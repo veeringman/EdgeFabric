@@ -1,0 +1,20 @@
+[package]
+name = "ef-agent"
+description = "EdgeFabric edge node agent — runs on device racks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "ef-agent"
+path = "src/main.rs"
+
+[dependencies]
+ef-core = { workspace = true }
+ef-control = { workspace = true }
+ef-streaming = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+config = { workspace = true }

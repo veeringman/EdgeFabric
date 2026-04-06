@@ -1,0 +1,33 @@
+# EdgeFabric — Default Configuration
+
+[server]
+host = "0.0.0.0"
+port = 8080
+grpc_port = 50051
+
+[database]
+url = "postgres://edgefabric:edgefabric@localhost:5432/edgefabric"
+max_connections = 20
+
+[redis]
+url = "redis://localhost:6379"
+
+[nats]
+url = "nats://localhost:4222"
+
+[auth]
+jwt_secret = "CHANGE_ME_IN_PRODUCTION"
+token_expiry_seconds = 3600
+
+[streaming]
+signaling_port = 8443
+turn_server = "turn:localhost:3478"
+
+[agent]
+control_plane_url = "https://localhost:50051"
+heartbeat_interval_seconds = 10
+device_scan_interval_seconds = 30
+
+[logging]
+level = "info"
+format = "json"

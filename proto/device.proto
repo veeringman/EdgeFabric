@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package edgefabric.device.v1;
+
+service DeviceService {
+  rpc ListDevices (ListDevicesRequest) returns (ListDevicesResponse);
+  rpc GetDevice (GetDeviceRequest) returns (Device);
+  rpc AllocateDevice (AllocateRequest) returns (AllocateResponse);
+  rpc ReleaseDevice (ReleaseRequest) returns (ReleaseResponse);
+  rpc StreamHealth (Empty) returns (stream HealthEvent);
+}
+
+message Empty {}
+
+message ListDevicesRequest {
+  optional string os = 1;
+  optional string status = 2;
+  optional string version = 3;
+  optional string kind = 4;
+  optional string region = 5;
+  int32 page = 6;
+  int32 page_size = 7;
+}
+
+message ListDevicesResponse {
+  repeated Device devices = 1;
+  int32 total = 2;
+}
+
+message GetDeviceRequest {
+  string device_id = 1;
+}
+
+message AllocateRequest {
+  optional string os = 1;
+  optional string version = 2;
+  optional string kind = 3;
+  optional string region = 4;
+}
+
+message AllocateResponse {
+  string device_id = 1;
+  string session_id = 2;
+}
+
+message ReleaseRequest {
+  string device_id = 1;
+  string session_id = 2;
+}
+
+message ReleaseResponse {
+  bool success = 1;
+}
+
+message Device {
+  string id = 1;
+  string name = 2;
+  string os = 3;
+  string os_version = 4;
+  string kind = 5;
+  string status = 6;
+  string region = 7;
+  repeated string capabilities = 8;
+}
+
+message HealthEvent {
+  string device_id = 1;
+  string status = 2;
+  float cpu_usage = 3;
+  float memory_usage = 4;
+  int64 timestamp = 5;
+}

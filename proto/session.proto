@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package edgefabric.session.v1;
+
+service SessionService {
+  rpc CreateSession (CreateSessionRequest) returns (Session);
+  rpc GetSession (GetSessionRequest) returns (Session);
+  rpc EndSession (EndSessionRequest) returns (EndSessionResponse);
+  rpc SendCommand (CommandRequest) returns (CommandResponse);
+  rpc StreamLogs (LogStreamRequest) returns (stream LogEntry);
+}
+
+message CreateSessionRequest {
+  optional string os = 1;
+  optional string version = 2;
+  optional string kind = 3;
+  int32 timeout_minutes = 4;
+  string purpose = 5;
+}
+
+message GetSessionRequest {
+  string session_id = 1;
+}
+
+message EndSessionRequest {
+  string session_id = 1;
+}
+
+message EndSessionResponse {
+  bool success = 1;
+}
+
+message Session {
+  string id = 1;
+  string device_id = 2;
+  string status = 3;
+  string stream_url = 4;
+  int64 created_at = 5;
+  int64 expires_at = 6;
+}
+
+message CommandRequest {
+  string session_id = 1;
+  string command_type = 2;  // "tap", "swipe", "key", "text", "install", "screenshot"
+  map<string, string> params = 3;
+}
+
+message CommandResponse {
+  bool success = 1;
+  bytes data = 2;  // screenshot bytes, etc.
+  string error = 3;
+}
+
+message LogStreamRequest {
+  string session_id = 1;
+  optional string level = 2;
+}
+
+message LogEntry {
+  int64 timestamp = 1;
+  string level = 2;
+  string message = 3;
+  string source = 4;
+}

@@ -1,0 +1,13 @@
+target/
+*.log
+.git/
+.github/
+docs/
+*.md
+!README.md
+.vscode/
+.idea/
+deploy/
+tests/
+clippy.toml
+rustfmt.toml

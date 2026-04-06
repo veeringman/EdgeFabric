@@ -7,9 +7,16 @@ license.workspace = true
 
 [dependencies]
 ef-core = { workspace = true }
+ef-control = { workspace = true }
+ef-db = { workspace = true }
+ef-scheduler = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
+chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+sqlx = { workspace = true }
+reqwest = { workspace = true }
+async-nats = { workspace = true }

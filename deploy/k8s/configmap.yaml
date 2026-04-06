@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: edgefabric-config
+  namespace: edgefabric
+  labels:
+    app.kubernetes.io/part-of: edgefabric
+data:
+  EF__SERVER__HOST: "0.0.0.0"
+  EF__SERVER__PORT: "8080"
+  EF__SERVER__GRPC_PORT: "50051"
+  EF__NATS__URL: "nats://nats.edgefabric.svc:4222"
+  EF__REDIS__URL: "redis://redis.edgefabric.svc:6379"
+  EF__LOGGING__LEVEL: "info"
+  EF__LOGGING__FORMAT: "json"
+  EF__TELEMETRY__SERVICE_NAME: "edgefabric-api"
+  EF__STREAMING__TURN_SERVER: "turn:coturn.edgefabric.svc:3478"
+  EF__STREAMING__STUN_SERVERS: "[\"stun:stun.l.google.com:19302\"]"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: edgefabric-secrets
+  namespace: edgefabric
+  labels:
+    app.kubernetes.io/part-of: edgefabric
+type: Opaque
+stringData:
+  EF__DATABASE__URL: "postgres://edgefabric:CHANGE_ME@postgres.edgefabric.svc:5432/edgefabric"
+  EF__AUTH__JWT_SECRET: "CHANGE_ME_IN_PRODUCTION"
+  EF__STREAMING__TURN_PASSWORD: "CHANGE_ME"

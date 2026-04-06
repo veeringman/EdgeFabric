@@ -8,44 +8,96 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: "-Dwarnings"
+  RUST_BACKTRACE: 1
+  PROTOC_VERSION: "25.1"
 
 jobs:
   check:
-    name: Check
+    name: Check & Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: ${{ env.PROTOC_VERSION }}
       - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace -- -D warnings
       - run: cargo check --workspace
 
   test:
     name: Test
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace
+    needs: check
 
-  fmt:
-    name: Format
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - run: cargo fmt --all -- --check
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: edgefabric
+          POSTGRES_PASSWORD: edgefabric
+          POSTGRES_DB: edgefabric_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U edgefabric"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://edgefabric:edgefabric@localhost:5432/edgefabric_test
+
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: arduino/setup-protoc@v3
         with:
-          components: clippy
+          version: ${{ env.PROTOC_VERSION }}
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --workspace -- -D warnings
+      - name: Unit tests
+        run: cargo test --workspace
+      - name: DB integration tests
+        run: cargo test -p ef-db --test db_integration
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    needs: check
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: edgefabric
+          POSTGRES_PASSWORD: edgefabric
+          POSTGRES_DB: edgefabric_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U edgefabric"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://edgefabric:edgefabric@localhost:5432/edgefabric_test
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: ${{ env.PROTOC_VERSION }}
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: Swatinem/rust-cache@v2
+      - name: Generate coverage
+        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: lcov.info
+          fail_ci_if_error: false

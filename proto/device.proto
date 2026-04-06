@@ -61,6 +61,7 @@ message Device {
   string status = 6;
   string region = 7;
   repeated string capabilities = 8;
+  optional string serial = 9;
 }
 
 message HealthEvent {

@@ -1,38 +1,84 @@
-use ef_core::device::{Device, DeviceStatus};
+use ef_core::device::DeviceStatus;
 use std::collections::HashMap;
+use tokio::time::{Duration, interval};
 use uuid::Uuid;
 
-/// In-memory device & session state (will be backed by PostgreSQL + Redis).
-pub struct StateManager {
-    devices: HashMap<Uuid, Device>,
+/// Tracks device heartbeat timestamps in-memory for fast staleness checks.
+/// The authoritative state lives in PostgreSQL; this is a cache for health monitoring.
+pub struct HealthMonitor {
+    /// device_id → last heartbeat unix timestamp
+    heartbeats: HashMap<Uuid, i64>,
+    /// Seconds after which a device with no heartbeat is considered offline.
+    stale_threshold_secs: i64,
 }
 
-impl StateManager {
-    pub fn new() -> Self {
+impl HealthMonitor {
+    pub fn new(stale_threshold_secs: i64) -> Self {
         Self {
-            devices: HashMap::new(),
+            heartbeats: HashMap::new(),
+            stale_threshold_secs,
         }
     }
 
-    pub fn register_device(&mut self, device: Device) {
-        tracing::info!(device_id = %device.id, name = %device.name, "Device registered");
-        self.devices.insert(device.id, device);
+    /// Record a heartbeat for a device.
+    pub fn record_heartbeat(&mut self, device_id: Uuid) {
+        let now = chrono::Utc::now().timestamp();
+        self.heartbeats.insert(device_id, now);
     }
 
-    pub fn get_device(&self, id: &Uuid) -> Option<&Device> {
-        self.devices.get(id)
+    /// Check if a device is considered healthy (heartbeat within threshold).
+    pub fn is_healthy(&self, device_id: &Uuid) -> bool {
+        let now = chrono::Utc::now().timestamp();
+        self.heartbeats
+            .get(device_id)
+            .map_or(false, |ts| (now - *ts) < self.stale_threshold_secs)
     }
 
-    pub fn list_available(&self) -> Vec<&Device> {
-        self.devices
-            .values()
-            .filter(|d| d.status == DeviceStatus::Available)
+    /// Return IDs of devices whose heartbeat is stale.
+    pub fn stale_devices(&self) -> Vec<Uuid> {
+        let now = chrono::Utc::now().timestamp();
+        self.heartbeats
+            .iter()
+            .filter(|(_, ts)| (now - **ts) >= self.stale_threshold_secs)
+            .map(|(id, _)| *id)
             .collect()
     }
 
-    pub fn set_status(&mut self, id: &Uuid, status: DeviceStatus) {
-        if let Some(device) = self.devices.get_mut(id) {
-            device.status = status;
-        }
+    /// Remove a device from tracking (e.g., after deletion).
+    pub fn remove(&mut self, device_id: &Uuid) {
+        self.heartbeats.remove(device_id);
     }
+}
+
+/// Spawn a background task that periodically marks stale devices as offline in the DB.
+pub fn spawn_stale_device_checker(
+    pool: sqlx::PgPool,
+    stale_threshold_secs: i64,
+    check_interval_secs: u64,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut tick = interval(Duration::from_secs(check_interval_secs));
+        loop {
+            tick.tick().await;
+            let cutoff = chrono::Utc::now() - chrono::Duration::seconds(stale_threshold_secs);
+            let result = sqlx::query(
+                r#"UPDATE devices SET status = 'offline'::device_status
+                   WHERE status IN ('available'::device_status, 'busy'::device_status)
+                     AND (last_heartbeat IS NULL OR last_heartbeat < $1)"#,
+            )
+            .bind(cutoff)
+            .execute(&pool)
+            .await;
+
+            match result {
+                Ok(r) if r.rows_affected() > 0 => {
+                    tracing::warn!(count = r.rows_affected(), "Marked stale devices offline");
+                }
+                Err(e) => {
+                    tracing::error!("Stale device check failed: {e}");
+                }
+                _ => {}
+            }
+        }
+    })
 }

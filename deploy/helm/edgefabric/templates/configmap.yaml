@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "edgefabric.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "edgefabric.labels" . | nindent 4 }}
+data:
+  EF__SERVER__HOST: {{ .Values.server.host | quote }}
+  EF__SERVER__PORT: {{ .Values.server.port | quote }}
+  EF__SERVER__GRPC_PORT: {{ .Values.server.grpcPort | quote }}
+  EF__NATS__URL: {{ .Values.nats.url | quote }}
+  EF__REDIS__URL: {{ .Values.redis.url | quote }}
+  EF__LOGGING__LEVEL: {{ .Values.logging.level | quote }}
+  EF__LOGGING__FORMAT: {{ .Values.logging.format | quote }}
+  EF__TELEMETRY__SERVICE_NAME: {{ .Values.telemetry.serviceName | quote }}
+  EF__TELEMETRY__OTLP_ENDPOINT: {{ .Values.telemetry.otlpEndpoint | quote }}
+  EF__STREAMING__TURN_SERVER: {{ .Values.streaming.turnServer | quote }}

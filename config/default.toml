@@ -2,7 +2,7 @@
 
 [server]
 host = "0.0.0.0"
-port = 8080
+port = 6060
 grpc_port = 50051
 
 [database]
@@ -22,12 +22,33 @@ token_expiry_seconds = 3600
 [streaming]
 signaling_port = 8443
 turn_server = "turn:localhost:3478"
+turn_username = "edgefabric"
+turn_password = "CHANGE_ME"
+stun_servers = ["stun:stun.l.google.com:19302"]
+max_resolution_width = 1920
+max_resolution_height = 1080
+max_fps = 30
+target_bitrate_kbps = 2000
+hardware_accel = true
+recording_enabled = false
+recording_dir = "/var/lib/edgefabric/recordings"
+latency_target_ms = 200
 
 [agent]
 control_plane_url = "https://localhost:50051"
 heartbeat_interval_seconds = 10
 device_scan_interval_seconds = 30
+agent_id = "agent-01"
+region = "local"
+auto_update_enabled = false
+auto_update_url = "https://releases.edgefabric.io/agent"
+reconnect_interval_seconds = 5
+max_reconnect_attempts = 0
 
 [logging]
 level = "info"
 format = "json"
+
+[telemetry]
+otlp_endpoint = ""
+service_name = "edgefabric-api"

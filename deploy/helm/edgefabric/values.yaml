@@ -1,0 +1,89 @@
+# Default values for edgefabric Helm chart.
+
+replicaCount: 2
+
+image:
+  api:
+    repository: ghcr.io/edgefabric/ef-api
+    tag: latest
+    pullPolicy: IfNotPresent
+  agent:
+    repository: ghcr.io/edgefabric/ef-agent
+    tag: latest
+    pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: edgefabric
+
+# ── Database ──────────────────────────────────────────────────────
+database:
+  url: "postgres://edgefabric:CHANGE_ME@postgres:5432/edgefabric"
+
+# ── Redis ─────────────────────────────────────────────────────────
+redis:
+  url: "redis://redis:6379"
+
+# ── NATS ──────────────────────────────────────────────────────────
+nats:
+  url: "nats://nats:4222"
+
+# ── Auth ──────────────────────────────────────────────────────────
+auth:
+  jwtSecret: "CHANGE_ME_IN_PRODUCTION"
+
+# ── Server ────────────────────────────────────────────────────────
+server:
+  host: "0.0.0.0"
+  port: 8080
+  grpcPort: 50051
+
+# ── Logging ───────────────────────────────────────────────────────
+logging:
+  level: "info"
+  format: "json"
+
+# ── Telemetry ─────────────────────────────────────────────────────
+telemetry:
+  otlpEndpoint: ""
+  serviceName: "edgefabric-api"
+
+# ── Streaming ─────────────────────────────────────────────────────
+streaming:
+  turnServer: "turn:coturn:3478"
+  turnPassword: "CHANGE_ME"
+
+# ── Ingress ───────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  className: nginx
+  host: api.edgefabric.io
+  tls:
+    enabled: true
+    secretName: ef-api-tls
+    clusterIssuer: letsencrypt-prod
+
+# ── Agent ─────────────────────────────────────────────────────────
+agent:
+  enabled: true
+  hostNetwork: true
+
+# ── Resources ─────────────────────────────────────────────────────
+resources:
+  api:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  agent:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi

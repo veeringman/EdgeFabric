@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: qemu-iot
+  labels:
+    app: edgefabric
+    component: virtual-device
+    device-type: qemu-iot
+spec:
+  containers:
+    - name: qemu
+      image: ghcr.io/edgefabric/qemu-iot-runner:latest
+      resources:
+        requests:
+          cpu: "1"
+          memory: 512Mi
+        limits:
+          cpu: "2"
+          memory: 2Gi
+      ports:
+        - containerPort: 2222
+          name: ssh-forward
+          protocol: TCP
+        - containerPort: 4444
+          name: serial
+          protocol: TCP
+        - containerPort: 4445
+          name: monitor
+          protocol: TCP
+      env:
+        - name: QEMU_ARCH
+          value: "aarch64"
+        - name: QEMU_MACHINE
+          value: "virt"
+        - name: QEMU_RAM_MB
+          value: "256"
+        - name: FIRMWARE_URL
+          value: ""  # set per deployment
+        - name: SERIAL_PORT
+          value: "4444"
+        - name: MONITOR_PORT
+          value: "4445"
+        - name: SSH_FORWARD_PORT
+          value: "2222"
+      readinessProbe:
+        tcpSocket:
+          port: serial
+        initialDelaySeconds: 15
+        periodSeconds: 10
+      livenessProbe:
+        tcpSocket:
+          port: monitor
+        periodSeconds: 30
+        failureThreshold: 5
+      volumeMounts:
+        - name: firmware
+          mountPath: /firmware
+        - name: vm-data
+          mountPath: /var/lib/edgefabric/qemu
+      securityContext:
+        privileged: false
+        capabilities:
+          add: ["NET_ADMIN"]
+  volumes:
+    - name: firmware
+      configMap:
+        name: qemu-firmware
+        optional: true
+    - name: vm-data
+      emptyDir:
+        sizeLimit: 5Gi
+  terminationGracePeriodSeconds: 15

@@ -1,0 +1,151 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
+use uuid::Uuid;
+
+/// DB row representation of a device.
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct DeviceRow {
+    pub id: Uuid,
+    pub name: String,
+    pub serial: Option<String>,
+    pub os: String,
+    pub os_version: String,
+    pub kind: String,
+    pub status: String,
+    pub region: String,
+    pub capabilities: Vec<String>,
+    pub agent_id: Option<Uuid>,
+    pub registered_at: DateTime<Utc>,
+    pub last_heartbeat: Option<DateTime<Utc>>,
+    pub updated_at: DateTime<Utc>,
+}
+
+pub struct DeviceRepo;
+
+impl DeviceRepo {
+    pub async fn create(
+        pool: &PgPool,
+        name: &str,
+        serial: Option<&str>,
+        os: &str,
+        os_version: &str,
+        kind: &str,
+        region: &str,
+        capabilities: &[String],
+    ) -> Result<DeviceRow, sqlx::Error> {
+        sqlx::query_as::<_, DeviceRow>(
+            r#"INSERT INTO devices (name, serial, os, os_version, kind, region, capabilities, status)
+               VALUES ($1, $2, $3::device_os, $4, $5::device_kind, $6, $7, 'available'::device_status)
+               RETURNING id, name, serial, os::text, os_version, kind::text, status::text,
+                         region, capabilities, agent_id, registered_at, last_heartbeat, updated_at"#,
+        )
+        .bind(name)
+        .bind(serial)
+        .bind(os)
+        .bind(os_version)
+        .bind(kind)
+        .bind(region)
+        .bind(capabilities)
+        .fetch_one(pool)
+        .await
+    }
+
+    pub async fn update(
+        pool: &PgPool,
+        id: Uuid,
+        name: &str,
+        serial: Option<&str>,
+        os_version: &str,
+        region: &str,
+        capabilities: &[String],
+    ) -> Result<Option<DeviceRow>, sqlx::Error> {
+        sqlx::query_as::<_, DeviceRow>(
+            r#"UPDATE devices SET name = $2, serial = $3, os_version = $4, region = $5, capabilities = $6
+               WHERE id = $1
+               RETURNING id, name, serial, os::text, os_version, kind::text, status::text,
+                         region, capabilities, agent_id, registered_at, last_heartbeat, updated_at"#,
+        )
+        .bind(id)
+        .bind(name)
+        .bind(serial)
+        .bind(os_version)
+        .bind(region)
+        .bind(capabilities)
+        .fetch_optional(pool)
+        .await
+    }
+
+    pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<DeviceRow>, sqlx::Error> {
+        sqlx::query_as::<_, DeviceRow>(
+            r#"SELECT id, name, serial, os::text, os_version, kind::text, status::text,
+                      region, capabilities, agent_id, registered_at, last_heartbeat, updated_at
+               FROM devices WHERE id = $1"#,
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+    }
+
+    pub async fn list(pool: &PgPool) -> Result<Vec<DeviceRow>, sqlx::Error> {
+        sqlx::query_as::<_, DeviceRow>(
+            r#"SELECT id, name, serial, os::text, os_version, kind::text, status::text,
+                      region, capabilities, agent_id, registered_at, last_heartbeat, updated_at
+               FROM devices ORDER BY registered_at"#,
+        )
+        .fetch_all(pool)
+        .await
+    }
+
+    pub async fn list_available(
+        pool: &PgPool,
+        os: Option<&str>,
+        region: Option<&str>,
+    ) -> Result<Vec<DeviceRow>, sqlx::Error> {
+        sqlx::query_as::<_, DeviceRow>(
+            r#"SELECT id, name, serial, os::text, os_version, kind::text, status::text,
+                      region, capabilities, agent_id, registered_at, last_heartbeat, updated_at
+               FROM devices
+               WHERE status = 'available'
+                 AND ($1::text IS NULL OR os::text = $1)
+                 AND ($2::text IS NULL OR region = $2)
+               ORDER BY registered_at"#,
+        )
+        .bind(os)
+        .bind(region)
+        .fetch_all(pool)
+        .await
+    }
+
+    pub async fn set_status(
+        pool: &PgPool,
+        id: Uuid,
+        status: &str,
+    ) -> Result<bool, sqlx::Error> {
+        let result = sqlx::query(
+            r#"UPDATE devices SET status = $2::device_status WHERE id = $1"#,
+        )
+        .bind(id)
+        .bind(status)
+        .execute(pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn update_heartbeat(pool: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
+        let result =
+            sqlx::query(r#"UPDATE devices SET last_heartbeat = now() WHERE id = $1"#)
+                .bind(id)
+                .execute(pool)
+                .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn delete(pool: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
+        let result = sqlx::query(r#"DELETE FROM devices WHERE id = $1"#)
+            .bind(id)
+            .execute(pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+}

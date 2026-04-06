@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: ef-agent
+  namespace: edgefabric
+  labels:
+    app.kubernetes.io/name: ef-agent
+    app.kubernetes.io/part-of: edgefabric
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ef-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ef-agent
+        app.kubernetes.io/part-of: edgefabric
+    spec:
+      serviceAccountName: edgefabric
+      hostNetwork: true          # access to host USB/ADB for device discovery
+      tolerations:
+        - key: "node-role.kubernetes.io/edge"
+          operator: "Exists"
+          effect: "NoSchedule"
+      containers:
+        - name: ef-agent
+          image: ghcr.io/edgefabric/ef-agent:latest
+          securityContext:
+            privileged: true     # required for USB device access
+          envFrom:
+            - configMapRef:
+                name: edgefabric-config
+            - secretRef:
+                name: edgefabric-secrets
+          env:
+            - name: EF__AGENT__CONTROL_PLANE_URL
+              value: "http://ef-api.edgefabric.svc:50051"
+            - name: EF__AGENT__REGION
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: EF__AGENT__AGENT_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          volumeMounts:
+            - name: dev-usb
+              mountPath: /dev/bus/usb
+            - name: run-udev
+              mountPath: /run/udev
+              readOnly: true
+      volumes:
+        - name: dev-usb
+          hostPath:
+            path: /dev/bus/usb
+            type: DirectoryOrCreate
+        - name: run-udev
+          hostPath:
+            path: /run/udev
+            type: Directory

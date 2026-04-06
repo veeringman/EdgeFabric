@@ -1,0 +1,128 @@
+# EdgeFabric Prometheus Alerting Rules
+# Deploy alongside your Prometheus server configuration.
+
+groups:
+  - name: edgefabric.device
+    interval: 30s
+    rules:
+      - alert: DeviceOffline
+        expr: |
+          increase(ef_device_status_changes_total{status="offline"}[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Device went offline ({{ $labels.os }}/{{ $labels.kind }})"
+          description: "One or more {{ $labels.os }} {{ $labels.kind }} devices transitioned to offline in the last 5 minutes."
+
+      - alert: HighDeviceOfflineRate
+        expr: |
+          sum(rate(ef_device_status_changes_total{status="offline"}[10m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High rate of devices going offline"
+          description: "More than 3 devices/min going offline over the last 10 minutes."
+
+  - name: edgefabric.jobs
+    interval: 30s
+    rules:
+      - alert: JobFailureRateHigh
+        expr: |
+          (
+            sum(rate(ef_jobs_completed_total{status="failed"}[15m]))
+            /
+            sum(rate(ef_jobs_completed_total[15m]))
+          ) > 0.25
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Job failure rate above 25%"
+          description: "{{ $value | humanizePercentage }} of jobs are failing over the last 15 minutes."
+
+      - alert: JobQueueBacklog
+        expr: ef_jobs_queued > 50
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Large job queue backlog"
+          description: "{{ $value }} jobs queued for more than 10 minutes."
+
+      - alert: TestCaseFailureSpike
+        expr: |
+          (
+            sum(rate(ef_test_cases_total{result="failed"}[10m]))
+            /
+            sum(rate(ef_test_cases_total[10m]))
+          ) > 0.5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Test case failure rate above 50%"
+          description: "{{ $value | humanizePercentage }} of test cases are failing."
+
+  - name: edgefabric.sessions
+    interval: 30s
+    rules:
+      - alert: SessionDurationAnomaly
+        expr: |
+          histogram_quantile(0.95, rate(ef_session_duration_seconds_bucket[30m])) > 3600
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P95 session duration exceeds 1 hour"
+          description: "Long-running sessions may indicate stuck sessions or resource leaks."
+
+  - name: edgefabric.api
+    interval: 15s
+    rules:
+      - alert: HighAPIErrorRate
+        expr: |
+          (
+            sum(rate(ef_http_requests_total{status=~"5.."}[5m]))
+            /
+            sum(rate(ef_http_requests_total[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API 5xx error rate above 5%"
+          description: "{{ $value | humanizePercentage }} of HTTP requests returning 5xx."
+
+      - alert: HighAPILatency
+        expr: |
+          histogram_quantile(0.99, rate(ef_http_request_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P99 API latency above 2 seconds"
+          description: "API response times are degraded."
+
+  - name: edgefabric.pool
+    interval: 30s
+    rules:
+      - alert: PoolExhausted
+        expr: ef_pool_ready == 0 and ef_pool_total > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Virtual device pool '{{ $labels.pool }}' exhausted"
+          description: "No ready instances available in pool {{ $labels.pool }} ({{ $value }} total)."
+
+      - alert: PoolScaleFailure
+        expr: |
+          ef_pool_total < ef_pool_ready
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pool '{{ $labels.pool }}' may have scaling issues"
+          description: "Pool total count is inconsistent with ready count."

@@ -1,0 +1,36 @@
+# EdgeFabric — Production Configuration (overrides default.toml)
+#
+# Secrets (database URL, JWT secret, TURN password) should be injected
+# via environment variables using the EF__ prefix, not stored in this file.
+#   EF__DATABASE__URL
+#   EF__AUTH__JWT_SECRET
+#   EF__STREAMING__TURN_PASSWORD
+
+[server]
+host = "0.0.0.0"
+
+[database]
+max_connections = 50
+
+[auth]
+token_expiry_seconds = 1800
+
+[streaming]
+hardware_accel = true
+recording_enabled = true
+recording_dir = "/var/lib/edgefabric/recordings"
+latency_target_ms = 150
+
+[agent]
+heartbeat_interval_seconds = 15
+device_scan_interval_seconds = 60
+auto_update_enabled = true
+reconnect_interval_seconds = 10
+max_reconnect_attempts = 10
+
+[logging]
+level = "info"
+format = "json"
+
+[telemetry]
+service_name = "edgefabric-api"

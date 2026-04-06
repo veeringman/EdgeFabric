@@ -1,0 +1,68 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: android-emulator
+  labels:
+    app: edgefabric
+    component: virtual-device
+    device-type: android-emulator
+spec:
+  containers:
+    - name: emulator
+      image: us-docker.pkg.dev/android-emulator-268719/images/30-google-x64:latest
+      resources:
+        requests:
+          cpu: "2"
+          memory: 4Gi
+        limits:
+          cpu: "4"
+          memory: 8Gi
+      ports:
+        - containerPort: 5554
+          name: console
+          protocol: TCP
+        - containerPort: 5555
+          name: adb
+          protocol: TCP
+      env:
+        - name: EMULATOR_PARAMS
+          value: "-no-window -no-audio -no-boot-anim -gpu swiftshader_indirect"
+        - name: ADBKEY
+          valueFrom:
+            secretKeyRef:
+              name: edgefabric-adb
+              key: adbkey
+              optional: true
+      startupProbe:
+        exec:
+          command: ["adb", "shell", "getprop", "sys.boot_completed"]
+        initialDelaySeconds: 30
+        periodSeconds: 10
+        failureThreshold: 18  # up to 3 minutes
+      readinessProbe:
+        exec:
+          command: ["adb", "shell", "getprop", "sys.boot_completed"]
+        periodSeconds: 15
+        failureThreshold: 3
+      livenessProbe:
+        exec:
+          command: ["adb", "shell", "echo", "alive"]
+        periodSeconds: 30
+        failureThreshold: 5
+      volumeMounts:
+        - name: emulator-data
+          mountPath: /android-home
+        - name: tmp
+          mountPath: /tmp
+      securityContext:
+        privileged: false
+        capabilities:
+          add: ["NET_ADMIN"]  # needed for emulator networking
+  volumes:
+    - name: emulator-data
+      emptyDir:
+        sizeLimit: 10Gi
+    - name: tmp
+      emptyDir:
+        sizeLimit: 2Gi
+  terminationGracePeriodSeconds: 30

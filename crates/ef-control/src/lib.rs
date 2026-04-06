@@ -5,4 +5,6 @@
 
 pub mod command;
 pub mod discovery;
+pub mod pool;
+pub mod snapshot;
 pub mod state;

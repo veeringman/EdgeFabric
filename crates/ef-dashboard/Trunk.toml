@@ -1,0 +1,16 @@
+[serve]
+address = "127.0.0.1"
+port = 9080
+
+[[proxy]]
+rewrite = "/api/v1/"
+backend = "http://127.0.0.1:6060/api/v1/"
+ws = true
+
+[[proxy]]
+rewrite = "/health"
+backend = "http://127.0.0.1:6060/health"
+
+[[proxy]]
+rewrite = "/metrics"
+backend = "http://127.0.0.1:6060/metrics"

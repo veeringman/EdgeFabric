@@ -1,0 +1,227 @@
+use serde::Deserialize;
+
+/// Top-level application configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AppConfig {
+    pub server: ServerConfig,
+    pub database: DatabaseConfig,
+    pub redis: RedisConfig,
+    pub nats: NatsConfig,
+    pub auth: AuthConfig,
+    pub streaming: StreamingConfig,
+    pub agent: AgentConfig,
+    pub logging: LoggingConfig,
+    #[serde(default)]
+    pub telemetry: crate::telemetry::TelemetryConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ServerConfig {
+    pub host: String,
+    pub port: u16,
+    pub grpc_port: u16,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DatabaseConfig {
+    pub url: String,
+    pub max_connections: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RedisConfig {
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct NatsConfig {
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AuthConfig {
+    pub jwt_secret: String,
+    pub token_expiry_seconds: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StreamingConfig {
+    pub signaling_port: u16,
+    pub turn_server: String,
+    pub turn_username: String,
+    pub turn_password: String,
+    pub stun_servers: Vec<String>,
+    pub max_resolution_width: u32,
+    pub max_resolution_height: u32,
+    pub max_fps: u32,
+    pub target_bitrate_kbps: u32,
+    pub hardware_accel: bool,
+    pub recording_enabled: bool,
+    pub recording_dir: String,
+    pub latency_target_ms: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AgentConfig {
+    pub control_plane_url: String,
+    pub heartbeat_interval_seconds: u64,
+    pub device_scan_interval_seconds: u64,
+    pub agent_id: String,
+    pub region: String,
+    pub auto_update_enabled: bool,
+    pub auto_update_url: String,
+    pub reconnect_interval_seconds: u64,
+    pub max_reconnect_attempts: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LoggingConfig {
+    pub level: String,
+    pub format: String,
+}
+
+impl AppConfig {
+    /// Load configuration from TOML files + environment variable overrides.
+    ///
+    /// Merge order (later overrides earlier):
+    /// 1. `config/default.toml`
+    /// 2. `config/{run_mode}.toml` (e.g. `development`, `production`)
+    /// 3. Environment variables prefixed with `EF_` (double underscore = nesting separator)
+    pub fn load() -> Result<Self, config::ConfigError> {
+        let run_mode = std::env::var("EF_RUN_MODE").unwrap_or_else(|_| "development".into());
+
+        let cfg = config::Config::builder()
+            .add_source(config::File::with_name("config/default"))
+            .add_source(config::File::with_name(&format!("config/{run_mode}")).required(false))
+            .add_source(
+                config::Environment::with_prefix("EF")
+                    .separator("__")
+                    .try_parsing(true),
+            )
+            .build()?;
+
+        cfg.try_deserialize()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_deserialize_from_toml() {
+        let toml = r#"
+[server]
+host = "0.0.0.0"
+port = 8080
+grpc_port = 50051
+
+[database]
+url = "postgres://localhost/test"
+max_connections = 5
+
+[redis]
+url = "redis://localhost:6379"
+
+[nats]
+url = "nats://localhost:4222"
+
+[auth]
+jwt_secret = "test-secret"
+token_expiry_seconds = 3600
+
+[streaming]
+signaling_port = 8443
+turn_server = "turn:localhost:3478"
+turn_username = "user"
+turn_password = "pass"
+stun_servers = ["stun:stun.l.google.com:19302"]
+max_resolution_width = 1920
+max_resolution_height = 1080
+max_fps = 30
+target_bitrate_kbps = 2000
+hardware_accel = false
+recording_enabled = false
+recording_dir = "/tmp/rec"
+latency_target_ms = 200
+
+[agent]
+control_plane_url = "https://localhost:50051"
+heartbeat_interval_seconds = 10
+device_scan_interval_seconds = 30
+agent_id = "test-agent"
+region = "test"
+auto_update_enabled = false
+auto_update_url = "https://example.com"
+reconnect_interval_seconds = 5
+max_reconnect_attempts = 3
+
+[logging]
+level = "debug"
+format = "pretty"
+"#;
+        let cfg: AppConfig = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.server.port, 8080);
+        assert_eq!(cfg.database.max_connections, 5);
+        assert_eq!(cfg.auth.jwt_secret, "test-secret");
+        assert_eq!(cfg.agent.region, "test");
+        assert_eq!(cfg.logging.level, "debug");
+    }
+
+    #[test]
+    fn telemetry_config_defaults() {
+        let toml = r#"
+[server]
+host = "0.0.0.0"
+port = 8080
+grpc_port = 50051
+
+[database]
+url = "postgres://localhost/test"
+max_connections = 5
+
+[redis]
+url = "redis://localhost:6379"
+
+[nats]
+url = "nats://localhost:4222"
+
+[auth]
+jwt_secret = "s"
+token_expiry_seconds = 60
+
+[streaming]
+signaling_port = 8443
+turn_server = "turn:localhost:3478"
+turn_username = "u"
+turn_password = "p"
+stun_servers = []
+max_resolution_width = 1920
+max_resolution_height = 1080
+max_fps = 30
+target_bitrate_kbps = 2000
+hardware_accel = false
+recording_enabled = false
+recording_dir = "/tmp"
+latency_target_ms = 200
+
+[agent]
+control_plane_url = "https://localhost:50051"
+heartbeat_interval_seconds = 10
+device_scan_interval_seconds = 30
+agent_id = "a"
+region = "r"
+auto_update_enabled = false
+auto_update_url = "https://example.com"
+reconnect_interval_seconds = 5
+max_reconnect_attempts = 0
+
+[logging]
+level = "info"
+format = "json"
+"#;
+        // telemetry section omitted — should use defaults
+        let cfg: AppConfig = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.telemetry.otlp_endpoint, "");
+    }
+}

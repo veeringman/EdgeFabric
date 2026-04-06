@@ -1,0 +1,119 @@
+# EdgeFabric — Local Development Stack
+#
+# Usage:
+#   docker compose up -d          # start infra + api
+#   docker compose up -d --build  # rebuild images
+#   docker compose logs -f ef-api # follow API logs
+#   docker compose down -v        # tear down (removes volumes)
+
+services:
+  # ── PostgreSQL ──────────────────────────────────────────────────
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: edgefabric
+      POSTGRES_PASSWORD: edgefabric
+      POSTGRES_DB: edgefabric
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U edgefabric"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Redis ───────────────────────────────────────────────────────
+  redis:
+    image: redis:7-bookworm
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── NATS ────────────────────────────────────────────────────────
+  nats:
+    image: nats:2-linux
+    ports:
+      - "4222:4222"   # client
+      - "8222:8222"   # monitoring
+    command: ["--jetstream", "--http_port", "8222"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8222/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── CoTURN (TURN/STUN for WebRTC) ──────────────────────────────
+  coturn:
+    image: coturn/coturn:latest
+    ports:
+      - "3478:3478"        # STUN/TURN
+      - "3478:3478/udp"
+      - "49152-49200:49152-49200/udp"  # relay range
+    command:
+      - --log-file=stdout
+      - --min-port=49152
+      - --max-port=49200
+      - --realm=edgefabric
+      - --user=edgefabric:edgefabric
+      - --lt-cred-mech
+
+  # ── ef-api ──────────────────────────────────────────────────────
+  ef-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8080:8080"
+      - "50051:50051"
+    environment:
+      EF__DATABASE__URL: "postgres://edgefabric:edgefabric@postgres:5432/edgefabric"
+      EF__REDIS__URL: "redis://redis:6379"
+      EF__NATS__URL: "nats://nats:4222"
+      EF__AUTH__JWT_SECRET: "dev-compose-secret-not-for-production"
+      EF__SERVER__HOST: "0.0.0.0"
+      EF__SERVER__PORT: "8080"
+      EF__STREAMING__TURN_SERVER: "turn:coturn:3478"
+      EF__LOGGING__LEVEL: "debug"
+      EF__LOGGING__FORMAT: "pretty"
+      RUST_LOG: "debug"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+
+  # ── ef-agent (optional — for full-stack testing) ────────────────
+  ef-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    environment:
+      EF__AGENT__CONTROL_PLANE_URL: "http://ef-api:50051"
+      EF__AGENT__AGENT_ID: "docker-agent-01"
+      EF__AGENT__REGION: "docker-local"
+      EF__NATS__URL: "nats://nats:4222"
+      EF__LOGGING__LEVEL: "debug"
+      EF__LOGGING__FORMAT: "pretty"
+      RUST_LOG: "debug"
+    depends_on:
+      ef-api:
+        condition: service_healthy
+    profiles:
+      - full   # only starts with: docker compose --profile full up
+
+volumes:
+  pgdata:

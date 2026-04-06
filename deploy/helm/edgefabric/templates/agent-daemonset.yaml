@@ -1,0 +1,54 @@
+{{- if .Values.agent.enabled }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "edgefabric.fullname" . }}-agent
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "edgefabric.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+spec:
+  selector:
+    matchLabels:
+      {{- include "edgefabric.agentSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "edgefabric.agentSelectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "edgefabric.serviceAccountName" . }}
+      hostNetwork: {{ .Values.agent.hostNetwork }}
+      tolerations:
+        - key: node-role.kubernetes.io/edge
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: ef-agent
+          image: "{{ .Values.image.agent.repository }}:{{ .Values.image.agent.tag }}"
+          imagePullPolicy: {{ .Values.image.agent.pullPolicy }}
+          securityContext:
+            privileged: true
+          envFrom:
+            - configMapRef:
+                name: {{ include "edgefabric.fullname" . }}-config
+            - secretRef:
+                name: {{ include "edgefabric.fullname" . }}-secrets
+          volumeMounts:
+            - name: usb
+              mountPath: /dev/bus/usb
+            - name: device-info
+              mountPath: /var/run/edgefabric
+          resources:
+            {{- toYaml .Values.resources.agent | nindent 12 }}
+      volumes:
+        - name: usb
+          hostPath:
+            path: /dev/bus/usb
+        - name: device-info
+          hostPath:
+            path: /var/run/edgefabric
+            type: DirectoryOrCreate
+{{- end }}

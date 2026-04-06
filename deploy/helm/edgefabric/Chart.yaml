@@ -1,0 +1,13 @@
+apiVersion: v2
+name: edgefabric
+description: EdgeFabric — Cloud-native device farm for mobile & IoT testing
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - device-farm
+  - mobile-testing
+  - iot
+  - webrtc
+maintainers:
+  - name: EdgeFabric Contributors

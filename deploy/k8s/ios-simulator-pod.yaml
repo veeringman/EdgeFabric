@@ -1,0 +1,55 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ios-simulator
+  labels:
+    app: edgefabric
+    component: virtual-device
+    device-type: ios-simulator
+spec:
+  nodeSelector:
+    kubernetes.io/os: darwin  # requires macOS node pool
+  tolerations:
+    - key: "os"
+      operator: "Equal"
+      value: "macos"
+      effect: "NoSchedule"
+  containers:
+    - name: simulator
+      image: ghcr.io/edgefabric/ios-simulator-runner:latest
+      resources:
+        requests:
+          cpu: "2"
+          memory: 4Gi
+        limits:
+          cpu: "4"
+          memory: 8Gi
+      ports:
+        - containerPort: 8100
+          name: wda
+          protocol: TCP
+      env:
+        - name: SIMULATOR_DEVICE_TYPE
+          value: "iPhone 15"
+        - name: SIMULATOR_RUNTIME
+          value: "com.apple.CoreSimulator.SimRuntime.iOS-17-4"
+      readinessProbe:
+        httpGet:
+          path: /status
+          port: 8100
+        initialDelaySeconds: 60
+        periodSeconds: 15
+      livenessProbe:
+        httpGet:
+          path: /status
+          port: 8100
+        periodSeconds: 30
+        failureThreshold: 5
+      volumeMounts:
+        - name: sim-data
+          mountPath: /Users/admin/Library/Developer/CoreSimulator
+  volumes:
+    - name: sim-data
+      emptyDir:
+        sizeLimit: 20Gi
+  terminationGracePeriodSeconds: 30

@@ -11,12 +11,20 @@ path = "src/main.rs"
 
 [dependencies]
 ef-core = { workspace = true }
+ef-db = { workspace = true }
+ef-control = { workspace = true }
+ef-streaming = { workspace = true }
+ef-scheduler = { workspace = true }
+async-nats = { workspace = true }
 tokio = { workspace = true }
 axum = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
 tonic = { workspace = true }
+tonic-health = { workspace = true }
+tonic-reflection = { workspace = true }
 prost = { workspace = true }
+tokio-stream = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
@@ -24,6 +32,17 @@ tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 anyhow = { workspace = true }
+sqlx = { workspace = true }
+jsonwebtoken = { workspace = true }
+governor = { workspace = true }
+futures = { workspace = true }
+utoipa = { workspace = true }
+utoipa-swagger-ui = { workspace = true }
 
 [build-dependencies]
 tonic-build = { workspace = true }
+
+[dev-dependencies]
+hyper = { workspace = true }
+http-body-util = "0.1"
+tower = { workspace = true }

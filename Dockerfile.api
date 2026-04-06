@@ -1,0 +1,72 @@
+# ── Stage 1: Build ────────────────────────────────────────────────
+FROM rust:1.86-bookworm AS builder
+
+# Install protoc (required by tonic-build)
+RUN apt-get update && apt-get install -y protobuf-compiler && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Cache dependency builds: copy workspace manifests first
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ef-core/Cargo.toml     crates/ef-core/Cargo.toml
+COPY crates/ef-db/Cargo.toml       crates/ef-db/Cargo.toml
+COPY crates/ef-api/Cargo.toml      crates/ef-api/Cargo.toml
+COPY crates/ef-scheduler/Cargo.toml crates/ef-scheduler/Cargo.toml
+COPY crates/ef-orchestrator/Cargo.toml crates/ef-orchestrator/Cargo.toml
+COPY crates/ef-control/Cargo.toml  crates/ef-control/Cargo.toml
+COPY crates/ef-streaming/Cargo.toml crates/ef-streaming/Cargo.toml
+COPY crates/ef-agent/Cargo.toml    crates/ef-agent/Cargo.toml
+COPY crates/ef-cli/Cargo.toml      crates/ef-cli/Cargo.toml
+
+# Create dummy lib/main files so Cargo can resolve the workspace
+RUN for crate in ef-core ef-db ef-scheduler ef-orchestrator ef-control ef-streaming; do \
+      mkdir -p crates/$crate/src && echo "// dummy" > crates/$crate/src/lib.rs; \
+    done && \
+    for bin in ef-api ef-agent ef-cli; do \
+      mkdir -p crates/$bin/src && echo "fn main() {}" > crates/$bin/src/main.rs; \
+    done
+
+# Pre-build dependencies (this layer is cached as long as Cargo.toml files don't change)
+RUN cargo build --release --bin ef-api 2>/dev/null || true
+
+# Copy real source code + proto files
+COPY crates/ crates/
+COPY proto/  proto/
+COPY config/ config/
+COPY migrations/ migrations/
+
+# Install sqlx-cli for migrations
+RUN cargo install sqlx-cli --no-default-features --features postgres
+
+# Build the actual binary
+RUN cargo build --release --bin ef-api
+
+# ── Stage 2: Runtime ──────────────────────────────────────────────
+FROM debian:bookworm-slim
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN useradd --create-home --shell /bin/bash edgefabric
+
+WORKDIR /app
+
+COPY --from=builder /app/target/release/ef-api /app/ef-api
+COPY --from=builder /usr/local/cargo/bin/sqlx /usr/local/bin/sqlx
+COPY --from=builder /app/config/ /app/config/
+COPY --from=builder /app/migrations/ /app/migrations/
+
+RUN chown -R edgefabric:edgefabric /app
+USER edgefabric
+
+# HTTP / gRPC / metrics
+EXPOSE 8080 50051
+
+ENV RUST_LOG=info
+ENV EF__SERVER__HOST=0.0.0.0
+
+HEALTHCHECK --interval=15s --timeout=3s --retries=3 \
+  CMD curl -sf http://localhost:8080/health || exit 1
+
+ENTRYPOINT ["/app/ef-api"]

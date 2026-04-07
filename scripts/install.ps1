@@ -1,7 +1,7 @@
 # EdgeFabric — Install Prerequisites (Windows)
 # Requires: PowerShell 5.1+ (run as Administrator for Chocolatey/winget installs)
 #
-# Usage: .\scripts\install.ps1 [-SkipDocker] [-SkipRust] [-SkipAndroid]
+# Usage: .\scripts\install.ps1 [-AgentOnly] [-SkipDocker] [-SkipRust] [-SkipAndroid]
 #
 param(
     [switch]$AgentOnly,
@@ -11,14 +11,28 @@ param(
     [switch]$Help
 )
 
-$ErrorActionPreference = "Stop"
-
 # ── Helpers ───────────────────────────────────────────────────────
 function Write-Info($msg)  { Write-Host "[INFO]  $msg" -ForegroundColor Cyan }
 function Write-Ok($msg)    { Write-Host "[OK]    $msg" -ForegroundColor Green }
 function Write-Warn($msg)  { Write-Host "[WARN]  $msg" -ForegroundColor Yellow }
 function Write-Err($msg)   { Write-Host "[ERROR] $msg" -ForegroundColor Red }
 function Has($cmd) { $null -ne (Get-Command $cmd -ErrorAction SilentlyContinue) }
+
+function Pkg-Install($wingetId, $chocoId) {
+    if (Has "winget") {
+        Write-Info "Installing via winget: $wingetId"
+        winget install --id $wingetId --accept-package-agreements --accept-source-agreements --silent
+    } elseif (Has "choco") {
+        Write-Info "Installing via choco: $chocoId"
+        choco install $chocoId -y
+    } else {
+        Write-Warn "No package manager available to install $chocoId"
+    }
+}
+
+function Refresh-Path {
+    $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
+}
 
 if ($Help) {
     Write-Host "Usage: .\scripts\install.ps1 [-AgentOnly] [-SkipDocker] [-SkipRust] [-SkipAndroid]"
@@ -28,44 +42,38 @@ if ($Help) {
     exit 0
 }
 
-# Agent-only mode: skip Docker (infra runs on a remote server)
 if ($AgentOnly) {
     $SkipDocker = $true
     Write-Info "Agent-only mode: skipping Docker/infrastructure dependencies"
 }
 
 Write-Host ""
-Write-Host "EdgeFabric — Windows Prerequisites Installer" -ForegroundColor Cyan
+Write-Host "EdgeFabric - Windows Prerequisites Installer" -ForegroundColor Cyan
 Write-Host "=============================================" -ForegroundColor Cyan
 Write-Host ""
 
-# ── Detect package manager ────────────────────────────────────────
-$script:UseWinget = Has "winget"
-$script:UseChoco  = Has "choco"
-
-if (-not $script:UseWinget -and -not $script:UseChoco) {
+# ── 0. Ensure a package manager ──────────────────────────────────
+if (-not (Has "winget") -and -not (Has "choco")) {
     Write-Warn "Neither winget nor Chocolatey found."
     Write-Info "Installing Chocolatey..."
-    Set-ExecutionPolicy Bypass -Scope Process -Force
-    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-    Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-    $script:UseChoco = $true
-}
-
-function Install-Pkg($wingetId, $chocoId) {
-    if ($script:UseWinget) {
-        winget install --id $wingetId --accept-package-agreements --accept-source-agreements --silent
-    } elseif ($script:UseChoco) {
-        choco install $chocoId -y
+    try {
+        Set-ExecutionPolicy Bypass -Scope Process -Force
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+        Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+        Refresh-Path
+        Write-Ok "Chocolatey installed"
+    } catch {
+        Write-Err "Failed to install Chocolatey: $_"
     }
 }
 
 # ── 1. Git ────────────────────────────────────────────────────────
 Write-Info "Checking Git..."
 if (-not (Has "git")) {
-    Install-Pkg "Git.Git" "git"
+    Pkg-Install "Git.Git" "git"
+    Refresh-Path
 }
-Write-Ok "Git $(git --version)"
+if (Has "git") { Write-Ok "Git $(git --version)" }
 
 # ── 2. Visual Studio Build Tools (C/C++ linker for Rust) ─────────
 Write-Info "Checking C/C++ build tools..."
@@ -78,21 +86,25 @@ if (Test-Path $vsWhere) {
         $vsInstalled = $true
     }
 }
-
 if (-not $vsInstalled) {
     Write-Info "Installing Visual Studio Build Tools (C++ workload)..."
     Write-Info "This may take several minutes..."
-    $vsUrl = "https://aka.ms/vs/17/release/vs_BuildTools.exe"
-    $vsInstaller = "$env:TEMP\vs_BuildTools.exe"
-    Invoke-WebRequest -Uri $vsUrl -OutFile $vsInstaller
-    Start-Process -FilePath $vsInstaller -ArgumentList `
-        "--quiet", "--wait", "--norestart", `
-        "--add", "Microsoft.VisualStudio.Workload.VCTools", `
-        "--includeRecommended" `
-        -Wait -NoNewWindow
-    Remove-Item $vsInstaller -ErrorAction SilentlyContinue
-    Write-Ok "Visual Studio Build Tools installed"
-    Write-Warn "You may need to RESTART your terminal for link.exe to be on PATH"
+    try {
+        $vsUrl = "https://aka.ms/vs/17/release/vs_BuildTools.exe"
+        $vsInstaller = "$env:TEMP\vs_BuildTools.exe"
+        Invoke-WebRequest -Uri $vsUrl -OutFile $vsInstaller -UseBasicParsing
+        Start-Process -FilePath $vsInstaller -ArgumentList @(
+            "--quiet", "--wait", "--norestart",
+            "--add", "Microsoft.VisualStudio.Workload.VCTools",
+            "--includeRecommended"
+        ) -Wait -NoNewWindow
+        Remove-Item $vsInstaller -ErrorAction SilentlyContinue
+        Write-Ok "Visual Studio Build Tools installed"
+        Write-Warn "You may need to RESTART your terminal for link.exe to be on PATH"
+    } catch {
+        Write-Err "VS Build Tools install failed: $_"
+        Write-Warn "Install manually: https://visualstudio.microsoft.com/visual-cpp-build-tools/"
+    }
 }
 
 # ── 3. Rust toolchain ────────────────────────────────────────────
@@ -100,22 +112,24 @@ if (-not $SkipRust) {
     Write-Info "Checking Rust toolchain..."
     if (-not (Has "rustup")) {
         Write-Info "Installing Rust via rustup..."
-        $rustupInit = "$env:TEMP\rustup-init.exe"
-        Invoke-WebRequest -Uri "https://win.rustup.rs/x86_64" -OutFile $rustupInit
-        & $rustupInit -y --default-toolchain stable
-        $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
+        try {
+            $rustupInit = "$env:TEMP\rustup-init.exe"
+            Invoke-WebRequest -Uri "https://win.rustup.rs/x86_64" -OutFile $rustupInit -UseBasicParsing
+            & $rustupInit -y --default-toolchain stable
+            $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
+        } catch {
+            Write-Err "Rust install failed: $_"
+        }
     }
-    $rustVer = rustc --version
-    Write-Ok "Rust: $rustVer"
+    if (Has "rustc") { Write-Ok "Rust: $(rustc --version)" }
 
-    if (-not (Has "sqlx")) {
-        if (-not $AgentOnly) {
-            Write-Info "Installing sqlx-cli..."
-            try {
-                cargo install sqlx-cli --no-default-features --features postgres
-            } catch {
-                Write-Warn "sqlx-cli install failed (needs link.exe). Retry after restarting terminal."
-            }
+    if (-not (Has "sqlx") -and -not $AgentOnly) {
+        Write-Info "Installing sqlx-cli..."
+        try {
+            cargo install sqlx-cli --no-default-features --features postgres 2>&1 | Out-Null
+            Write-Ok "sqlx-cli installed"
+        } catch {
+            Write-Warn "sqlx-cli install failed (may need link.exe). Retry after restarting terminal."
         }
     }
     Write-Ok "Rust toolchain ready"
@@ -126,26 +140,19 @@ if (-not $SkipRust) {
 # ── 4. Protobuf compiler ─────────────────────────────────────────
 Write-Info "Checking protobuf compiler..."
 if (-not (Has "protoc")) {
-    Install-Pkg "Google.Protobuf" "protoc"
+    Pkg-Install "Google.Protobuf" "protoc"
+    Refresh-Path
 }
-if (Has "protoc") {
-    Write-Ok "protoc $(protoc --version)"
-}
+if (Has "protoc") { Write-Ok "protoc $(protoc --version)" }
 
 # ── 5. Docker Desktop ────────────────────────────────────────────
 if (-not $SkipDocker) {
     Write-Info "Checking Docker..."
     if (-not (Has "docker")) {
-        Write-Warn "Docker Desktop not found."
-        Write-Warn "Install from: https://docker.com/products/docker-desktop"
-        if ($UseWinget) {
-            Write-Info "Attempting winget install..."
-            winget install --id Docker.DockerDesktop --accept-package-agreements --accept-source-agreements --silent
-        }
+        Pkg-Install "Docker.DockerDesktop" "docker-desktop"
+        Refresh-Path
     }
-    if (Has "docker") {
-        Write-Ok "Docker $(docker --version)"
-    }
+    if (Has "docker") { Write-Ok "Docker $(docker --version)" }
 } else {
     Write-Warn "Skipping Docker (-SkipDocker)"
 }
@@ -154,16 +161,11 @@ if (-not $SkipDocker) {
 if (-not $SkipAndroid) {
     Write-Info "Checking Android tools..."
     if (-not (Has "adb")) {
-        Write-Warn "ADB not found. Install Android SDK Platform Tools:"
-        Write-Warn "  https://developer.android.com/studio/releases/platform-tools"
-        Write-Warn "  Or: choco install adb"
-        if ($UseChoco) {
-            choco install adb -y
-        }
+        Pkg-Install "Google.PlatformTools" "adb"
+        Refresh-Path
     }
-    if (Has "adb") {
-        Write-Ok "adb available"
-    }
+    if (Has "adb") { Write-Ok "adb available" }
+    else { Write-Warn "ADB not found. Install Android SDK Platform Tools manually." }
 } else {
     Write-Warn "Skipping Android tools (-SkipAndroid)"
 }
@@ -180,7 +182,7 @@ Write-Host ""
 Write-Host "  Next steps:"
 if ($AgentOnly) {
     Write-Host '    1. .\scripts\build.ps1 agent                    # build the agent binary'
-    Write-Host '    2. $env:EF__AGENT__CONTROL_PLANE_URL="https://<api-server>:50051"'
+    Write-Host '    2. $env:EF__AGENT__CONTROL_PLANE_URL="http://<api-server>:6060"'
     Write-Host '       .\scripts\deploy.ps1 agent                   # start the agent'
 } else {
     Write-Host "    1. .\scripts\build.ps1          # build EdgeFabric binaries"

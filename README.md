@@ -1,10 +1,10 @@
-<p align="center">
+<p align="left">
   <img src="docs/assets/EdgeFabric_Logo.png" alt="EdgeFabric" width="420"/>
 </p>
 
-<h3 align="center">Unified device cloud to test, automate, and scale across real and virtual devices.</h3>
+<h3 align="left">Unified device cloud to test, automate, and scale across real and virtual devices.</h3>
 
-<p align="center">
+<p align="left">
   <a href="docs/SYSTEM_DESIGN.md">System Design</a> ·
   <a href="docs/ARCHITECTURE.md">Architecture & Diagrams</a> ·
   <a href="docs/API_REFERENCE.md">API Reference</a>

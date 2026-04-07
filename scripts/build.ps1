@@ -59,30 +59,61 @@ try {
     if (-not (Get-Command "link.exe" -ErrorAction SilentlyContinue)) {
         Write-Info "link.exe not found -- loading VS Developer environment..."
         $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+        $vsLoaded = $false
         if (Test-Path $vsWhere) {
-            $vsPath = & $vsWhere -latest -property installationPath 2>$null
+            $vsPath = & $vsWhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+            if (-not $vsPath) {
+                # Broader search: any VS/Build Tools installation
+                $vsPath = & $vsWhere -latest -products * -property installationPath 2>$null
+            }
             if ($vsPath) {
-                $devShell = Join-Path $vsPath "Common7\Tools\Launch-VsDevShell.ps1"
-                if (Test-Path $devShell) {
-                    & $devShell -SkipAutomaticLocation 2>$null | Out-Null
-                    Write-Ok "VS Developer environment loaded"
-                } else {
-                    # Fallback: try vcvarsall.bat
-                    $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
-                    if (Test-Path $vcvars) {
-                        $envOutput = cmd /c "`"$vcvars`" >nul 2`>`&1 `& set"
-                        foreach ($line in $envOutput) {
-                            if ($line -match "^(.+?)=(.*)$") {
-                                [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
-                            }
+                Write-Info "Found VS at: $vsPath"
+                # Try vcvars64.bat first (most reliable across VS editions)
+                $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
+                if (Test-Path $vcvars) {
+                    Write-Info "Loading environment via vcvars64.bat..."
+                    $envOutput = cmd /c "`"$vcvars`" >nul 2>&1 && set"
+                    foreach ($line in $envOutput) {
+                        if ($line -match "^(.+?)=(.*)$") {
+                            [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
                         }
-                        Write-Ok "VS environment loaded via vcvars64.bat"
+                    }
+                    $vsLoaded = $true
+                    Write-Ok "VS environment loaded via vcvars64.bat"
+                } else {
+                    # Fallback: Launch-VsDevShell.ps1
+                    $devShell = Join-Path $vsPath "Common7\Tools\Launch-VsDevShell.ps1"
+                    if (Test-Path $devShell) {
+                        Write-Info "Loading environment via Launch-VsDevShell.ps1..."
+                        try {
+                            & $devShell -SkipAutomaticLocation | Out-Null
+                            $vsLoaded = $true
+                            Write-Ok "VS Developer environment loaded"
+                        } catch {
+                            Write-Err "Launch-VsDevShell.ps1 failed: $_"
+                        }
+                    } else {
+                        Write-Err "Neither vcvars64.bat nor Launch-VsDevShell.ps1 found under $vsPath"
                     }
                 }
+            } else {
+                Write-Err "vswhere found but no VS installation detected."
+                Write-Err "Install 'Desktop development with C++' workload:"
+                Write-Err "  winget install Microsoft.VisualStudio.2022.BuildTools --override ""--add Microsoft.VisualStudio.Workload.VCTools --passive"""
             }
+        } else {
+            Write-Err "vswhere.exe not found at: $vsWhere"
+            Write-Err "Install Visual Studio Build Tools:"
+            Write-Err "  winget install Microsoft.VisualStudio.2022.BuildTools --override ""--add Microsoft.VisualStudio.Workload.VCTools --passive"""
         }
         if (-not (Get-Command "link.exe" -ErrorAction SilentlyContinue)) {
-            Write-Err "link.exe still not found. Open 'Developer PowerShell for VS 2022' and try again."
+            if ($vsLoaded) {
+                Write-Err "VS environment loaded but link.exe still not on PATH."
+                Write-Err "The C++ build tools may not be installed. Add the 'Desktop development with C++' workload."
+            } else {
+                Write-Err "link.exe not found. Open 'Developer PowerShell for VS 2022' or install C++ build tools:"
+                Write-Err "  winget install Microsoft.VisualStudio.2022.BuildTools --override ""--add Microsoft.VisualStudio.Workload.VCTools --passive"""
+            }
             exit 1
         }
     }

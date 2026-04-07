@@ -135,8 +135,8 @@ try {
         foreach ($bin in @("ef-api.exe", "ef-agent.exe", "ef.exe")) {
             $path = Join-Path $BuildDir $bin
             if (Test-Path $path) {
-                $size = [math]::Round((Get-Item $path).Length / 1MB, 1)
-                Write-Host "    $path  $size MB"
+                $size = [math]::Round((Get-Item $path).Length / 1048576, 1)
+                Write-Host ('    ' + $path + '  ' + $size + ' MB')
             }
         }
     }

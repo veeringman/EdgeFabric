@@ -44,6 +44,7 @@ auto_update_enabled = false
 auto_update_url = "https://releases.edgefabric.io/agent"
 reconnect_interval_seconds = 5
 max_reconnect_attempts = 0
+tls_skip_verify = false
 
 [logging]
 level = "info"

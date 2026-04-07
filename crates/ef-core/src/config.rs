@@ -72,6 +72,9 @@ pub struct AgentConfig {
     pub auto_update_url: String,
     pub reconnect_interval_seconds: u64,
     pub max_reconnect_attempts: u32,
+    /// Skip TLS certificate verification (IP addresses, self-signed certs, test setups).
+    #[serde(default)]
+    pub tls_skip_verify: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

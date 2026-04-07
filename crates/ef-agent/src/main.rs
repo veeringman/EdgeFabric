@@ -44,6 +44,7 @@ async fn main() -> Result<()> {
             &cfg.agent.agent_id,
             cfg.agent.reconnect_interval_seconds,
             cfg.agent.max_reconnect_attempts,
+            cfg.agent.tls_skip_verify,
         )
         .await?,
     );
@@ -124,8 +125,9 @@ async fn connect_with_retry(
     agent_id: &str,
     base_interval_secs: u64,
     max_attempts: u32,
+    tls_skip_verify: bool,
 ) -> Result<ControlPlaneClient> {
-    let client = ControlPlaneClient::new(url, agent_id)?;
+    let client = ControlPlaneClient::new(url, agent_id, tls_skip_verify)?;
 
     let mut attempt = 0u32;
     loop {

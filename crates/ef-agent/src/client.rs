@@ -59,11 +59,16 @@ pub struct CommandResult {
 }
 
 impl ControlPlaneClient {
-    pub fn new(base_url: &str, agent_id: &str) -> anyhow::Result<Self> {
-        let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .danger_accept_invalid_certs(true) // dev env; production should use proper TLS
-            .build()?;
+    pub fn new(base_url: &str, agent_id: &str, tls_skip_verify: bool) -> anyhow::Result<Self> {
+        let mut builder = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30));
+
+        if tls_skip_verify {
+            tracing::warn!("TLS certificate verification is DISABLED — do not use in production");
+            builder = builder.danger_accept_invalid_certs(true);
+        }
+
+        let http = builder.build()?;
 
         Ok(Self {
             base_url: base_url.trim_end_matches('/').to_string(),

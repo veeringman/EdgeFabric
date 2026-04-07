@@ -6,6 +6,10 @@ host = "127.0.0.1"
 [auth]
 jwt_secret = "dev-secret-not-for-production"
 
+[agent]
+control_plane_url = "http://localhost:6060"
+tls_skip_verify = true
+
 [logging]
 level = "debug"
 format = "pretty"

@@ -38,7 +38,11 @@ New-Item -ItemType Directory -Force -Path $PidDir | Out-Null
 $BinDir = $null
 if (Test-Path "target\release\ef-api.exe") {
     $BinDir = "target\release"
+} elseif (Test-Path "target\release\ef-agent.exe") {
+    $BinDir = "target\release"
 } elseif (Test-Path "target\debug\ef-api.exe") {
+    $BinDir = "target\debug"
+} elseif (Test-Path "target\debug\ef-agent.exe") {
     $BinDir = "target\debug"
 }
 

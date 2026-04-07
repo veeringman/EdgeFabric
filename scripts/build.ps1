@@ -70,8 +70,9 @@ try {
                     # Fallback: try vcvarsall.bat
                     $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
                     if (Test-Path $vcvars) {
-                        cmd /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
-                            if ($_ -match "^(.+?)=(.*)$") {
+                        $envOutput = cmd /c "`"$vcvars`" >nul 2`>`&1 `& set"
+                        foreach ($line in $envOutput) {
+                            if ($line -match "^(.+?)=(.*)$") {
                                 [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
                             }
                         }
@@ -135,7 +136,7 @@ try {
             $path = Join-Path $BuildDir $bin
             if (Test-Path $path) {
                 $size = [math]::Round((Get-Item $path).Length / 1MB, 1)
-                Write-Host "    $path  (${size}MB)"
+                Write-Host "    $path  ($size MB)"
             }
         }
     }

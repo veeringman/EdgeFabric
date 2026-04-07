@@ -40,22 +40,22 @@ Write-Host "=============================================" -ForegroundColor Cyan
 Write-Host ""
 
 # ── Detect package manager ────────────────────────────────────────
-$UseWinget = Has "winget"
-$UseChoco  = Has "choco"
+$script:UseWinget = Has "winget"
+$script:UseChoco  = Has "choco"
 
-if (-not $UseWinget -and -not $UseChoco) {
+if (-not $script:UseWinget -and -not $script:UseChoco) {
     Write-Warn "Neither winget nor Chocolatey found."
     Write-Info "Installing Chocolatey..."
     Set-ExecutionPolicy Bypass -Scope Process -Force
     [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
     Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-    $UseChoco = $true
+    $script:UseChoco = $true
 }
 
 function Install-Pkg($wingetId, $chocoId) {
-    if ($UseWinget) {
+    if ($script:UseWinget) {
         winget install --id $wingetId --accept-package-agreements --accept-source-agreements --silent
-    } elseif ($UseChoco) {
+    } elseif ($script:UseChoco) {
         choco install $chocoId -y
     }
 }
@@ -69,16 +69,30 @@ Write-Ok "Git $(git --version)"
 
 # ── 2. Visual Studio Build Tools (C/C++ linker for Rust) ─────────
 Write-Info "Checking C/C++ build tools..."
+$vsInstalled = $false
 $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 if (Test-Path $vsWhere) {
     $vsPath = & $vsWhere -latest -property installationPath 2>$null
     if ($vsPath) {
         Write-Ok "Visual Studio / Build Tools found: $vsPath"
+        $vsInstalled = $true
     }
-} else {
-    Write-Warn "Visual Studio Build Tools not found."
-    Write-Warn "Install from: https://visualstudio.microsoft.com/visual-cpp-build-tools/"
-    Write-Warn 'Select "Desktop development with C++" workload.'
+}
+
+if (-not $vsInstalled) {
+    Write-Info "Installing Visual Studio Build Tools (C++ workload)..."
+    Write-Info "This may take several minutes..."
+    $vsUrl = "https://aka.ms/vs/17/release/vs_BuildTools.exe"
+    $vsInstaller = "$env:TEMP\vs_BuildTools.exe"
+    Invoke-WebRequest -Uri $vsUrl -OutFile $vsInstaller
+    Start-Process -FilePath $vsInstaller -ArgumentList `
+        "--quiet", "--wait", "--norestart", `
+        "--add", "Microsoft.VisualStudio.Workload.VCTools", `
+        "--includeRecommended" `
+        -Wait -NoNewWindow
+    Remove-Item $vsInstaller -ErrorAction SilentlyContinue
+    Write-Ok "Visual Studio Build Tools installed"
+    Write-Warn "You may need to RESTART your terminal for link.exe to be on PATH"
 }
 
 # ── 3. Rust toolchain ────────────────────────────────────────────
@@ -95,8 +109,14 @@ if (-not $SkipRust) {
     Write-Ok "Rust: $rustVer"
 
     if (-not (Has "sqlx")) {
-        Write-Info "Installing sqlx-cli..."
-        cargo install sqlx-cli --no-default-features --features postgres
+        if (-not $AgentOnly) {
+            Write-Info "Installing sqlx-cli..."
+            try {
+                cargo install sqlx-cli --no-default-features --features postgres
+            } catch {
+                Write-Warn "sqlx-cli install failed (needs link.exe). Retry after restarting terminal."
+            }
+        }
     }
     Write-Ok "Rust toolchain ready"
 } else {

@@ -136,7 +136,7 @@ try {
             $path = Join-Path $BuildDir $bin
             if (Test-Path $path) {
                 $size = [math]::Round((Get-Item $path).Length / 1MB, 1)
-                Write-Host "    $path  ($size MB)"
+                Write-Host ("    {0}  ({1} MB)" -f $path, $size)
             }
         }
     }

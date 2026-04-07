@@ -174,6 +174,253 @@ EdgeFabric/
 
 ---
 
+## Getting Started
+
+### Quick Start (One-Liner)
+
+**macOS:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/veeringman/EdgeFabric/main/scripts/bootstrap.sh | bash
+cd ~/edgefabric
+./scripts/setup-mac.sh
+```
+
+**Linux (Ubuntu/Debian):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/veeringman/EdgeFabric/main/scripts/bootstrap.sh | bash
+cd ~/edgefabric
+./scripts/install.sh
+./scripts/build.sh
+./scripts/deploy.sh all
+```
+
+**Windows (PowerShell — run as Administrator):**
+```powershell
+irm https://raw.githubusercontent.com/veeringman/EdgeFabric/main/scripts/bootstrap.ps1 | iex
+cd $HOME\edgefabric
+.\scripts\build.ps1
+.\scripts\deploy.ps1 all
+```
+
+### Step by Step
+
+If you already have the repo cloned:
+
+```bash
+git clone https://github.com/veeringman/EdgeFabric.git
+cd EdgeFabric
+```
+
+Then follow the platform-specific instructions below.
+
+---
+
+## Prerequisites
+
+| Tool | Version | macOS | Linux | Windows |
+|------|---------|-------|-------|---------|
+| **Rust** | >= 1.85 | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` | same | [rustup.rs](https://rustup.rs) |
+| **protoc** | any | `brew install protobuf` | `apt install protobuf-compiler` | `winget install Google.Protobuf` |
+| **Docker** | any | `brew install --cask docker` | `curl -fsSL https://get.docker.com \| sh` | Docker Desktop |
+| **adb** | any | `brew install --cask android-platform-tools` | `apt install android-tools-adb` | `winget install Google.PlatformTools` |
+| **Xcode CLI** | any | `xcode-select --install` | N/A | N/A |
+| **libimobiledevice** | any | `brew install libimobiledevice` | N/A | N/A |
+
+Or run the automated installer:
+
+```bash
+./scripts/install.sh              # macOS / Linux
+.\scripts\install.ps1             # Windows (PowerShell)
+./scripts/install.sh --agent-only # edge agent node only
+```
+
+---
+
+## Building
+
+```bash
+# Debug build (all crates)
+./scripts/build.sh
+
+# Release build
+./scripts/build.sh --release
+
+# Build specific targets
+./scripts/build.sh agent          # ef-agent only
+./scripts/build.sh api            # ef-api only
+./scripts/build.sh cli            # ef CLI only
+./scripts/build.sh dashboard      # WASM dashboard via trunk
+
+# Or use cargo directly
+cargo build                       # debug
+cargo build --release             # release
+cargo build -p ef-agent           # single crate
+```
+
+**Windows:**
+```powershell
+.\scripts\build.ps1               # debug, all
+.\scripts\build.ps1 -Release      # release
+.\scripts\build.ps1 agent         # agent only
+```
+
+**Note:** On machines with <= 8 GB RAM, limit parallelism:
+```bash
+CARGO_BUILD_JOBS=2 ./scripts/build.sh
+```
+
+---
+
+## Deploying
+
+### Local Development (Full Stack)
+
+```bash
+# 1. Start infrastructure (Postgres, Redis, NATS, CoTURN)
+./scripts/deploy.sh infra
+
+# 2. Run database migrations
+DATABASE_URL="postgres://edgefabric:edgefabric@localhost:5432/edgefabric" ./scripts/migrate.sh up
+
+# 3. Start the API server (starts infra automatically if needed)
+./scripts/deploy.sh api
+
+# 4. Start the edge agent
+./scripts/deploy.sh agent
+
+# Or do it all at once:
+./scripts/deploy.sh all
+```
+
+### Docker Compose (Full Stack)
+
+```bash
+docker compose up -d                    # infra + API
+docker compose --profile full up -d     # infra + API + agent
+docker compose down -v                  # tear down
+```
+
+### Agent-Only Deployment (Edge Node)
+
+When the API server runs elsewhere (e.g., cloud), deploy just the agent:
+
+```bash
+# On the edge node (Mac / Linux)
+./scripts/install.sh --agent-only
+./scripts/build.sh agent
+
+EF__AGENT__CONTROL_PLANE_URL=https://api.example.com:6060 \
+EF__AGENT__AGENT_ID=macbook-lab-01 \
+EF__AGENT__REGION=us-west \
+  ./scripts/deploy.sh agent
+```
+
+### macOS One-Shot (Setup + Build + Deploy)
+
+```bash
+./scripts/setup-mac.sh                  # full stack on Mac
+./scripts/setup-mac.sh --agent-only     # agent only
+./scripts/setup-mac.sh --release        # release build
+./scripts/setup-mac.sh --step check     # scan for connected devices
+```
+
+### Managing Services
+
+```bash
+./scripts/deploy.sh status              # check health of all services
+./scripts/deploy.sh stop                # stop everything
+tail -f logs/ef-api.log                 # watch API logs
+tail -f logs/ef-agent.log              # watch agent logs
+```
+
+### Service Endpoints
+
+| Service | URL |
+|---------|-----|
+| API (native) | http://127.0.0.1:6060 |
+| API (Docker) | http://localhost:8080 |
+| Swagger UI (native) | http://127.0.0.1:6060/swagger-ui |
+| Health check | http://127.0.0.1:6060/health |
+| gRPC | localhost:50051 |
+| NATS monitoring | http://localhost:8222 |
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `EF_RUN_MODE` | `development` | Config profile: `development` or `production` |
+| `EF__AGENT__AGENT_ID` | hostname | Unique agent identifier |
+| `EF__AGENT__REGION` | `local` | Region label for device scheduling |
+| `EF__AGENT__CONTROL_PLANE_URL` | `http://localhost:6060` | API server URL |
+| `EF__AGENT__TLS_SKIP_VERIFY` | `true` (dev) | Skip TLS cert verification |
+| `EF__DATABASE__URL` | (see config) | PostgreSQL connection string |
+| `EF__AUTH__JWT_SECRET` | (see config) | JWT signing secret |
+| `EF__STREAMING__TURN_PASSWORD` | (see config) | TURN server credential |
+
+---
+
+## Device Setup
+
+### Android Devices
+
+1. Enable **Developer Options**: Settings → About Phone → tap Build Number 7 times
+2. Enable **USB Debugging**: Settings → Developer Options → USB Debugging
+3. Connect via USB and authorize the computer when prompted
+4. Verify: `adb devices -l`
+
+### iOS / iPadOS Devices
+
+1. Enable **Developer Mode** (iOS 16+): Settings → Privacy & Security → Developer Mode → On → Restart
+2. Connect via USB (Lightning or USB-C cable)
+3. Tap **Trust** on the "Trust This Computer?" dialog and enter your passcode
+4. Verify:
+   ```bash
+   idevice_id -l                            # list UDIDs
+   ideviceinfo -k DeviceName                # device name
+   xcrun xctrace list devices               # Xcode device list
+   ```
+5. **Optional (full Xcode):** For app install/testing via `xcrun`, install Xcode from the App Store
+
+### iOS / iPadOS Simulators
+
+1. Install Xcode from the App Store
+2. Boot a simulator:
+   ```bash
+   xcrun simctl list devices available       # see available devices
+   xcrun simctl boot "iPhone 15 Pro"         # boot one
+   ```
+3. EdgeFabric auto-discovers booted simulators and tags them as `virtual` with `simctl` capability
+
+### IoT Devices
+
+EdgeFabric discovers IoT devices via **mDNS** (Bonjour / Avahi):
+
+- **macOS**: Uses built-in `dns-sd` — no install needed
+- **Linux**: Install `avahi-utils` (`apt install avahi-utils`)
+- Devices must advertise `_edgefabric._tcp` or generic services (`_mqtt._tcp`, `_http._tcp`, `_coap._udp`)
+
+For custom IoT boards (Raspberry Pi, ESP32, Arduino):
+1. Ensure the device is on the same network
+2. Register an mDNS service or configure SSH access
+3. EdgeFabric agent will discover via mDNS scan
+
+### Checking Connected Devices
+
+```bash
+# Full device check (macOS)
+./scripts/setup-mac.sh --step check
+
+# Or manually:
+adb devices -l                           # Android
+idevice_id -l                            # iOS (USB)
+xcrun xctrace list devices               # iOS (Xcode)
+xcrun simctl list devices booted         # simulators
+dns-sd -B _edgefabric._tcp              # IoT (macOS)
+avahi-browse -t -r _edgefabric._tcp     # IoT (Linux)
+```
+
+---
+
 ## Security
 
 | Control | Implementation |
@@ -205,6 +452,8 @@ EdgeFabric/
 | [System Design](docs/SYSTEM_DESIGN.md) | Detailed design: layers, modules, data flow, security |
 | [Architecture & Diagrams](docs/ARCHITECTURE.md) | All schematics: system, network, deployment, sequences |
 | [API Reference](docs/API_REFERENCE.md) | REST endpoints, gRPC services, error codes |
+| [Getting Started](#getting-started) | Quick start, install, build, deploy instructions |
+| [Device Setup](#device-setup) | Android, iOS/iPadOS, IoT device preparation |
 
 ---
 

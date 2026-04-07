@@ -36,6 +36,8 @@ pub fn api_router() -> Router<AppState> {
         .route("/stream/{session_id}", get(streaming::ws_stream_handler))
         // Also allow streaming by device_id directly
         .route("/devices/{id}/stream", get(streaming::ws_stream_handler))
+        // Device log streaming (WebSocket logcat)
+        .route("/devices/{id}/logs", get(streaming::ws_logs_handler))
         // Agent endpoints (device registration, heartbeat, command polling)
         .route("/agent/devices", post(agent::register_device))
         .route("/agent/devices/{id}", axum::routing::delete(agent::deregister_device))

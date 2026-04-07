@@ -277,6 +277,12 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .log-line.info { color: var(--info); }
 .log-line.warn { color: var(--warning); }
 .log-line.error { color: var(--danger); }
+.log-line.fatal { color: #ff6b6b; font-weight: 600; }
+.log-line.debug { color: #8b9dc3; }
+.log-line.verbose { color: var(--text-muted); }
+.log-ts { color: var(--text-muted); margin-right: 0.5rem; min-width: 16ch; display: inline-block; }
+.log-level { margin-right: 0.5rem; font-weight: 700; width: 1.5ch; display: inline-block; text-align: center; }
+.log-tag { color: #a78bfa; margin-right: 0.25rem; }
 
 /* ---- Video player ---- */
 .video-container {

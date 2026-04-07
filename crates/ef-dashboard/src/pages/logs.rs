@@ -1,8 +1,10 @@
 use leptos::prelude::*;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
 
 use crate::api::{self, DeviceListResponse};
 
-/// Real-time log viewer (streaming logs from device logcat / syslog).
+/// Real-time log viewer — streams logcat/syslog from device via WebSocket.
 #[component]
 pub fn LogsPage() -> impl IntoView {
     let (device_id, set_device_id) = signal(String::new());
@@ -11,27 +13,115 @@ pub fn LogsPage() -> impl IntoView {
     let (log_lines, set_log_lines) = signal(Vec::<LogLine>::new());
     let (connected, set_connected) = signal(false);
     let (auto_scroll, set_auto_scroll) = signal(true);
+    let (ws_handle, set_ws_handle) = signal(Option::<web_sys::WebSocket>::None);
+    let (line_count, set_line_count) = signal(0usize);
 
     let devices = LocalResource::new(|| async {
         api::get::<DeviceListResponse>("/devices").await.unwrap_or_default()
     });
 
-    // Simulated log streaming (in production would use WebSocket to /stream/{session_id})
     let start_streaming = move |_| {
         let did = device_id.get_untracked();
         if did.is_empty() {
             return;
         }
-        set_connected.set(true);
-        set_log_lines.set(vec![
-            LogLine { level: "info".into(), timestamp: "2026-04-07T10:00:01Z".into(), message: format!("Connected to device {}", &did[..8.min(did.len())]) },
-            LogLine { level: "info".into(), timestamp: "2026-04-07T10:00:02Z".into(), message: "Log streaming started…".into() },
-            LogLine { level: "info".into(), timestamp: "2026-04-07T10:00:03Z".into(), message: "Waiting for log events from device agent".into() },
-        ]);
+
+        // Close any existing connection
+        if let Some(old_ws) = ws_handle.get_untracked() {
+            let _ = old_ws.close();
+        }
+
+        set_log_lines.set(Vec::new());
+        set_line_count.set(0);
+
+        let host = web_sys::window()
+            .and_then(|w| w.location().hostname().ok())
+            .unwrap_or_else(|| "localhost".to_string());
+        let ws_url = format!("ws://{host}:6060/api/v1/devices/{did}/logs");
+
+        let ws = match web_sys::WebSocket::new(&ws_url) {
+            Ok(ws) => ws,
+            Err(_) => return,
+        };
+
+        let onopen = Closure::wrap(Box::new(move |_: web_sys::Event| {
+            set_connected.set(true);
+        }) as Box<dyn FnMut(_)>);
+        ws.set_onopen(Some(onopen.as_ref().unchecked_ref()));
+        onopen.forget();
+
+        let onmessage = Closure::wrap(Box::new(move |evt: web_sys::MessageEvent| {
+            if let Ok(text) = evt.data().dyn_into::<js_sys::JsString>() {
+                let s: String = text.into();
+                if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&s) {
+                    let msg_type = msg.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                    if msg_type == "log" {
+                        let line = LogLine {
+                            level: msg.get("level").and_then(|v| v.as_str()).unwrap_or("info").to_string(),
+                            timestamp: msg.get("timestamp").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                            tag: msg.get("tag").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                            message: msg.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        };
+                        set_log_lines.update(|lines| {
+                            lines.push(line);
+                            // Keep last 2000 lines to prevent memory issues
+                            if lines.len() > 2000 {
+                                lines.drain(..500);
+                            }
+                        });
+                        set_line_count.update(|c| *c += 1);
+
+                        // Auto-scroll
+                        if auto_scroll.get_untracked() {
+                            if let Some(el) = web_sys::window()
+                                .and_then(|w| w.document())
+                                .and_then(|d| d.get_element_by_id("log-viewer"))
+                            {
+                                el.set_scroll_top(el.scroll_height());
+                            }
+                        }
+                    } else if msg_type == "error" {
+                        let err_msg = msg.get("message").and_then(|v| v.as_str()).unwrap_or("Unknown error");
+                        set_log_lines.update(|lines| {
+                            lines.push(LogLine {
+                                level: "error".into(),
+                                timestamp: String::new(),
+                                tag: "SYSTEM".into(),
+                                message: err_msg.to_string(),
+                            });
+                        });
+                    }
+                }
+            }
+        }) as Box<dyn FnMut(_)>);
+        ws.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
+        onmessage.forget();
+
+        let onclose = Closure::wrap(Box::new(move |_: web_sys::Event| {
+            set_connected.set(false);
+        }) as Box<dyn FnMut(_)>);
+        ws.set_onclose(Some(onclose.as_ref().unchecked_ref()));
+        onclose.forget();
+
+        set_ws_handle.set(Some(ws));
     };
 
     let stop_streaming = move |_| {
+        if let Some(ws) = ws_handle.get_untracked() {
+            let msg = serde_json::json!({"type":"stop"});
+            let _ = ws.send_with_str(&msg.to_string());
+            let _ = ws.close();
+        }
         set_connected.set(false);
+        set_ws_handle.set(None);
+    };
+
+    let clear_logs = move |_| {
+        if let Some(ws) = ws_handle.get_untracked() {
+            let msg = serde_json::json!({"type":"clear"});
+            let _ = ws.send_with_str(&msg.to_string());
+        }
+        set_log_lines.set(Vec::new());
     };
 
     let filtered_lines = move || {
@@ -39,13 +129,21 @@ pub fn LogsPage() -> impl IntoView {
         let query = search.get().to_lowercase();
         log_lines.get()
             .into_iter()
-            .filter(|l| level == "all" || l.level == level)
-            .filter(|l| query.is_empty() || l.message.to_lowercase().contains(&query))
+            .filter(|l| {
+                level == "all" || l.level == level
+                    || (level == "warn" && (l.level == "warn" || l.level == "error" || l.level == "fatal"))
+                    || (level == "error" && (l.level == "error" || l.level == "fatal"))
+            })
+            .filter(|l| {
+                query.is_empty()
+                    || l.message.to_lowercase().contains(&query)
+                    || l.tag.to_lowercase().contains(&query)
+            })
             .collect::<Vec<_>>()
     };
 
     view! {
-        <h1 style="margin-bottom: 1rem">"Logs"</h1>
+        <h1 style="margin-bottom: 1rem">"Device Logs"</h1>
 
         <div class="filters">
             <div class="form-group">
@@ -55,35 +153,41 @@ pub fn LogsPage() -> impl IntoView {
                         view! {
                             <select on:change=move |ev| set_device_id.set(event_target_value(&ev))>
                                 <option value="">"Select device"</option>
-                                {data.devices.iter().map(|d| {
-                                    let id = d.id.clone();
-                                    let label = format!("{} ({})", d.name, &d.id[..8]);
-                                    view! { <option value=id>{label}</option> }
-                                }).collect::<Vec<_>>()}
+                                {data.devices.iter()
+                                    .filter(|d| d.status == "available" || d.status == "busy")
+                                    .map(|d| {
+                                        let id = d.id.clone();
+                                        let label = format!("{} ({})", d.name, &d.id[..8.min(d.id.len())]);
+                                        view! { <option value=id>{label}</option> }
+                                    }).collect::<Vec<_>>()}
                             </select>
                         }
                     })}
                 </Suspense>
             </div>
             <div class="form-group">
-                <label>"Level"</label>
+                <label>"Min Level"</label>
                 <select on:change=move |ev| set_log_level.set(event_target_value(&ev))>
                     <option value="all">"All"</option>
-                    <option value="error">"Error"</option>
-                    <option value="warn">"Warning"</option>
-                    <option value="info">"Info"</option>
+                    <option value="verbose">"Verbose"</option>
                     <option value="debug">"Debug"</option>
+                    <option value="info">"Info"</option>
+                    <option value="warn">"Warning+"</option>
+                    <option value="error">"Error+"</option>
                 </select>
             </div>
             <div class="form-group">
                 <label>"Search"</label>
-                <input type="text" placeholder="Filter logs…" prop:value=search
+                <input type="text" placeholder="Filter by message or tag…" prop:value=search
                     on:input=move |ev| set_search.set(event_target_value(&ev))/>
             </div>
             <Show
                 when=move || !connected.get()
                 fallback=move || view! {
-                    <button class="btn btn-danger btn-sm" style="align-self: flex-end" on:click=stop_streaming>"⏹ Stop"</button>
+                    <div style="display: flex; gap: 0.5rem; align-self: flex-end">
+                        <button class="btn btn-ghost btn-sm" on:click=clear_logs>"🗑 Clear"</button>
+                        <button class="btn btn-danger btn-sm" on:click=stop_streaming>"⏹ Stop"</button>
+                    </div>
                 }
             >
                 <button class="btn btn-primary btn-sm" style="align-self: flex-end" on:click=start_streaming
@@ -101,11 +205,16 @@ pub fn LogsPage() -> impl IntoView {
         <div class="card">
             <div class="card-header">
                 <h2>"Log Output"</h2>
-                <span style="font-size: 0.8rem; color: var(--text-muted)">
-                    {move || format!("{} lines", filtered_lines().len())}
-                </span>
+                <div style="display: flex; align-items: center; gap: 1rem; font-size: 0.8rem; color: var(--text-muted)">
+                    {move || if connected.get() {
+                        view! { <span class="badge active">"● Live"</span> }.into_any()
+                    } else {
+                        view! { <span class="badge queued">"○ Disconnected"</span> }.into_any()
+                    }}
+                    <span>{move || format!("{} lines", line_count.get())}</span>
+                </div>
             </div>
-            <div class="log-viewer">
+            <div id="log-viewer" class="log-viewer">
                 {move || {
                     let lines = filtered_lines();
                     if lines.is_empty() {
@@ -113,11 +222,13 @@ pub fn LogsPage() -> impl IntoView {
                     } else {
                         lines.into_iter().map(|l| {
                             let class = format!("log-line {}", l.level);
+                            let tag_display = if l.tag.is_empty() { String::new() } else { format!("[{}] ", l.tag) };
                             view! {
                                 <div class=class>
-                                    <span style="color: var(--text-muted); margin-right: 0.5rem">{l.timestamp}</span>
-                                    <span style="margin-right: 0.5rem; text-transform: uppercase; font-weight: 600; width: 4ch; display: inline-block">{l.level.clone()}</span>
-                                    {l.message}
+                                    <span class="log-ts">{l.timestamp}</span>
+                                    <span class="log-level">{l.level.chars().next().unwrap_or('I').to_uppercase().to_string()}</span>
+                                    <span class="log-tag">{tag_display}</span>
+                                    <span>{l.message}</span>
                                 </div>
                             }
                         }).collect_view().into_any()
@@ -132,6 +243,7 @@ pub fn LogsPage() -> impl IntoView {
 struct LogLine {
     level: String,
     timestamp: String,
+    tag: String,
     message: String,
 }
 

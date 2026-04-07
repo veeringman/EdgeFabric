@@ -1,4 +1,4 @@
-# EdgeFabric — Build Script (Windows)
+# EdgeFabric -- Build Script (Windows)
 #
 # Usage:
 #   .\scripts\build.ps1                    # build all (debug)
@@ -57,7 +57,7 @@ try {
 
     # Ensure MSVC link.exe is on PATH (needed by Rust on Windows)
     if (-not (Get-Command "link.exe" -ErrorAction SilentlyContinue)) {
-        Write-Info "link.exe not found — loading VS Developer environment..."
+        Write-Info "link.exe not found -- loading VS Developer environment..."
         $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
         if (Test-Path $vsWhere) {
             $vsPath = & $vsWhere -latest -property installationPath 2>$null

@@ -130,13 +130,15 @@ impl DeviceDiscovery {
     pub async fn scan_iot() -> Result<Vec<Device>> {
         info!("Scanning for IoT devices...");
 
-        // Try avahi-browse first (Linux)
-        let output = Command::new("avahi-browse")
-            .args(["-t", "-r", "-p", "_edgefabric._tcp"])
-            .output()
-            .await;
+        // Try avahi-browse first (Linux) — the -t flag ensures it terminates
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            Command::new("avahi-browse")
+                .args(["-t", "-r", "-p", "_edgefabric._tcp"])
+                .output(),
+        ).await;
 
-        if let Ok(out) = output {
+        if let Ok(Ok(out)) = output {
             if out.status.success() {
                 let stdout = String::from_utf8_lossy(&out.stdout);
                 let devices = parse_avahi_output(&stdout);
@@ -146,13 +148,16 @@ impl DeviceDiscovery {
         }
 
         // Fallback: dns-sd (macOS built-in)
-        // dns-sd -B _edgefabric._tcp runs indefinitely, so we use a short timeout
-        let output = Command::new("dns-sd")
-            .args(["-Z", "_edgefabric._tcp", "local."])
-            .output()
-            .await;
+        // dns-sd runs indefinitely, so spawn with kill_on_drop and timeout
+        let dns_sd_result = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            Command::new("dns-sd")
+                .args(["-Z", "_edgefabric._tcp", "local."])
+                .kill_on_drop(true)
+                .output(),
+        ).await;
 
-        if let Ok(out) = output {
+        if let Ok(Ok(out)) = dns_sd_result {
             let stdout = String::from_utf8_lossy(&out.stdout);
             if !stdout.trim().is_empty() {
                 let devices = parse_dns_sd_output(&stdout);
@@ -335,11 +340,14 @@ fn parse_dns_sd_output(stdout: &str) -> Vec<Device> {
 
 /// Scan a generic mDNS service type using platform-appropriate tools.
 async fn scan_mdns_service(service: &str) -> Vec<Device> {
-    // Try dns-sd (macOS) first, then avahi-browse (Linux)
-    if let Ok(out) = Command::new("dns-sd")
-        .args(["-Z", service, "local."])
-        .output()
-        .await
+    // Try dns-sd (macOS) first with timeout — dns-sd runs indefinitely
+    if let Ok(Ok(out)) = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        Command::new("dns-sd")
+            .args(["-Z", service, "local."])
+            .kill_on_drop(true)
+            .output(),
+    ).await
     {
         if out.status.success() {
             let stdout = String::from_utf8_lossy(&out.stdout);
@@ -347,10 +355,13 @@ async fn scan_mdns_service(service: &str) -> Vec<Device> {
         }
     }
 
-    if let Ok(out) = Command::new("avahi-browse")
-        .args(["-t", "-r", "-p", service])
-        .output()
-        .await
+    // avahi-browse with -t flag terminates after scanning, but add timeout as safeguard
+    if let Ok(Ok(out)) = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        Command::new("avahi-browse")
+            .args(["-t", "-r", "-p", service])
+            .output(),
+    ).await
     {
         if out.status.success() {
             let stdout = String::from_utf8_lossy(&out.stdout);

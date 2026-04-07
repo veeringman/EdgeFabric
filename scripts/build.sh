@@ -62,6 +62,46 @@ if ! command -v protoc &>/dev/null; then
   exit 1
 fi
 
+# ── macOS: check device discovery tooling ─────────────────────────
+if [[ "$(uname)" == "Darwin" ]]; then
+  info "macOS detected -- checking device discovery dependencies"
+
+  # Android (adb)
+  if command -v adb &>/dev/null; then
+    ok "adb found (Android discovery ready)"
+  else
+    warn "adb not found -- Android device discovery will be unavailable"
+    warn "  Install: brew install --cask android-platform-tools"
+  fi
+
+  # iOS real devices (xcrun is part of Xcode CLI tools)
+  if command -v xcrun &>/dev/null; then
+    ok "xcrun found (iOS/iPadOS discovery ready)"
+    # Check Xcode CLI tools are fully installed
+    if ! xcode-select -p &>/dev/null; then
+      warn "Xcode CLI tools not fully configured: xcode-select --install"
+    fi
+  else
+    warn "xcrun not found -- iOS device discovery will be unavailable"
+    warn "  Install: xcode-select --install"
+  fi
+
+  # iOS real devices via USB (libimobiledevice)
+  if command -v idevice_id &>/dev/null; then
+    ok "libimobiledevice found (USB iOS discovery ready)"
+  else
+    warn "idevice_id not found -- USB iOS fallback unavailable"
+    warn "  Install: brew install libimobiledevice"
+  fi
+
+  # IoT (dns-sd is built-in on macOS, but verify)
+  if command -v dns-sd &>/dev/null; then
+    ok "dns-sd found (IoT mDNS discovery ready)"
+  else
+    warn "dns-sd not found -- IoT discovery will be unavailable"
+  fi
+fi
+
 # ── Build functions ───────────────────────────────────────────────
 build_crate() {
   local crate="$1"

@@ -76,6 +76,9 @@ if ($SkipDocker)  { $installArgs += "-SkipDocker" }
 if ($SkipRust)    { $installArgs += "-SkipRust" }
 if ($SkipAndroid) { $installArgs += "-SkipAndroid" }
 
-# Bypass execution policy for the install script (user already consented by running bootstrap)
+# Bypass execution policy — use -EncodedCommand to run the script in-memory
 $installScript = Join-Path $InstallDir "scripts\install.ps1"
-powershell.exe -ExecutionPolicy Bypass -File $installScript @installArgs
+$cmd = "& '$installScript' $($installArgs -join ' ')"
+$bytes = [System.Text.Encoding]::Unicode.GetBytes($cmd)
+$encoded = [Convert]::ToBase64String($bytes)
+powershell.exe -ExecutionPolicy Bypass -NoProfile -EncodedCommand $encoded

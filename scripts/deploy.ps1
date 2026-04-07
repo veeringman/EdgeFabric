@@ -224,7 +224,8 @@ function Show-Status {
                 if ($state -eq "running") {
                     Write-Host "  ${svc}:$((' ' * (12 - $svc.Length)))" -NoNewline; Write-Host $state -ForegroundColor Green
                 } else {
-                    Write-Host "  ${svc}:$((' ' * (12 - $svc.Length)))" -NoNewline; Write-Host ($state ?? "not found") -ForegroundColor Red
+                    $display = if ($state) { $state } else { "not found" }
+                    Write-Host "  ${svc}:$((' ' * (12 - $svc.Length)))" -NoNewline; Write-Host $display -ForegroundColor Red
                 }
             } catch {
                 Write-Host "  ${svc}:$((' ' * (12 - $svc.Length)))" -NoNewline; Write-Host "not found" -ForegroundColor Red

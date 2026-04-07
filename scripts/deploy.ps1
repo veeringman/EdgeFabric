@@ -64,8 +64,8 @@ function Wait-ForPort($port, $name, $timeout = 30) {
     return $false
 }
 
-function Save-Pid($name, $pid) {
-    Set-Content -Path (Join-Path $PidDir "$name.pid") -Value $pid
+function Save-Pid($name, $svcPid) {
+    Set-Content -Path (Join-Path $PidDir "$name.pid") -Value $svcPid
 }
 
 function Get-SavedPid($name) {
@@ -75,13 +75,13 @@ function Get-SavedPid($name) {
 }
 
 function Stop-Service-ByName($name) {
-    $pid = Get-SavedPid $name
-    if ($pid) {
+    $svcPid = Get-SavedPid $name
+    if ($svcPid) {
         try {
-            $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+            $proc = Get-Process -Id $svcPid -ErrorAction SilentlyContinue
             if ($proc) {
-                Write-Info "Stopping $name (PID $pid)..."
-                Stop-Process -Id $pid -Force
+                Write-Info "Stopping $name (PID $svcPid)..."
+                Stop-Process -Id $svcPid -Force
                 Write-Ok "$name stopped"
             } else {
                 Write-Warn "$name is not running"
@@ -201,12 +201,12 @@ function Show-Status {
 
     # Native processes
     foreach ($svc in @("ef-api", "ef-agent")) {
-        $pid = Get-SavedPid $svc
-        if ($pid) {
+        $svcPid = Get-SavedPid $svc
+        if ($svcPid) {
             try {
-                $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+                $proc = Get-Process -Id $svcPid -ErrorAction SilentlyContinue
                 if ($proc) {
-                    Write-Host "  ${svc}:       " -NoNewline; Write-Host "running (PID $pid)" -ForegroundColor Green
+                    Write-Host "  ${svc}:       " -NoNewline; Write-Host "running (PID $svcPid)" -ForegroundColor Green
                 } else {
                     Write-Host "  ${svc}:       " -NoNewline; Write-Host "stopped" -ForegroundColor Red
                 }

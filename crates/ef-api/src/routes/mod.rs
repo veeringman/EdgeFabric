@@ -2,6 +2,7 @@ pub mod devices;
 pub mod jobs;
 pub mod sessions;
 pub mod streaming;
+pub mod agent;
 
 use axum::{Json, Router, extract::State, http::StatusCode, routing::{get, post, put}};
 use serde::Deserialize;
@@ -35,6 +36,10 @@ pub fn api_router() -> Router<AppState> {
         .route("/stream/{session_id}", get(streaming::ws_stream_handler))
         // Also allow streaming by device_id directly
         .route("/devices/{id}/stream", get(streaming::ws_stream_handler))
+        // Agent endpoints (device registration, heartbeat, command polling)
+        .route("/agent/devices", post(agent::register_device))
+        .route("/agent/devices/{id}", axum::routing::delete(agent::deregister_device))
+        .route("/agent/{agent_id}/commands", get(agent::poll_commands))
 }
 
 #[utoipa::path(get, path = "/health", tag = "health",

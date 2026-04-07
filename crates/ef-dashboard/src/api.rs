@@ -2,7 +2,13 @@ use gloo_net::http::Request;
 use gloo_storage::Storage;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-const BASE_URL: &str = "http://localhost:6060/api/v1";
+/// Build API base URL from the browser's current hostname (port 6060).
+fn base_url() -> String {
+    let host = web_sys::window()
+        .and_then(|w| w.location().hostname().ok())
+        .unwrap_or_else(|| "localhost".to_string());
+    format!("http://{host}:6060/api/v1")
+}
 
 fn token() -> Option<String> {
     gloo_storage::LocalStorage::get::<String>("ef_token").ok()
@@ -14,7 +20,7 @@ fn auth_header() -> String {
 
 /// Generic JSON GET
 pub async fn get<T: DeserializeOwned>(path: &str) -> Result<T, String> {
-    let resp = Request::get(&format!("{BASE_URL}{path}"))
+    let resp = Request::get(&format!("{}{path}", base_url()))
         .header("Authorization", &auth_header())
         .send()
         .await
@@ -31,7 +37,7 @@ pub async fn get<T: DeserializeOwned>(path: &str) -> Result<T, String> {
 
 /// Generic JSON POST
 pub async fn post<B: Serialize, T: DeserializeOwned>(path: &str, body: &B) -> Result<T, String> {
-    let resp = Request::post(&format!("{BASE_URL}{path}"))
+    let resp = Request::post(&format!("{}{path}", base_url()))
         .header("Authorization", &auth_header())
         .header("Content-Type", "application/json")
         .body(serde_json::to_string(body).map_err(|e| e.to_string())?)
@@ -51,7 +57,7 @@ pub async fn post<B: Serialize, T: DeserializeOwned>(path: &str, body: &B) -> Re
 
 /// Generic JSON PUT
 pub async fn put<B: Serialize, T: DeserializeOwned>(path: &str, body: &B) -> Result<T, String> {
-    let resp = Request::put(&format!("{BASE_URL}{path}"))
+    let resp = Request::put(&format!("{}{path}", base_url()))
         .header("Authorization", &auth_header())
         .header("Content-Type", "application/json")
         .body(serde_json::to_string(body).map_err(|e| e.to_string())?)
@@ -71,7 +77,7 @@ pub async fn put<B: Serialize, T: DeserializeOwned>(path: &str, body: &B) -> Res
 
 /// DELETE request (no body)
 pub async fn delete(path: &str) -> Result<(), String> {
-    let resp = Request::delete(&format!("{BASE_URL}{path}"))
+    let resp = Request::delete(&format!("{}{path}", base_url()))
         .header("Authorization", &auth_header())
         .send()
         .await
@@ -88,7 +94,7 @@ pub async fn delete(path: &str) -> Result<(), String> {
 
 /// Login — exchange API key for JWT (unauthed endpoint)
 pub async fn login(api_key: &str) -> Result<LoginResponse, String> {
-    let resp = Request::post(&format!("{BASE_URL}/auth/login"))
+    let resp = Request::post(&format!("{}/auth/login", base_url()))
         .header("Content-Type", "application/json")
         .body(serde_json::to_string(&LoginRequest { api_key: api_key.to_string() }).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?

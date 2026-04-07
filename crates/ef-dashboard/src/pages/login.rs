@@ -7,7 +7,8 @@ use crate::api;
 #[component]
 pub fn LoginPage() -> impl IntoView {
     let set_token = expect_context::<WriteSignal<Option<String>>>();
-    let (api_key, set_api_key) = signal(String::new());
+    // Dev default -- remove before production
+    let (api_key, set_api_key) = signal("efdev-key-00000000".to_string());
     let (error, set_error) = signal(Option::<String>::None);
     let (loading, set_loading) = signal(false);
 
@@ -55,7 +56,7 @@ pub fn LoginPage() -> impl IntoView {
                         <label for="api_key">"API Key"</label>
                         <input
                             id="api_key"
-                            type="password"
+                            type="text"
                             placeholder="Enter your API key"
                             prop:value=api_key
                             on:input=move |ev| set_api_key.set(event_target_value(&ev))

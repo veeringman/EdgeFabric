@@ -3,14 +3,14 @@ address = "0.0.0.0"
 port = 9080
 
 [[proxy]]
+backend = "http://127.0.0.1:6060"
 rewrite = "/api/v1/"
-backend = "http://127.0.0.1:6060/api/v1/"
-ws = true
+no_system_proxy = true
 
 [[proxy]]
+backend = "http://127.0.0.1:6060"
 rewrite = "/health"
-backend = "http://127.0.0.1:6060/health"
 
 [[proxy]]
+backend = "http://127.0.0.1:6060"
 rewrite = "/metrics"
-backend = "http://127.0.0.1:6060/metrics"

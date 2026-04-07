@@ -6,6 +6,7 @@ use uuid::Uuid;
 use crate::middleware::auth_extractor::AppState;
 use crate::middleware::error_response::ApiError;
 
+use ef_db::repo::agent::AgentRepo;
 use ef_db::repo::device::DeviceRepo;
 
 /// Agent device registration request (upsert by serial).
@@ -23,6 +24,8 @@ pub struct AgentRegisterDeviceRequest {
     pub capabilities: Vec<String>,
     pub agent_id: String,
     pub ip_address: Option<String>,
+    /// The agent's streaming WebSocket base URL (e.g. http://192.168.29.6:7070).
+    pub streaming_url: Option<String>,
 }
 
 fn default_kind() -> String { "real".into() }
@@ -58,6 +61,17 @@ pub async fn register_device(
         bytes[8..16].copy_from_slice(&h);
         Uuid::from_bytes(bytes)
     });
+
+    // Upsert the agent record (creates agents table row with streaming_url)
+    if let Err(e) = AgentRepo::upsert(
+        &state.pool,
+        agent_uuid,
+        &body.agent_id,
+        &body.region,
+        body.streaming_url.as_deref(),
+    ).await {
+        tracing::warn!(agent_id = %body.agent_id, "Failed to upsert agent: {e}");
+    }
 
     let device = DeviceRepo::upsert_by_serial(
         &state.pool,

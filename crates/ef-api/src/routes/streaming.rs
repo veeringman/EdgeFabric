@@ -24,6 +24,78 @@ use uuid::Uuid;
 
 use crate::middleware::auth_extractor::AppState;
 
+// ── WebSocket proxy to remote agent ───────────────────────────────
+
+/// Bidirectional WebSocket relay between a dashboard client and a remote
+/// agent's streaming server.  Messages flow both ways:
+///   dashboard → agent   (text: input events, stop commands)
+///   agent → dashboard   (binary: JPEG frames, text: log lines)
+async fn proxy_ws_to_agent(
+    mut client_tx: futures::stream::SplitSink<WebSocket, Message>,
+    mut client_rx: futures::stream::SplitStream<WebSocket>,
+    agent_url: &str,
+    id: Uuid,
+) {
+    use tokio_tungstenite::tungstenite::Message as TsMsg;
+
+    let (agent_ws, _resp) = match tokio_tungstenite::connect_async(agent_url).await {
+        Ok(pair) => pair,
+        Err(e) => {
+            tracing::error!(%id, %agent_url, "Failed to connect to agent WS: {e}");
+            let _ = client_tx.send(Message::Text(
+                serde_json::json!({"type":"error","message":format!("Agent unreachable: {e}")}).to_string().into()
+            )).await;
+            return;
+        }
+    };
+
+    tracing::info!(%id, %agent_url, "Proxy connected to agent");
+
+    let (mut agent_tx, mut agent_rx) = agent_ws.split();
+
+    // agent → dashboard
+    let id2 = id;
+    let a2d = tokio::spawn(async move {
+        while let Some(msg) = agent_rx.next().await {
+            let relay = match msg {
+                Ok(TsMsg::Binary(data)) => Some(Message::Binary(data.into())),
+                Ok(TsMsg::Text(t)) => Some(Message::Text(t.to_string().into())),
+                Ok(TsMsg::Close(_)) | Err(_) => break,
+                _ => None,
+            };
+            if let Some(m) = relay {
+                if client_tx.send(m).await.is_err() { break; }
+            }
+        }
+        tracing::debug!(%id2, "agent→dashboard relay ended");
+    });
+
+    // dashboard → agent
+    let id3 = id;
+    let d2a = tokio::spawn(async move {
+        while let Some(Ok(msg)) = client_rx.next().await {
+            let relay = match msg {
+                Message::Text(t) => Some(TsMsg::Text(t.to_string().into())),
+                Message::Binary(b) => Some(TsMsg::Binary(b.into())),
+                Message::Close(_) => break,
+                _ => None,
+            };
+            if let Some(m) = relay {
+                if agent_tx.send(m).await.is_err() { break; }
+            }
+        }
+        tracing::debug!(%id3, "dashboard→agent relay ended");
+    });
+
+    // When either direction ends, abort the other
+    tokio::select! {
+        _ = a2d => {},
+        _ = d2a => {},
+    }
+
+    tracing::info!(%id, "Proxy relay finished");
+}
+
 /// WebSocket upgrade handler.
 pub async fn ws_stream_handler(
     ws: WebSocketUpgrade,
@@ -48,16 +120,12 @@ async fn handle_stream(socket: WebSocket, id: Uuid, state: AppState) {
     tracing::info!(%id, "Stream WebSocket connected");
 
     // Try device lookup first (dashboard sends device_id), fall back to session lookup
-    let (serial, ip_address) = if let Ok(Some(device)) = ef_db::repo::device::DeviceRepo::find_by_id(&state.pool, id).await {
+    let device = if let Ok(Some(device)) = ef_db::repo::device::DeviceRepo::find_by_id(&state.pool, id).await {
         tracing::info!(%id, name = %device.name, "Found device directly");
-        let serial = device.serial.unwrap_or_else(|| "emulator-5554".to_string());
-        (serial, device.ip_address)
+        device
     } else if let Ok(Some(session)) = ef_db::repo::session::SessionRepo::find_by_id(&state.pool, id).await {
         match ef_db::repo::device::DeviceRepo::find_by_id(&state.pool, session.device_id).await {
-            Ok(Some(d)) => {
-                let serial = d.serial.unwrap_or_else(|| "emulator-5554".to_string());
-                (serial, d.ip_address)
-            }
+            Ok(Some(d)) => d,
             _ => {
                 let _ = ws_tx.send(Message::Text(
                     serde_json::json!({"type":"error","message":"Device not found for session"}).to_string().into()
@@ -72,26 +140,38 @@ async fn handle_stream(socket: WebSocket, id: Uuid, state: AppState) {
         return;
     };
 
-    // Auto-connect to remote device via ADB TCP if ip_address is set
-    let effective_serial = if let Some(ref ip) = ip_address {
+    let serial = device.serial.clone().unwrap_or_else(|| "emulator-5554".to_string());
+
+    // Check if device has a remote agent with a streaming URL
+    if let Some(agent_id) = device.agent_id {
+        if let Ok(Some(agent)) = ef_db::repo::agent::AgentRepo::find_by_id(&state.pool, agent_id).await {
+            if let Some(ref streaming_url) = agent.streaming_url {
+                tracing::info!(%id, %streaming_url, %serial, "Proxying stream to remote agent");
+                let agent_ws_url = format!("{}/ws/stream/{}", streaming_url.trim_end_matches('/'), serial)
+                    .replace("http://", "ws://").replace("https://", "wss://");
+                proxy_ws_to_agent(ws_tx, ws_rx, &agent_ws_url, id).await;
+                return;
+            }
+        }
+    }
+
+    // Local device — run capture directly
+    let effective_serial = if let Some(ref ip) = device.ip_address {
         let addr = format!("{ip}:5555");
         tracing::info!(%addr, "Auto-connecting ADB to remote device");
         let _ = tokio::process::Command::new("adb")
             .args(["connect", &addr])
             .output()
             .await;
-        // Use the network address as ADB serial
         addr
     } else {
         serial.clone()
     };
 
-    // Also get device screen resolution for coordinate mapping
     let resolution = get_device_resolution(&effective_serial).await;
 
-    tracing::info!(%id, serial = %effective_serial, ?resolution, "Starting screenshot stream");
+    tracing::info!(%id, serial = %effective_serial, ?resolution, "Starting local screenshot stream");
 
-    // Send stream_ready immediately — no handshake needed
     let _ = ws_tx.send(Message::Text(
         serde_json::json!({
             "type": "stream_ready",
@@ -326,11 +406,8 @@ async fn handle_logs(socket: WebSocket, device_id: Uuid, state: AppState) {
     let (mut ws_tx, mut ws_rx) = socket.split();
 
     // Look up device
-    let (serial, ip_address) = match ef_db::repo::device::DeviceRepo::find_by_id(&state.pool, device_id).await {
-        Ok(Some(d)) => {
-            let serial = d.serial.unwrap_or_else(|| "emulator-5554".to_string());
-            (serial, d.ip_address)
-        }
+    let device = match ef_db::repo::device::DeviceRepo::find_by_id(&state.pool, device_id).await {
+        Ok(Some(d)) => d,
         _ => {
             let _ = ws_tx.send(Message::Text(
                 serde_json::json!({"type":"error","message":"Device not found"}).to_string().into()
@@ -339,8 +416,23 @@ async fn handle_logs(socket: WebSocket, device_id: Uuid, state: AppState) {
         }
     };
 
-    // Auto-connect ADB TCP if needed
-    let effective_serial = if let Some(ref ip) = ip_address {
+    let serial = device.serial.clone().unwrap_or_else(|| "emulator-5554".to_string());
+
+    // Check for remote agent with streaming URL → proxy logs
+    if let Some(agent_id) = device.agent_id {
+        if let Ok(Some(agent)) = ef_db::repo::agent::AgentRepo::find_by_id(&state.pool, agent_id).await {
+            if let Some(ref streaming_url) = agent.streaming_url {
+                tracing::info!(%device_id, %streaming_url, %serial, "Proxying logs to remote agent");
+                let agent_ws_url = format!("{}/ws/logs/{}", streaming_url.trim_end_matches('/'), serial)
+                    .replace("http://", "ws://").replace("https://", "wss://");
+                proxy_ws_to_agent(ws_tx, ws_rx, &agent_ws_url, device_id).await;
+                return;
+            }
+        }
+    }
+
+    // Local device: run ADB logcat directly
+    let effective_serial = if let Some(ref ip) = device.ip_address {
         let addr = format!("{ip}:5555");
         let _ = tokio::process::Command::new("adb")
             .args(["connect", &addr])

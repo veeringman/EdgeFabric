@@ -9,6 +9,7 @@ mod discovery;
 mod executor;
 mod heartbeat;
 mod streaming;
+mod streaming_server;
 mod updater;
 
 use client::ControlPlaneClient;
@@ -52,6 +53,16 @@ async fn main() -> Result<()> {
     // ── Shared device registry ────────────────────────────────────
     let registry = Arc::new(DeviceRegistry::new());
 
+    // ── Build streaming URL for this agent ─────────────────────────
+    let streaming_port = cfg.agent.streaming_port.unwrap_or(7070);
+    let streaming_url = {
+        let addr = cfg.agent.advertise_address.clone()
+            .or_else(|| detect_local_ip())
+            .unwrap_or_else(|| "127.0.0.1".to_string());
+        format!("http://{addr}:{streaming_port}")
+    };
+    tracing::info!(%streaming_url, "Agent streaming URL");
+
     // ── P8.3 Device discovery loop ────────────────────────────────
     let discovery_handle = discovery::spawn_discovery_loop(
         Arc::clone(&cp_client),
@@ -59,6 +70,7 @@ async fn main() -> Result<()> {
         cfg.agent.agent_id.clone(),
         cfg.agent.region.clone(),
         cfg.agent.device_scan_interval_seconds,
+        Some(streaming_url),
         shutdown_rx.clone(),
     );
 
@@ -95,7 +107,15 @@ async fn main() -> Result<()> {
         Arc::clone(&registry),
     );
 
-    tracing::info!("Agent running — all subsystems active");
+    // ── Agent-local streaming HTTP/WS server ──────────────────────
+    let streaming_port = cfg.agent.streaming_port.unwrap_or(7070);
+    tokio::spawn(async move {
+        if let Err(e) = streaming_server::start_streaming_server(streaming_port).await {
+            tracing::error!("Streaming server failed: {e}");
+        }
+    });
+
+    tracing::info!(streaming_port, "Agent running — all subsystems active");
 
     // ── P8.8 Wait for shutdown signal ─────────────────────────────
     tokio::signal::ctrl_c().await?;
@@ -153,4 +173,13 @@ async fn connect_with_retry(
         );
         tokio::time::sleep(backoff).await;
     }
+}
+
+/// Detect a LAN-reachable IP address for this host.
+fn detect_local_ip() -> Option<String> {
+    // Connect to a non-routable address to find the default outgoing interface IP.
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("10.255.255.255:1").ok()?;
+    let addr = socket.local_addr().ok()?;
+    Some(addr.ip().to_string())
 }

@@ -27,6 +27,9 @@ pub struct RegisterDeviceRequest {
     pub capabilities: Vec<String>,
     pub agent_id: String,
     pub ip_address: Option<String>,
+    /// Agent's streaming WebSocket base URL for remote capture relay.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub streaming_url: Option<String>,
 }
 
 /// Heartbeat payload sent periodically.

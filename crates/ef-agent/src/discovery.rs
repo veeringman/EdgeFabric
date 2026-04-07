@@ -48,6 +48,7 @@ pub fn spawn_discovery_loop(
     agent_id: String,
     region: String,
     interval_secs: u64,
+    streaming_url: Option<String>,
     shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -68,7 +69,7 @@ pub fn spawn_discovery_loop(
                 }
             }
 
-            if let Err(e) = run_scan(&client, &registry, &agent_id, &region).await {
+            if let Err(e) = run_scan(&client, &registry, &agent_id, &region, streaming_url.as_deref()).await {
                 tracing::error!("Discovery scan failed: {e}");
             }
         }
@@ -80,6 +81,7 @@ async fn run_scan(
     registry: &DeviceRegistry,
     agent_id: &str,
     region: &str,
+    streaming_url: Option<&str>,
 ) -> anyhow::Result<()> {
     let discovered = DeviceDiscovery::scan_all().await?;
 
@@ -110,6 +112,7 @@ async fn run_scan(
                 capabilities: device.capabilities.clone(),
                 agent_id: agent_id.to_string(),
                 ip_address,
+                streaming_url: streaming_url.map(|s| s.to_string()),
             };
 
             match client.register_device(&req).await {

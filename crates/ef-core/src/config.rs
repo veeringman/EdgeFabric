@@ -75,6 +75,12 @@ pub struct AgentConfig {
     /// Skip TLS certificate verification (IP addresses, self-signed certs, test setups).
     #[serde(default)]
     pub tls_skip_verify: bool,
+    /// Port for the agent's local streaming HTTP/WS server (default 7070).
+    #[serde(default)]
+    pub streaming_port: Option<u16>,
+    /// The agent's externally reachable IP/hostname (auto-detected if absent).
+    #[serde(default)]
+    pub advertise_address: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -100,6 +100,14 @@ do_install() {
     info "Installing Rust..."
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
     source "$HOME/.cargo/env"
+  else
+    # Ensure Rust >= 1.85 (required for edition2024 crates)
+    RUST_VER="$(rustc --version | awk '{print $2}')"
+    RUST_MINOR="$(echo "$RUST_VER" | cut -d. -f2)"
+    if [[ "$RUST_MINOR" -lt 85 ]]; then
+      info "Rust $RUST_VER is too old (need >= 1.85). Updating..."
+      rustup update stable
+    fi
   fi
   ok "Rust $(rustc --version | awk '{print $2}')"
 

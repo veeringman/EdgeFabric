@@ -55,6 +55,37 @@ try {
         exit 1
     }
 
+    # Ensure MSVC link.exe is on PATH (needed by Rust on Windows)
+    if (-not (Get-Command "link.exe" -ErrorAction SilentlyContinue)) {
+        Write-Info "link.exe not found — loading VS Developer environment..."
+        $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+        if (Test-Path $vsWhere) {
+            $vsPath = & $vsWhere -latest -property installationPath 2>$null
+            if ($vsPath) {
+                $devShell = Join-Path $vsPath "Common7\Tools\Launch-VsDevShell.ps1"
+                if (Test-Path $devShell) {
+                    & $devShell -SkipAutomaticLocation 2>$null | Out-Null
+                    Write-Ok "VS Developer environment loaded"
+                } else {
+                    # Fallback: try vcvarsall.bat
+                    $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
+                    if (Test-Path $vcvars) {
+                        cmd /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
+                            if ($_ -match "^(.+?)=(.*)$") {
+                                [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
+                            }
+                        }
+                        Write-Ok "VS environment loaded via vcvars64.bat"
+                    }
+                }
+            }
+        }
+        if (-not (Get-Command "link.exe" -ErrorAction SilentlyContinue)) {
+            Write-Err "link.exe still not found. Open 'Developer PowerShell for VS 2022' and try again."
+            exit 1
+        }
+    }
+
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
     foreach ($target in $Targets) {

@@ -26,6 +26,7 @@ pub struct RegisterDeviceRequest {
     pub region: String,
     pub capabilities: Vec<String>,
     pub agent_id: String,
+    pub ip_address: Option<String>,
 }
 
 /// Heartbeat payload sent periodically.

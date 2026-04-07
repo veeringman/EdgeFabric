@@ -48,12 +48,16 @@ async fn handle_stream(socket: WebSocket, id: Uuid, state: AppState) {
     tracing::info!(%id, "Stream WebSocket connected");
 
     // Try device lookup first (dashboard sends device_id), fall back to session lookup
-    let serial = if let Ok(Some(device)) = ef_db::repo::device::DeviceRepo::find_by_id(&state.pool, id).await {
+    let (serial, ip_address) = if let Ok(Some(device)) = ef_db::repo::device::DeviceRepo::find_by_id(&state.pool, id).await {
         tracing::info!(%id, name = %device.name, "Found device directly");
-        device.serial.unwrap_or_else(|| "emulator-5554".to_string())
+        let serial = device.serial.unwrap_or_else(|| "emulator-5554".to_string());
+        (serial, device.ip_address)
     } else if let Ok(Some(session)) = ef_db::repo::session::SessionRepo::find_by_id(&state.pool, id).await {
         match ef_db::repo::device::DeviceRepo::find_by_id(&state.pool, session.device_id).await {
-            Ok(Some(d)) => d.serial.unwrap_or_else(|| "emulator-5554".to_string()),
+            Ok(Some(d)) => {
+                let serial = d.serial.unwrap_or_else(|| "emulator-5554".to_string());
+                (serial, d.ip_address)
+            }
             _ => {
                 let _ = ws_tx.send(Message::Text(
                     serde_json::json!({"type":"error","message":"Device not found for session"}).to_string().into()
@@ -68,18 +72,36 @@ async fn handle_stream(socket: WebSocket, id: Uuid, state: AppState) {
         return;
     };
 
-    tracing::info!(%id, %serial, "Starting screenshot stream");
+    // Auto-connect to remote device via ADB TCP if ip_address is set
+    let effective_serial = if let Some(ref ip) = ip_address {
+        let addr = format!("{ip}:5555");
+        tracing::info!(%addr, "Auto-connecting ADB to remote device");
+        let _ = tokio::process::Command::new("adb")
+            .args(["connect", &addr])
+            .output()
+            .await;
+        // Use the network address as ADB serial
+        addr
+    } else {
+        serial.clone()
+    };
+
+    // Also get device screen resolution for coordinate mapping
+    let resolution = get_device_resolution(&effective_serial).await;
+
+    tracing::info!(%id, serial = %effective_serial, ?resolution, "Starting screenshot stream");
 
     // Send stream_ready immediately — no handshake needed
     let _ = ws_tx.send(Message::Text(
         serde_json::json!({
             "type": "stream_ready",
             "device_id": id,
-            "serial": serial,
+            "serial": effective_serial,
+            "resolution": resolution,
         }).to_string().into()
     )).await;
 
-    run_screenshot_loop(ws_tx, ws_rx, &serial, id).await;
+    run_screenshot_loop(ws_tx, ws_rx, &effective_serial, id).await;
 
     tracing::info!(%id, "Stream ended");
 }
@@ -162,9 +184,9 @@ async fn run_screenshot_loop(
             handle_input_event(&serial_owned, &event_json).await;
         }
 
-        // ~5 FPS
+        // ~15 FPS target (actual limited by capture latency)
         tokio::select! {
-            _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {}
+            _ = tokio::time::sleep(std::time::Duration::from_millis(66)) => {}
             _ = stop_rx.changed() => break,
         }
     }
@@ -172,8 +194,30 @@ async fn run_screenshot_loop(
     tracing::info!(%session_id, frame_count, "Screenshot stream ended");
 }
 
-/// Capture a single screenshot via `adb exec-out screencap -p`.
+/// Capture a screenshot via ADB, compress to JPEG and downscale via ffmpeg.
+/// Falls back to raw PNG if ffmpeg is unavailable.
 async fn capture_screenshot(serial: &str) -> anyhow::Result<Vec<u8>> {
+    // Try ffmpeg pipeline: screencap → downscale to 540px wide → JPEG quality 10
+    // This reduces frame size from ~1.2MB PNG to ~60KB JPEG
+    let mut child = tokio::process::Command::new("sh")
+        .args([
+            "-c",
+            &format!(
+                "adb -s {} exec-out screencap -p | ffmpeg -y -i - -vframes 1 -f mjpeg -q:v 10 -vf scale=540:-1 -",
+                shell_escape(serial)
+            ),
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+
+    let output = child.wait_with_output().await?;
+
+    if output.status.success() && output.stdout.len() > 100 {
+        return Ok(output.stdout);
+    }
+
+    // Fallback: raw PNG screencap
     let output = tokio::process::Command::new("adb")
         .args(["-s", serial, "exec-out", "screencap", "-p"])
         .stdout(Stdio::piped())
@@ -191,6 +235,15 @@ async fn capture_screenshot(serial: &str) -> anyhow::Result<Vec<u8>> {
     }
 
     Ok(output.stdout)
+}
+
+/// Simple shell argument escaping (allow alphanumeric, dots, colons, dashes).
+fn shell_escape(s: &str) -> String {
+    if s.chars().all(|c| c.is_alphanumeric() || ".-_:".contains(c)) {
+        s.to_string()
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
 }
 
 /// Handle an input event by dispatching ADB commands.
@@ -242,4 +295,22 @@ async fn handle_input_event(serial: &str, event_json: &str) {
         .stderr(Stdio::null())
         .status()
         .await;
+}
+
+/// Query device screen resolution via `adb shell wm size`.
+/// Returns [width, height] e.g. [1080, 2340].
+async fn get_device_resolution(serial: &str) -> Option<[u32; 2]> {
+    let output = tokio::process::Command::new("adb")
+        .args(["-s", serial, "shell", "wm", "size"])
+        .output()
+        .await
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // "Physical size: 1080x2340"
+    let line = stdout.lines().find(|l| l.contains("Physical size"))?;
+    let dims = line.split(':').nth(1)?.trim();
+    let mut parts = dims.split('x');
+    let w: u32 = parts.next()?.parse().ok()?;
+    let h: u32 = parts.next()?.parse().ok()?;
+    Some([w, h])
 }

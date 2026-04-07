@@ -1,7 +1,7 @@
 # EdgeFabric — Development Configuration (overrides default.toml)
 
 [server]
-host = "127.0.0.1"
+host = "0.0.0.0"
 
 [auth]
 jwt_secret = "dev-secret-not-for-production"

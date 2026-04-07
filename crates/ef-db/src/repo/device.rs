@@ -16,6 +16,7 @@ pub struct DeviceRow {
     pub region: String,
     pub capabilities: Vec<String>,
     pub agent_id: Option<Uuid>,
+    pub ip_address: Option<String>,
     pub registered_at: DateTime<Utc>,
     pub last_heartbeat: Option<DateTime<Utc>>,
     pub updated_at: DateTime<Utc>,
@@ -38,7 +39,7 @@ impl DeviceRepo {
             r#"INSERT INTO devices (name, serial, os, os_version, kind, region, capabilities, status)
                VALUES ($1, $2, $3::device_os, $4, $5::device_kind, $6, $7, 'available'::device_status)
                RETURNING id, name, serial, os::text, os_version, kind::text, status::text,
-                         region, capabilities, agent_id, registered_at, last_heartbeat, updated_at"#,
+                         region, capabilities, agent_id, ip_address, registered_at, last_heartbeat, updated_at"#,
         )
         .bind(name)
         .bind(serial)
@@ -64,7 +65,7 @@ impl DeviceRepo {
             r#"UPDATE devices SET name = $2, serial = $3, os_version = $4, region = $5, capabilities = $6
                WHERE id = $1
                RETURNING id, name, serial, os::text, os_version, kind::text, status::text,
-                         region, capabilities, agent_id, registered_at, last_heartbeat, updated_at"#,
+                         region, capabilities, agent_id, ip_address, registered_at, last_heartbeat, updated_at"#,
         )
         .bind(id)
         .bind(name)
@@ -79,7 +80,7 @@ impl DeviceRepo {
     pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<DeviceRow>, sqlx::Error> {
         sqlx::query_as::<_, DeviceRow>(
             r#"SELECT id, name, serial, os::text, os_version, kind::text, status::text,
-                      region, capabilities, agent_id, registered_at, last_heartbeat, updated_at
+                      region, capabilities, agent_id, ip_address, registered_at, last_heartbeat, updated_at
                FROM devices WHERE id = $1"#,
         )
         .bind(id)
@@ -90,7 +91,7 @@ impl DeviceRepo {
     pub async fn list(pool: &PgPool) -> Result<Vec<DeviceRow>, sqlx::Error> {
         sqlx::query_as::<_, DeviceRow>(
             r#"SELECT id, name, serial, os::text, os_version, kind::text, status::text,
-                      region, capabilities, agent_id, registered_at, last_heartbeat, updated_at
+                      region, capabilities, agent_id, ip_address, registered_at, last_heartbeat, updated_at
                FROM devices ORDER BY registered_at"#,
         )
         .fetch_all(pool)
@@ -104,7 +105,7 @@ impl DeviceRepo {
     ) -> Result<Vec<DeviceRow>, sqlx::Error> {
         sqlx::query_as::<_, DeviceRow>(
             r#"SELECT id, name, serial, os::text, os_version, kind::text, status::text,
-                      region, capabilities, agent_id, registered_at, last_heartbeat, updated_at
+                      region, capabilities, agent_id, ip_address, registered_at, last_heartbeat, updated_at
                FROM devices
                WHERE status = 'available'
                  AND ($1::text IS NULL OR os::text = $1)
@@ -162,20 +163,22 @@ impl DeviceRepo {
         region: &str,
         capabilities: &[String],
         agent_id: Uuid,
+        ip_address: Option<&str>,
     ) -> Result<DeviceRow, sqlx::Error> {
         sqlx::query_as::<_, DeviceRow>(
-            r#"INSERT INTO devices (name, serial, os, os_version, kind, region, capabilities, status, agent_id)
-               VALUES ($1, $2, $3::device_os, $4, $5::device_kind, $6, $7, 'available'::device_status, $8)
+            r#"INSERT INTO devices (name, serial, os, os_version, kind, region, capabilities, status, agent_id, ip_address)
+               VALUES ($1, $2, $3::device_os, $4, $5::device_kind, $6, $7, 'available'::device_status, $8, $9)
                ON CONFLICT (serial) WHERE serial IS NOT NULL DO UPDATE SET
                    name = EXCLUDED.name,
                    os_version = EXCLUDED.os_version,
                    region = EXCLUDED.region,
                    capabilities = EXCLUDED.capabilities,
                    agent_id = EXCLUDED.agent_id,
+                   ip_address = EXCLUDED.ip_address,
                    status = 'available'::device_status,
                    last_heartbeat = now()
                RETURNING id, name, serial, os::text, os_version, kind::text, status::text,
-                         region, capabilities, agent_id, registered_at, last_heartbeat, updated_at"#,
+                         region, capabilities, agent_id, ip_address, registered_at, last_heartbeat, updated_at"#,
         )
         .bind(name)
         .bind(serial)
@@ -185,6 +188,7 @@ impl DeviceRepo {
         .bind(region)
         .bind(capabilities)
         .bind(agent_id)
+        .bind(ip_address)
         .fetch_one(pool)
         .await
     }

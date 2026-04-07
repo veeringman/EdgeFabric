@@ -97,6 +97,9 @@ async fn run_scan(
     for (serial, device) in &current_serials {
         let already_known = registry.known.read().await.contains_key(serial);
         if !already_known {
+            // Try to get device IP for remote ADB access
+            let ip_address = get_device_ip(serial).await;
+
             let req = RegisterDeviceRequest {
                 name: device.name.clone(),
                 serial: Some(serial.clone()),
@@ -106,6 +109,7 @@ async fn run_scan(
                 region: region.to_string(),
                 capabilities: device.capabilities.clone(),
                 agent_id: agent_id.to_string(),
+                ip_address,
             };
 
             match client.register_device(&req).await {
@@ -143,4 +147,30 @@ async fn run_scan(
     }
 
     Ok(())
+}
+
+/// Get the WiFi IP address of an ADB device for remote streaming.
+/// Runs `adb -s <serial> shell ip route` and parses the src address.
+async fn get_device_ip(serial: &str) -> Option<String> {
+    let output = tokio::process::Command::new("adb")
+        .args(["-s", serial, "shell", "ip", "route"])
+        .output()
+        .await
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Parse lines like: "192.168.29.0/24 dev wlan0 proto kernel scope link src 192.168.29.5"
+    for line in stdout.lines() {
+        if let Some(idx) = line.find("src ") {
+            let ip = line[idx + 4..].split_whitespace().next()?;
+            if !ip.starts_with("127.") {
+                return Some(ip.to_string());
+            }
+        }
+    }
+    None
 }

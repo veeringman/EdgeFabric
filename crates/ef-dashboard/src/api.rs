@@ -18,6 +18,15 @@ fn auth_header() -> String {
     format!("Bearer {}", token().unwrap_or_default())
 }
 
+/// Redirect to /login when the server says our token is invalid/expired.
+fn handle_unauthorized() {
+    let _ = gloo_storage::LocalStorage::delete("ef_token");
+    let _ = gloo_storage::LocalStorage::delete("ef_tenant");
+    if let Some(w) = web_sys::window() {
+        let _ = w.location().set_href("/login");
+    }
+}
+
 /// Generic JSON GET
 pub async fn get<T: DeserializeOwned>(path: &str) -> Result<T, String> {
     let resp = Request::get(&format!("{}{path}", base_url()))
@@ -25,6 +34,11 @@ pub async fn get<T: DeserializeOwned>(path: &str) -> Result<T, String> {
         .send()
         .await
         .map_err(|e| e.to_string())?;
+
+    if resp.status() == 401 {
+        handle_unauthorized();
+        return Err("Session expired".into());
+    }
 
     if !resp.ok() {
         let status = resp.status();
@@ -46,6 +60,11 @@ pub async fn post<B: Serialize, T: DeserializeOwned>(path: &str, body: &B) -> Re
         .await
         .map_err(|e| e.to_string())?;
 
+    if resp.status() == 401 {
+        handle_unauthorized();
+        return Err("Session expired".into());
+    }
+
     if !resp.ok() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
@@ -66,6 +85,11 @@ pub async fn put<B: Serialize, T: DeserializeOwned>(path: &str, body: &B) -> Res
         .await
         .map_err(|e| e.to_string())?;
 
+    if resp.status() == 401 {
+        handle_unauthorized();
+        return Err("Session expired".into());
+    }
+
     if !resp.ok() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
@@ -82,6 +106,11 @@ pub async fn delete(path: &str) -> Result<(), String> {
         .send()
         .await
         .map_err(|e| e.to_string())?;
+
+    if resp.status() == 401 {
+        handle_unauthorized();
+        return Err("Session expired".into());
+    }
 
     if !resp.ok() {
         let status = resp.status();

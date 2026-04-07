@@ -22,6 +22,7 @@ pub struct AgentRegisterDeviceRequest {
     #[serde(default)]
     pub capabilities: Vec<String>,
     pub agent_id: String,
+    pub ip_address: Option<String>,
 }
 
 fn default_kind() -> String { "real".into() }
@@ -68,6 +69,7 @@ pub async fn register_device(
         &body.region,
         &body.capabilities,
         agent_uuid,
+        body.ip_address.as_deref(),
     )
     .await
     .map_err(|e| {

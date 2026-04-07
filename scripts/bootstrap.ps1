@@ -76,4 +76,6 @@ if ($SkipDocker)  { $installArgs += "-SkipDocker" }
 if ($SkipRust)    { $installArgs += "-SkipRust" }
 if ($SkipAndroid) { $installArgs += "-SkipAndroid" }
 
-& (Join-Path $InstallDir "scripts\install.ps1") @installArgs
+# Bypass execution policy for the install script (user already consented by running bootstrap)
+$installScript = Join-Path $InstallDir "scripts\install.ps1"
+powershell.exe -ExecutionPolicy Bypass -File $installScript @installArgs

@@ -386,11 +386,47 @@ async fn handle_input_event(serial: &str, os: &str, event_json: &str) {
 
     match os {
         "ios" => {
-            // iOS input via idevice tools is very limited — log for now
-            tracing::debug!(%serial, %etype, "iOS input event (not yet implemented)");
+            tracing::info!(%serial, %etype, "iOS input event");
+            match etype {
+                "home" => {
+                    // Simulate home press via Instruments protocol (DDI must be mounted)
+                    // Fallback: use idevicediagnostics to trigger diagnostics that returns to home
+                    let _ = tokio::process::Command::new("idevicediagnostics")
+                        .args(["-u", serial, "diagnostics", "HomeDiagnostics"])
+                        .stderr(Stdio::null())
+                        .stdout(Stdio::null())
+                        .status()
+                        .await;
+                }
+                "key" => {
+                    let code = event.get("keycode").and_then(|v| v.as_str()).unwrap_or("");
+                    match code {
+                        "KEYCODE_POWER" => {
+                            let _ = tokio::process::Command::new("idevicediagnostics")
+                                .args(["-u", serial, "sleep"])
+                                .stderr(Stdio::null())
+                                .stdout(Stdio::null())
+                                .status()
+                                .await;
+                        }
+                        _ => {
+                            tracing::debug!(%serial, %code, "iOS key event not supported without WDA");
+                        }
+                    }
+                }
+                "tap" | "swipe" => {
+                    // Touch input requires WebDriverAgent (Xcode/XCTest)
+                    // or pymobiledevice3 DVT (iOS 16+ only)
+                    tracing::debug!(%serial, %etype, "iOS touch input requires WDA — not available");
+                }
+                _ => {
+                    tracing::debug!(%serial, %etype, "iOS input event not supported");
+                }
+            }
         }
         _ => {
             // Android via ADB
+            tracing::info!(%serial, %etype, "Android input event");
             let args: Vec<String> = match etype {
                 "tap" => {
                     let x = event["x"].as_f64().unwrap_or(0.0);
@@ -427,7 +463,15 @@ async fn handle_input_event(serial: &str, os: &str, event_json: &str) {
                                  "keyevent".into(), "KEYCODE_APP_SWITCH".into()],
                 _ => return,
             };
-            let _ = tokio::process::Command::new("adb").args(&args).output().await;
+            match tokio::process::Command::new("adb").args(&args).output().await {
+                Ok(out) => {
+                    if !out.status.success() {
+                        let stderr = String::from_utf8_lossy(&out.stderr);
+                        tracing::warn!(%serial, %etype, %stderr, "ADB input command failed");
+                    }
+                }
+                Err(e) => tracing::error!(%serial, %etype, %e, "Failed to run ADB input"),
+            }
         }
     }
 }

@@ -5,27 +5,94 @@ use wasm_bindgen::JsCast;
 use crate::api::{self, DeviceListResponse};
 use crate::components::status_badge::StatusBadge;
 
+/// Device info passed from card selection to the viewer.
+#[derive(Clone, Debug)]
+struct SelectedDevice {
+    id: String,
+    name: String,
+    os: String,
+    os_version: String,
+    serial: Option<String>,
+    kind: String,
+    capabilities: Vec<String>,
+}
+
+/// Extract the bezel style from capabilities (e.g. "bezel:iphone-modern" → "iphone-modern").
+/// Returns a sensible default based on OS version if not set.
+fn bezel_from_caps(caps: &[String], os: &str, os_version: &str) -> String {
+    for cap in caps {
+        if let Some(val) = cap.strip_prefix("bezel:") {
+            return val.to_string();
+        }
+    }
+    // Auto-detect from OS version for iOS
+    if os == "ios" {
+        let ver: f32 = os_version.split('.').next().unwrap_or("0").parse().unwrap_or(0.0);
+        if ver >= 16.0 { return "iphone-island".into(); }
+        if ver >= 14.0 { return "iphone-modern".into(); }
+        if ver >= 11.0 { return "iphone-notch".into(); }
+        return "iphone-classic".into();
+    }
+    // Auto-detect from device name / manufacturer for Android
+    if os == "android" {
+        let name_lower: String = caps.iter()
+            .find(|c| c.starts_with("model:"))
+            .map(|c| c[6..].to_lowercase())
+            .unwrap_or_default();
+        if name_lower.contains("pixel") { return "pixel".into(); }
+        if name_lower.contains("oneplus") { return "oneplus".into(); }
+        if name_lower.contains("xiaomi") || name_lower.contains("redmi") { return "xiaomi".into(); }
+        if name_lower.contains("nothing") { return "nothing".into(); }
+        if name_lower.contains("moto") || name_lower.contains("razr") { return "motorola".into(); }
+        if name_lower.contains("xperia") { return "xperia".into(); }
+        if name_lower.contains("huawei") || name_lower.contains("mate") { return "huawei".into(); }
+        if name_lower.contains("oppo") || name_lower.contains("realme") || name_lower.contains("find") { return "oppo".into(); }
+        if name_lower.contains("rog") || name_lower.contains("asus") { return "rog".into(); }
+        if name_lower.contains("fold") || name_lower.contains("sm-f9") { return "galaxy-fold".into(); }
+        if name_lower.contains("flip") || name_lower.contains("sm-f7") { return "galaxy-flip".into(); }
+        if name_lower.contains("sm-a") { return "galaxy-a".into(); }
+        return "galaxy-s".into(); // default Android
+    }
+    "galaxy-s".into()
+}
+
 /// Live session viewer — screenshot streaming via WebSocket + input relay.
 #[component]
 pub fn LiveSessionsPage() -> impl IntoView {
-    let (selected_device, set_selected_device) = signal(Option::<(String, String, String)>::None);
+    let (selected_device, set_selected_device) = signal(Option::<SelectedDevice>::None);
+    let (refresh, set_refresh) = signal(0u32);
 
-    let devices = LocalResource::new(|| async {
-        api::get::<DeviceListResponse>("/devices")
-            .await
-            .unwrap_or_default()
+    // Auto-refresh device list every 5 seconds
+    Effect::new(move || {
+        let handle = gloo_timers::callback::Interval::new(5_000, move || {
+            set_refresh.update(|n| *n = n.wrapping_add(1));
+        });
+        std::mem::forget(handle);
+    });
+
+    let devices = LocalResource::new(move || {
+        let _ = refresh.get();
+        async move {
+            api::get::<DeviceListResponse>("/devices")
+                .await
+                .unwrap_or_default()
+        }
     });
 
     view! {
         <h1 style="margin-bottom: 1rem">"Live Device Viewer"</h1>
 
         {move || {
-            if let Some((dev_id, dev_name, dev_os)) = selected_device.get() {
+            if let Some(sel) = selected_device.get() {
                 view! {
                     <DeviceViewer
-                        device_id=dev_id.clone()
-                        device_name=dev_name.clone()
-                        device_os=dev_os.clone()
+                        device_id=sel.id.clone()
+                        device_name=sel.name.clone()
+                        device_os=sel.os.clone()
+                        device_os_version=sel.os_version.clone()
+                        device_serial=sel.serial.clone()
+                        device_kind=sel.kind.clone()
+                        device_capabilities=sel.capabilities.clone()
                         on_close=move || set_selected_device.set(None)
                     />
                 }.into_any()
@@ -36,7 +103,7 @@ pub fn LiveSessionsPage() -> impl IntoView {
                         <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem">
                             "Select a device to view its screen in real-time and interact with it."
                         </p>
-                        <Suspense fallback=move || view! { <div class="loading">"Loading…"</div> }>
+                        <Transition fallback=move || view! { <div class="loading">"Loading…"</div> }>
                             {move || devices.get().as_deref().map(|data| {
                                 let streamable: Vec<_> = data.devices.iter()
                                     .filter(|d| d.status == "available" || d.status == "busy")
@@ -48,9 +115,18 @@ pub fn LiveSessionsPage() -> impl IntoView {
                                 view! {
                                     <div class="device-grid">
                                         {streamable.into_iter().map(|d| {
-                                            let dev_id = d.id.clone();
-                                            let dev_name = d.name.clone();
-                                            let dev_os = d.os.clone();
+                                            let caps: Vec<String> = d.capabilities.as_array()
+                                                .map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                                                .unwrap_or_default();
+                                            let sel = SelectedDevice {
+                                                id: d.id.clone(),
+                                                name: d.name.clone(),
+                                                os: d.os.clone(),
+                                                os_version: d.os_version.clone(),
+                                                serial: d.serial.clone(),
+                                                kind: d.kind.clone(),
+                                                capabilities: caps,
+                                            };
                                             let os_icon = if d.os == "android" { "🤖" } else if d.os == "ios" { "🍎" } else if d.os == "iot" { "🔌" } else { "📱" };
                                             let status = d.status.clone();
                                             let os_label = if d.os == "android" { "Android".to_string() }
@@ -60,7 +136,7 @@ pub fn LiveSessionsPage() -> impl IntoView {
                                             let status = d.status.clone();
                                             view! {
                                                 <div class="device-card" on:click=move |_| {
-                                                    set_selected_device.set(Some((dev_id.clone(), dev_name.clone(), dev_os.clone())));
+                                                    set_selected_device.set(Some(sel.clone()));
                                                 }>
                                                     <div class="device-card-icon">{os_icon}</div>
                                                     <div class="device-card-name">{d.name.clone()}</div>
@@ -75,7 +151,7 @@ pub fn LiveSessionsPage() -> impl IntoView {
                                     </div>
                                 }.into_any()
                             })}
-                        </Suspense>
+                        </Transition>
                     </div>
                 }.into_any()
             }
@@ -89,6 +165,10 @@ fn DeviceViewer(
     device_id: String,
     device_name: String,
     device_os: String,
+    device_os_version: String,
+    device_serial: Option<String>,
+    device_kind: String,
+    device_capabilities: Vec<String>,
     on_close: impl Fn() + Send + Sync + 'static,
 ) -> impl IntoView {
     let img_ref = NodeRef::<leptos::html::Img>::new();
@@ -104,9 +184,32 @@ fn DeviceViewer(
     let (cmd_history, set_cmd_history) = signal(Vec::<String>::new());
     let (history_idx, set_history_idx) = signal(Option::<usize>::None);
 
+    // Log panel signals
+    let (log_lines, set_log_lines) = signal(Vec::<(String, String, String)>::new()); // (level, tag, message)
+    let (log_open, set_log_open) = signal(false);
+    let (log_connected, set_log_connected) = signal(false);
+    let (log_filter, set_log_filter) = signal(String::from("all"));
+    let (log_ws_handle, set_log_ws_handle) = signal(Option::<web_sys::WebSocket>::None);
+
+    let initial_bezel = bezel_from_caps(&device_capabilities, &device_os, &device_os_version);
+    let (bezel_style, set_bezel_style) = signal(initial_bezel);
+
     let dev_id = device_id.clone();
+    let log_dev_id = device_id.clone();
     let is_android = device_os == "android";
+    let is_ios = device_os == "ios";
     let is_iot = device_os == "iot";
+
+    // Pre-clone for branches that need them
+    let iot_os_label = format!("{} {}", device_os, device_os_version);
+    let phone_os_label = iot_os_label.clone();
+    let iot_serial_display = device_serial.clone().unwrap_or_else(|| "—".into());
+    let phone_serial_display = device_serial.unwrap_or_else(|| "—".into());
+    let phone_kind = device_kind.clone();
+    let iot_name = device_name.clone();
+    let phone_name = device_name.clone();
+    let phone_name2 = device_name;
+    let bezel_dev_id = device_id.clone();
 
     // FPS counter
     let last_frame_time = std::cell::Cell::new(0.0f64);
@@ -216,6 +319,74 @@ fn DeviceViewer(
             onerror.forget();
 
             set_ws_handle.set(Some(ws));
+        });
+    });
+
+    // ── Log WebSocket (connects when log_open toggles on) ─────────
+
+    Effect::new(move || {
+        let open = log_open.get();
+        if !open {
+            // Closing: disconnect
+            if let Some(ws) = log_ws_handle.get_untracked() {
+                let _ = ws.close();
+            }
+            set_log_ws_handle.set(None);
+            set_log_connected.set(false);
+            return;
+        }
+
+        let log_id = log_dev_id.clone();
+        let set_log_connected = set_log_connected.clone();
+        let set_log_lines = set_log_lines.clone();
+        let set_log_ws_handle = set_log_ws_handle.clone();
+
+        leptos::task::spawn_local(async move {
+            let host = web_sys::window()
+                .and_then(|w| w.location().hostname().ok())
+                .unwrap_or_else(|| "localhost".to_string());
+            let ws_url = format!("ws://{host}:6060/api/v1/devices/{log_id}/logs");
+
+            let ws = match web_sys::WebSocket::new(&ws_url) {
+                Ok(ws) => ws,
+                Err(_) => return,
+            };
+
+            let onopen = Closure::wrap(Box::new(move |_: web_sys::Event| {
+                set_log_connected.set(true);
+            }) as Box<dyn FnMut(_)>);
+            ws.set_onopen(Some(onopen.as_ref().unchecked_ref()));
+            onopen.forget();
+
+            let onmessage = Closure::wrap(Box::new(move |evt: web_sys::MessageEvent| {
+                if let Ok(text) = evt.data().dyn_into::<js_sys::JsString>() {
+                    let s: String = text.into();
+                    if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&s) {
+                        if msg.get("type").and_then(|t| t.as_str()) == Some("log") {
+                            let level = msg.get("level").and_then(|v| v.as_str()).unwrap_or("info").to_string();
+                            let tag = msg.get("tag").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            let message = msg.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            set_log_lines.update(|lines| {
+                                lines.push((level, tag, message));
+                                if lines.len() > 1000 {
+                                    lines.drain(..300);
+                                }
+                            });
+                            // Auto-scroll
+                            if let Some(el) = web_sys::window()
+                                .and_then(|w| w.document())
+                                .and_then(|d| d.get_element_by_id("inline-log-viewer"))
+                            {
+                                el.set_scroll_top(el.scroll_height());
+                            }
+                        }
+                    }
+                }
+            }) as Box<dyn FnMut(_)>);
+            ws.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
+            onmessage.forget();
+
+            set_log_ws_handle.set(Some(ws));
         });
     });
 
@@ -431,7 +602,15 @@ fn DeviceViewer(
                         <div class="stream-info" style="margin-top: 0.75rem;">
                             <div class="info-row">
                                 <span class="info-label">"Device"</span>
-                                <span>{device_name.clone()}</span>
+                                <span>{iot_name}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">"OS"</span>
+                                <span>{iot_os_label}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">"Serial"</span>
+                                <span class="mono" style="font-size: 0.75rem">{iot_serial_display}</span>
                             </div>
                             <div class="info-row">
                                 <span class="info-label">"Status"</span>
@@ -457,11 +636,37 @@ fn DeviceViewer(
                 <>
             // ── Phone simulator ──
             <div class="phone-wrapper">
-                <div class={if is_android { "phone-frame android" } else { "phone-frame ios" }}>
-                    // Top bezel (notch / camera area)
-                    <div class="phone-notch">
-                        <div class="phone-camera"></div>
-                    </div>
+                <div class={move || if is_android { format!("phone-frame android {}", bezel_style.get()) } else { format!("phone-frame ios {}", bezel_style.get()) }}>
+                    // Top bezel
+                    {if is_android {
+                        view! {
+                            <div class={move || format!("phone-notch {}", match bezel_style.get().as_str() {
+                                "pixel" => "android-punch-hole pixel-bar",
+                                "galaxy-fold" => "android-punch-hole",
+                                "rog" => "android-punch-hole",
+                                _ => "android-punch-hole",
+                            })}>
+                                {move || match bezel_style.get().as_str() {
+                                    "pixel" => view! { <div class="pixel-camera-dot"></div> }.into_any(),
+                                    _ => view! { <div class="android-hole-punch"></div> }.into_any(),
+                                }}
+                            </div>
+                        }.into_any()
+                    } else {
+                        view! {
+                            <div class={move || format!("phone-notch {}", match bezel_style.get().as_str() {
+                                "iphone-classic" => "ios-classic-top",
+                                "iphone-notch" | "iphone-modern" => "ios-notch",
+                                _ => "ios-notch",
+                            })}>
+                                {move || match bezel_style.get().as_str() {
+                                    "iphone-classic" => view! { <div class="phone-speaker"></div> }.into_any(),
+                                    "iphone-island" => view! { <div class="dynamic-island"></div> }.into_any(),
+                                    _ => view! { <div class="ios-notch-cutout"></div> }.into_any(),
+                                }}
+                            </div>
+                        }.into_any()
+                    }}
 
                     // Screen area — interactive
                     <div class="phone-screen"
@@ -472,18 +677,48 @@ fn DeviceViewer(
                     >
                         <Show
                             when=move || connected.get()
-                            fallback=|| view! {
-                                <div class="phone-screen-placeholder">
-                                    <div class="spinner"></div>
-                                    <span>"Connecting to device…"</span>
-                                </div>
+                            fallback=move || {
+                                if is_ios {
+                                    view! {
+                                        <div class="phone-screen-placeholder ios-boot">
+                                            <span class="apple-logo">"" </span>
+                                        </div>
+                                    }.into_any()
+                                } else {
+                                    view! {
+                                        <div class="phone-screen-placeholder">
+                                            <div class="spinner"></div>
+                                            <span>"Connecting to device…"</span>
+                                        </div>
+                                    }.into_any()
+                                }
                             }
                         >
                             <img id="stream-img" node_ref=img_ref
                                  draggable="false"
-                                 style="width: 100%; height: 100%; object-fit: cover; user-select: none; -webkit-user-drag: none;"
-                                 alt="Device screen"
+                                 style="width: 100%; height: 100%; object-fit: cover; user-select: none; -webkit-user-drag: none; color: transparent;"
+                                 alt=""
                             />
+                            // Overlay until first frame arrives
+                            <Show when=move || frame_count.get() == 0>
+                                {if is_ios {
+                                    view! {
+                                        <div class="phone-screen-placeholder ios-boot" style="position:absolute;inset:0;z-index:2;">
+                                            <span class="apple-logo">"" </span>
+                                            <div class="ios-progress-bar">
+                                                <div class="ios-progress-fill"></div>
+                                            </div>
+                                        </div>
+                                    }.into_any()
+                                } else {
+                                    view! {
+                                        <div class="phone-screen-placeholder" style="position:absolute;inset:0;z-index:2;">
+                                            <div class="spinner"></div>
+                                            <span>"Waiting for stream…"</span>
+                                        </div>
+                                    }.into_any()
+                                }}
+                            </Show>
                         </Show>
                     </div>
 
@@ -504,26 +739,54 @@ fn DeviceViewer(
                         }.into_any()
                     } else {
                         view! {
-                            <div class="phone-navbar ios-navbar">
-                                <div class="ios-home-indicator"></div>
-                            </div>
+                            {move || match bezel_style.get().as_str() {
+                                "iphone-classic" => view! {
+                                    <div class="phone-navbar ios-navbar classic-navbar">
+                                        <div class="ios-home-button"></div>
+                                    </div>
+                                }.into_any(),
+                                _ => view! {
+                                    <div class="phone-navbar ios-navbar">
+                                        <div class="ios-home-indicator"></div>
+                                    </div>
+                                }.into_any(),
+                            }}
                         }.into_any()
                     }}
                 </div>
 
                 // Side buttons
-                <div class="phone-side-buttons">
-                    <button class="side-btn power-btn" on:click=send_power title="Power">"⏻"</button>
-                    <button class="side-btn vol-btn" on:click=send_vol_up title="Volume Up">"+"</button>
-                    <button class="side-btn vol-btn" on:click=send_vol_down title="Volume Down">"−"</button>
-                </div>
+                {if is_android {
+                    view! {
+                        <div class="phone-side-buttons side-right">
+                            <button class="side-btn power-btn" on:click=send_power title="Power">"⏻"</button>
+                            <button class="side-btn vol-btn" on:click=send_vol_up title="Volume Up">"+"</button>
+                            <button class="side-btn vol-btn" on:click=send_vol_down title="Volume Down">"−"</button>
+                        </div>
+                    }.into_any()
+                } else {
+                    view! {
+                        <>
+                        // iOS: power button on the right
+                        <div class="phone-side-buttons side-right">
+                            <button class="side-btn power-btn ios-power" on:click=send_power title="Side Button">"⏻"</button>
+                        </div>
+                        // iOS: volume + action button on the left
+                        <div class="phone-side-buttons side-left">
+                            <button class="side-btn ios-action-btn" title="Action Button">"⊚"</button>
+                            <button class="side-btn vol-btn" on:click=send_vol_up title="Volume Up">"+"</button>
+                            <button class="side-btn vol-btn" on:click=send_vol_down title="Volume Down">"−"</button>
+                        </div>
+                        </>
+                    }.into_any()
+                }}
             </div>
 
             // ── Info panel ──
             <div class="viewer-panel">
                 <div class="card">
                     <div class="card-header">
-                        <h2>{device_name.clone()}</h2>
+                        <h2>{phone_name2}</h2>
                         <button class="btn btn-ghost btn-sm" on:click=move |_| {
                             if let Some(ws) = ws_handle.get_untracked() {
                                 let _ = ws.close();
@@ -547,7 +810,84 @@ fn DeviceViewer(
                         </div>
                         <div class="info-row">
                             <span class="info-label">"Device"</span>
-                            <span>{device_name}</span>
+                            <span>{phone_name}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">"OS"</span>
+                            <span>{phone_os_label}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">"Kind"</span>
+                            <span>{phone_kind}</span>
+                        </div>
+                        {{
+                            let dev_id_for_bezel = bezel_dev_id.clone();
+                            if is_ios {
+                                view! {
+                                    <div class="info-row">
+                                        <span class="info-label">"Bezel"</span>
+                                        <select class="bezel-select"
+                                            on:change=move |ev| {
+                                                let val = event_target_value(&ev);
+                                                set_bezel_style.set(val.clone());
+                                                let dev_id = dev_id_for_bezel.clone();
+                                                leptos::task::spawn_local(async move {
+                                                    let body = serde_json::json!({"key": "bezel", "value": val});
+                                                    let _ = api::put::<_, serde_json::Value>(
+                                                        &format!("/devices/{dev_id}/preference"),
+                                                        &body,
+                                                    ).await;
+                                                });
+                                            }
+                                        >
+                                            <option value="iphone-classic" selected=move || bezel_style.get() == "iphone-classic">"iPhone 6/7/8 (Classic)"</option>
+                                            <option value="iphone-notch" selected=move || bezel_style.get() == "iphone-notch">"iPhone X/11 (Notch)"</option>
+                                            <option value="iphone-modern" selected=move || bezel_style.get() == "iphone-modern">"iPhone 12–14 (Modern)"</option>
+                                            <option value="iphone-island" selected=move || bezel_style.get() == "iphone-island">"iPhone 15/16 (Dynamic Island)"</option>
+                                        </select>
+                                    </div>
+                                }.into_any()
+                            } else if is_android {
+                                view! {
+                                    <div class="info-row">
+                                        <span class="info-label">"Bezel"</span>
+                                        <select class="bezel-select"
+                                            on:change=move |ev| {
+                                                let val = event_target_value(&ev);
+                                                set_bezel_style.set(val.clone());
+                                                let dev_id = dev_id_for_bezel.clone();
+                                                leptos::task::spawn_local(async move {
+                                                    let body = serde_json::json!({"key": "bezel", "value": val});
+                                                    let _ = api::put::<_, serde_json::Value>(
+                                                        &format!("/devices/{dev_id}/preference"),
+                                                        &body,
+                                                    ).await;
+                                                });
+                                            }
+                                        >
+                                            <option value="galaxy-s" selected=move || bezel_style.get() == "galaxy-s">"Galaxy S (S23–S25)"</option>
+                                            <option value="galaxy-a" selected=move || bezel_style.get() == "galaxy-a">"Galaxy A (A54/A55)"</option>
+                                            <option value="galaxy-fold" selected=move || bezel_style.get() == "galaxy-fold">"Galaxy Z Fold"</option>
+                                            <option value="galaxy-flip" selected=move || bezel_style.get() == "galaxy-flip">"Galaxy Z Flip"</option>
+                                            <option value="pixel" selected=move || bezel_style.get() == "pixel">"Google Pixel (8/9)"</option>
+                                            <option value="oneplus" selected=move || bezel_style.get() == "oneplus">"OnePlus (12/13)"</option>
+                                            <option value="xiaomi" selected=move || bezel_style.get() == "xiaomi">"Xiaomi / Redmi"</option>
+                                            <option value="nothing" selected=move || bezel_style.get() == "nothing">"Nothing Phone"</option>
+                                            <option value="motorola" selected=move || bezel_style.get() == "motorola">"Motorola Edge/Razr"</option>
+                                            <option value="xperia" selected=move || bezel_style.get() == "xperia">"Sony Xperia"</option>
+                                            <option value="huawei" selected=move || bezel_style.get() == "huawei">"Huawei Mate/P"</option>
+                                            <option value="oppo" selected=move || bezel_style.get() == "oppo">"Oppo / Realme"</option>
+                                            <option value="rog" selected=move || bezel_style.get() == "rog">"Asus ROG Phone"</option>
+                                        </select>
+                                    </div>
+                                }.into_any()
+                            } else {
+                                view! { <span></span> }.into_any()
+                            }
+                        }}
+                        <div class="info-row">
+                            <span class="info-label">"Serial"</span>
+                            <span class="mono" style="font-size: 0.75rem">{phone_serial_display}</span>
                         </div>
                         <div class="info-row">
                             <span class="info-label">"ID"</span>
@@ -568,7 +908,7 @@ fn DeviceViewer(
                     </div>
                 </div>
 
-                <div class="card" style="margin-top: 1rem">
+                <div class="card">
                     <div class="card-header"><h2>"Interaction Guide"</h2></div>
                     <div class="interaction-guide">
                         <div class="guide-item">
@@ -593,6 +933,86 @@ fn DeviceViewer(
                             </div>
                         </div>
                     </div>
+                </div>
+
+                // ── Inline Device Logs ──
+                <div class="card">
+                    <div class="card-header" style="cursor: pointer; user-select: none;"
+                        on:click=move |_| set_log_open.update(|v| *v = !*v)
+                    >
+                        <h2>{move || if log_open.get() { "▾ Device Logs" } else { "▸ Device Logs" }}</h2>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            {move || if log_connected.get() {
+                                view! { <span class="badge active" style="font-size: 0.7rem">"● Live"</span> }.into_any()
+                            } else if log_open.get() {
+                                view! { <span class="badge queued" style="font-size: 0.7rem">"○ Connecting…"</span> }.into_any()
+                            } else {
+                                view! { <span></span> }.into_any()
+                            }}
+                        </div>
+                    </div>
+                    <Show when=move || log_open.get()>
+                        <div style="display: flex; gap: 0.4rem; padding: 0.4rem 0.75rem; align-items: center;">
+                            <select class="bezel-select" style="flex: 0 0 auto; font-size: 0.75rem; padding: 0.2rem 0.4rem;"
+                                on:change=move |ev| set_log_filter.set(event_target_value(&ev))
+                            >
+                                <option value="all">"All"</option>
+                                <option value="error">"Error"</option>
+                                <option value="warn">"Warn+"</option>
+                                <option value="info">"Info+"</option>
+                                <option value="debug">"Debug+"</option>
+                            </select>
+                            <button class="btn btn-ghost btn-sm" style="font-size: 0.7rem; padding: 0.15rem 0.4rem;"
+                                on:click=move |_| {
+                                    set_log_lines.set(Vec::new());
+                                    if let Some(ws) = log_ws_handle.get_untracked() {
+                                        let msg = serde_json::json!({"type":"clear"});
+                                        let _ = ws.send_with_str(&msg.to_string());
+                                    }
+                                }
+                            >"Clear"</button>
+                            <span style="margin-left: auto; font-size: 0.7rem; color: var(--text-muted);">
+                                {move || format!("{} lines", log_lines.get().len())}
+                            </span>
+                        </div>
+                        <div id="inline-log-viewer" style="max-height: 260px; overflow-y: auto; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.72rem; background: #0d1117; color: #c9d1d9; padding: 0.4rem; border-radius: 0 0 6px 6px; line-height: 1.45;">
+                            {move || {
+                                let filter = log_filter.get();
+                                let lines = log_lines.get();
+                                let filtered: Vec<_> = lines.iter().filter(|(level, _, _)| {
+                                    match filter.as_str() {
+                                        "error" => level == "error" || level == "fatal",
+                                        "warn" => level == "warn" || level == "error" || level == "fatal",
+                                        "info" => level != "debug" && level != "verbose",
+                                        "debug" => level != "verbose",
+                                        _ => true,
+                                    }
+                                }).collect();
+                                if filtered.is_empty() {
+                                    view! { <div style="color: #484f58; padding: 0.5rem;">"Waiting for logs…"</div> }.into_any()
+                                } else {
+                                    filtered.into_iter().map(|(level, tag, message)| {
+                                        let color = match level.as_str() {
+                                            "error" | "fatal" => "#f85149",
+                                            "warn" => "#d29922",
+                                            "info" => "#58a6ff",
+                                            "debug" => "#8b949e",
+                                            _ => "#6e7681",
+                                        };
+                                        let level_char = level.chars().next().unwrap_or('I').to_uppercase().to_string();
+                                        let tag_str = if tag.is_empty() { String::new() } else { format!("[{}] ", tag) };
+                                        view! {
+                                            <div style="white-space: pre-wrap; word-break: break-all; padding: 0.5px 0;">
+                                                <span style=format!("color: {}; font-weight: 600; margin-right: 0.3em;", color)>{level_char}</span>
+                                                <span style="color: #79c0ff;">{tag_str}</span>
+                                                <span>{message.clone()}</span>
+                                            </div>
+                                        }
+                                    }).collect_view().into_any()
+                                }
+                            }}
+                        </div>
+                    </Show>
                 </div>
             </div>
                 </>

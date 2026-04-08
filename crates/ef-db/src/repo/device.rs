@@ -172,7 +172,10 @@ impl DeviceRepo {
                    name = EXCLUDED.name,
                    os_version = EXCLUDED.os_version,
                    region = EXCLUDED.region,
-                   capabilities = EXCLUDED.capabilities,
+                   capabilities = EXCLUDED.capabilities || ARRAY(
+                       SELECT unnest(devices.capabilities)
+                       WHERE unnest LIKE 'bezel:%'
+                   ),
                    agent_id = EXCLUDED.agent_id,
                    ip_address = EXCLUDED.ip_address,
                    status = 'available'::device_status,
@@ -202,5 +205,31 @@ impl DeviceRepo {
         .execute(pool)
         .await?;
         Ok(result.rows_affected())
+    }
+
+    /// Set or update a single prefixed capability like `bezel:iphone-modern`.
+    /// Removes any existing entry with the same prefix and appends the new one.
+    pub async fn set_preference(
+        pool: &PgPool,
+        id: Uuid,
+        key: &str,
+        value: &str,
+    ) -> Result<bool, sqlx::Error> {
+        let entry = format!("{key}:{value}");
+        let like_pattern = format!("{key}:%");
+        let result = sqlx::query(
+            r#"UPDATE devices
+               SET capabilities = array_append(
+                   ARRAY(SELECT unnest(capabilities) WHERE NOT unnest LIKE $2),
+                   $3
+               )
+               WHERE id = $1"#,
+        )
+        .bind(id)
+        .bind(&like_pattern)
+        .bind(&entry)
+        .execute(pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
     }
 }

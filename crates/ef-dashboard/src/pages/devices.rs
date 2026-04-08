@@ -10,6 +10,14 @@ pub fn DevicesPage() -> impl IntoView {
     let (status_filter, set_status_filter) = signal(String::new());
     let (refresh, set_refresh) = signal(0u32);
 
+    // Auto-refresh every 5 seconds
+    Effect::new(move || {
+        let handle = gloo_timers::callback::Interval::new(5_000, move || {
+            set_refresh.update(|n| *n = n.wrapping_add(1));
+        });
+        std::mem::forget(handle);
+    });
+
     let devices = LocalResource::new(move || {
         let _ = refresh.get();
         async move {
@@ -59,14 +67,14 @@ pub fn DevicesPage() -> impl IntoView {
         </div>
 
         <div class="card">
-            <Suspense fallback=move || view! { <div class="loading">"Loading devices…"</div> }>
+            <Transition fallback=move || view! { <div class="loading">"Loading devices…"</div> }>
                 {move || filtered().map(|devs| {
                     if devs.is_empty() {
                         return view! { <p class="empty-state">"No devices match the filters"</p> }.into_any();
                     }
                     view! { <DeviceTable devices=devs/> }.into_any()
                 })}
-            </Suspense>
+            </Transition>
         </div>
     }
 }

@@ -99,6 +99,20 @@ async fn run_scan(
     for (serial, device) in &current_serials {
         let already_known = registry.known.read().await.contains_key(serial);
         if !already_known {
+            // Check if this device name was previously known under a different serial
+            // (e.g., IoT device moved to another USB port). If so, deregister the old one first.
+            let stale: Option<(String, Uuid)> = {
+                let known = registry.known.read().await;
+                known.iter()
+                    .find(|(_, (d, _))| d.name == device.name)
+                    .map(|(s, (_, id))| (s.clone(), *id))
+            };
+            if let Some((old_serial, old_id)) = stale {
+                tracing::info!(%old_id, old = %old_serial, new = %serial, "Device changed serial — deregistering old entry");
+                let _ = client.deregister_device(old_id).await;
+                registry.known.write().await.remove(&old_serial);
+            }
+
             // Try to get device IP for remote ADB access
             let ip_address = get_device_ip(serial).await;
 

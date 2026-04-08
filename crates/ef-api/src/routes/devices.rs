@@ -188,6 +188,40 @@ pub async fn set_device_status(
     }
 }
 
+#[derive(Deserialize)]
+pub struct SetPreferenceRequest {
+    pub key: String,
+    pub value: String,
+}
+
+/// PUT /api/v1/devices/:id/preference
+pub async fn set_device_preference(
+    auth: AuthContext,
+    Path(id): Path<Uuid>,
+    State(state): State<AppState>,
+    Json(body): Json<SetPreferenceRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    tracing::info!(tenant_id = %auth.tenant_id, device_id = %id, key = %body.key, value = %body.value, "Setting device preference");
+
+    // Only allow known preference keys
+    if body.key != "bezel" {
+        return Err(ApiError::bad_request(format!("Unknown preference key: {}", body.key)));
+    }
+
+    let updated = DeviceRepo::set_preference(&state.pool, id, &body.key, &body.value)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to set preference: {e}");
+            ApiError::internal("Failed to set device preference")
+        })?;
+
+    if updated {
+        Ok(Json(json!({ "device_id": id, "key": body.key, "value": body.value })))
+    } else {
+        Err(ApiError::not_found(format!("Device {id} not found")))
+    }
+}
+
 /// POST /api/v1/devices/:id/heartbeat
 pub async fn device_heartbeat(
     Path(id): Path<Uuid>,

@@ -6,14 +6,27 @@ use crate::components::stat_card::StatCard;
 /// Dashboard overview — quick stats + recent activity.
 #[component]
 pub fn OverviewPage() -> impl IntoView {
-    let devices = LocalResource::new(|| async {
-        api::get::<DeviceListResponse>("/devices").await.unwrap_or_default()
+    let (refresh, set_refresh) = signal(0u32);
+
+    // Auto-refresh every 5 seconds
+    Effect::new(move || {
+        let handle = gloo_timers::callback::Interval::new(5_000, move || {
+            set_refresh.update(|n| *n = n.wrapping_add(1));
+        });
+        std::mem::forget(handle);
     });
-    let sessions = LocalResource::new(|| async {
-        api::get::<SessionListResponse>("/sessions").await.unwrap_or_default()
+
+    let devices = LocalResource::new(move || {
+        let _ = refresh.get();
+        async move { api::get::<DeviceListResponse>("/devices").await.unwrap_or_default() }
     });
-    let jobs = LocalResource::new(|| async {
-        api::get::<JobListResponse>("/jobs").await.unwrap_or_default()
+    let sessions = LocalResource::new(move || {
+        let _ = refresh.get();
+        async move { api::get::<SessionListResponse>("/sessions").await.unwrap_or_default() }
+    });
+    let jobs = LocalResource::new(move || {
+        let _ = refresh.get();
+        async move { api::get::<JobListResponse>("/jobs").await.unwrap_or_default() }
     });
 
     let total_devices = move || {
@@ -53,7 +66,9 @@ pub fn OverviewPage() -> impl IntoView {
                         if data.devices.is_empty() {
                             return view! { <p class="empty-state">"No devices registered"</p> }.into_any();
                         }
-                        let devs: Vec<_> = data.devices.iter().take(5).cloned().collect();
+                        let mut sorted: Vec<_> = data.devices.clone();
+                        sorted.sort_by(|a, b| b.last_heartbeat.cmp(&a.last_heartbeat));
+                        let devs: Vec<_> = sorted.into_iter().take(5).collect();
                         view! {
                             <div class="table-wrap">
                                 <table>
@@ -61,6 +76,7 @@ pub fn OverviewPage() -> impl IntoView {
                                         <tr>
                                             <th>"Name"</th>
                                             <th>"OS"</th>
+                                            <th>"Version"</th>
                                             <th>"Status"</th>
                                         </tr>
                                     </thead>
@@ -71,6 +87,7 @@ pub fn OverviewPage() -> impl IntoView {
                                                 <tr>
                                                     <td>{d.name}</td>
                                                     <td>{os_icon(&d.os)} " " {d.os}</td>
+                                                    <td>{d.os_version}</td>
                                                     <td><crate::components::status_badge::StatusBadge status=status/></td>
                                                 </tr>
                                             }

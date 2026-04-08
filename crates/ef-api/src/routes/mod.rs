@@ -19,6 +19,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/devices", get(devices::list_devices).post(devices::create_device))
         .route("/devices/{id}", get(devices::get_device).put(devices::update_device).delete(devices::delete_device))
         .route("/devices/{id}/status", put(devices::set_device_status))
+        .route("/devices/{id}/preference", put(devices::set_device_preference))
         .route("/devices/{id}/heartbeat", post(devices::device_heartbeat))
         .route("/devices/{id}/health", get(devices::device_health))
         // Session CRUD

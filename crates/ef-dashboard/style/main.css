@@ -54,15 +54,15 @@ body {
 }
 
 .sidebar-brand {
-    padding: 1rem;
+    padding: 0.6rem 0.75rem;
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     background: linear-gradient(135deg, rgba(59,130,246,0.08) 0%, transparent 100%);
 }
 
-.brand-logo { width: 100%; max-width: 180px; height: auto; object-fit: contain; }
+.brand-logo { width: 100%; max-width: 140px; height: auto; object-fit: contain; }
 
 .sidebar-nav { flex: 1; padding: 0.75rem 0.5rem; display: flex; flex-direction: column; gap: 2px; }
 
@@ -476,7 +476,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
         grid-template-columns: 1fr 280px;
     }
     .phone-frame {
-        width: 280px;
+        width: clamp(170px, 24vw, 250px);
     }
     .viewer-panel {
         flex: 0 0 260px;
@@ -548,20 +548,59 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
     .viewer-layout {
         flex-direction: column;
         align-items: center;
+        gap: 0.75rem;
     }
     .viewer-panel {
         flex: none;
         width: 100%;
         min-width: 0;
+        max-height: none;
+        overflow: visible;
+        margin-left: 0;
     }
     .phone-wrapper {
         align-self: center;
+        margin-left: 0;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
     }
     .phone-frame {
-        width: 280px;
+        width: clamp(220px, 65vw, 320px);
+        max-height: 60svh;
+        transform: none;
     }
+    .phone-frame:hover {
+        transform: none;
+    }
+    /* Side buttons become horizontal bar below phone */
     .phone-side-buttons {
+        position: static;
+        flex-direction: row;
+        gap: 12px;
+        margin-top: 8px;
+        justify-content: center;
+    }
+    .phone-side-buttons.side-left {
         display: none;
+    }
+    .phone-side-buttons.side-right {
+        right: auto;
+    }
+    .side-btn {
+        width: 36px;
+        height: 36px;
+    }
+    .power-btn {
+        margin-bottom: 0;
+    }
+    .ios-power {
+        height: 36px;
+    }
+    .main-content h1 {
+        font-size: 0.9rem;
+        margin-bottom: 0.5rem !important;
     }
 
     .device-grid {
@@ -630,8 +669,77 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
     .device-card-name { font-size: 0.85rem; }
 
     .phone-frame {
-        width: min(260px, calc(100vw - 2rem));
+        width: min(calc(100vw - 1rem), 300px);
+        max-height: 55svh;
+        transform: none;
     }
+    .phone-frame:hover {
+        transform: none;
+    }
+    .phone-wrapper {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        margin-left: 0;
+    }
+    .phone-side-buttons {
+        position: static;
+        flex-direction: row;
+        gap: 10px;
+        margin-top: 6px;
+        justify-content: center;
+    }
+    .phone-side-buttons.side-left {
+        display: none;
+    }
+    .phone-side-buttons.side-right {
+        right: auto;
+    }
+    .side-btn {
+        width: 32px;
+        height: 32px;
+        font-size: 0.7rem;
+    }
+    .power-btn { margin-bottom: 0; }
+    .ios-power { height: 32px; }
+    .viewer-layout {
+        gap: 0.5rem;
+        padding: 0;
+    }
+    .viewer-panel {
+        max-height: none;
+        overflow: visible;
+        margin-left: 0;
+        width: 100%;
+    }
+    .viewer-panel .card {
+        padding: 0.4rem 0.5rem;
+    }
+    .viewer-panel .card-header h2 {
+        font-size: 0.75rem;
+    }
+    .stream-info {
+        font-size: 0.68rem;
+        gap: 0.05rem;
+    }
+    .info-row {
+        padding: 0.05rem 0;
+    }
+    .info-label {
+        font-size: 0.6rem;
+    }
+    .bezel-select {
+        font-size: 0.68rem;
+        max-width: 140px;
+    }
+    .page { padding: 0.25rem; }
+    .main-content h1 {
+        font-size: 0.85rem;
+        margin-bottom: 0.25rem !important;
+    }
+    /* Hide interaction guide on small phones */
+    .interaction-guide { display: none; }
 
     .card { padding: 0.75rem; }
     .card-header { margin-bottom: 0.75rem; padding-bottom: 0.5rem; }
@@ -689,56 +797,388 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .device-card-icon { font-size: 2rem; margin-bottom: 0.5rem; }
 .device-card-name { font-weight: 600; font-size: 0.95rem; margin-bottom: 0.25rem; }
 .device-card-info { font-size: 0.8rem; color: var(--text-secondary); }
-.device-card-serial { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); margin: 0.25rem 0 0.5rem; }
+.device-card-serial { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); margin: 0.25rem 0 0.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 
 /* ── Phone-frame live viewer ── */
 .viewer-layout {
     display: flex;
     gap: 2rem;
-    align-items: flex-start;
+    align-items: stretch;
 }
 .viewer-panel {
-    flex: 0 0 300px;
-    min-width: 260px;
+    flex: 0 0 260px;
+    min-width: 220px;
+    max-height: calc(100vh - 100px);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-left: 20px;
+}
+.viewer-panel .card {
+    margin-top: 0;
+    padding: 0.6rem 0.8rem;
+}
+.viewer-panel .card-header {
+    margin-bottom: 0.4rem;
+    padding-bottom: 0.3rem;
+}
+.viewer-panel .card-header h2 {
+    font-size: 0.85rem;
 }
 
-/* Phone wrapper (frame + side buttons) */
+/* Phone wrapper (frame + side buttons) — left margin clears sidebar */
 .phone-wrapper {
     position: relative;
     flex-shrink: 0;
+    margin-left: 40px;
 }
 
-/* Phone frame — the bezel */
+/* Phone frame — the bezel, adaptive width, fits viewport height */
+/* Real phones are ~2:1 H:W body ratio (e.g. 138.4×67.3 mm for iPhone 8) */
 .phone-frame {
-    width: 320px;
-    background: #1a1a1a;
+    width: clamp(180px, 20vw, 280px);
+    max-height: calc(100vh - 100px);
+    background: #1a3a3a;
     border-radius: 36px;
-    border: 3px solid #2a2a2a;
+    border: 2px solid rgba(127,255,212,0.35);
     box-shadow:
-        0 0 0 1px rgba(255,255,255,0.05),
+        /* outer glow */
+        0 0 0 1px rgba(127,255,212,0.08),
+        /* 3D depth layers */
+        0 2px 4px rgba(0,0,0,0.3),
+        0 8px 16px rgba(0,0,0,0.25),
         0 20px 60px rgba(0,0,0,0.5),
-        inset 0 0 20px rgba(0,0,0,0.3);
+        /* bottom edge highlight */
+        0 1px 0 rgba(255,255,255,0.05),
+        /* inner rim */
+        inset 0 1px 0 rgba(255,255,255,0.08),
+        inset 0 -1px 0 rgba(0,0,0,0.2);
     display: flex;
     flex-direction: column;
     overflow: hidden;
     position: relative;
+    /* subtle 3D tilt */
+    transform: perspective(800px) rotateY(-1deg);
+    transition: transform 0.3s ease;
+}
+.phone-frame:hover {
+    transform: perspective(800px) rotateY(0deg) translateY(-2px);
 }
 .phone-frame.android {
     border-radius: 32px;
 }
+
+/* ── Android Bezel Variants ── */
+/* Samsung Galaxy S (S23/S24/S25) — flat glass, slim aluminium frame */
+.phone-frame.android.galaxy-s {
+    border-radius: 28px;
+    background: linear-gradient(145deg, #1e1e1e, #141414);
+    border: 2px solid #3a3a3a;
+    box-shadow:
+        0 0 0 1px rgba(100,100,105,0.15),
+        inset 0 1px 0 rgba(255,255,255,0.06),
+        inset 0 -1px 0 rgba(0,0,0,0.3),
+        0 2px 4px rgba(0,0,0,0.3),
+        0 8px 20px rgba(0,0,0,0.35),
+        0 20px 50px rgba(0,0,0,0.5);
+}
+/* Samsung Galaxy A (A54/A55) — polycarbonate, matte feel */
+.phone-frame.android.galaxy-a {
+    border-radius: 26px;
+    background: linear-gradient(145deg, #222236, #181828);
+    border: 2px solid #44446a;
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.05),
+        inset 0 -1px 0 rgba(0,0,0,0.25),
+        0 2px 4px rgba(0,0,0,0.3),
+        0 16px 44px rgba(0,0,0,0.45),
+        0 0 10px rgba(68,68,106,0.12);
+}
+/* Google Pixel (8/9) — visor bar look, matte aluminium */
+.phone-frame.android.pixel {
+    border-radius: 30px;
+    background: linear-gradient(145deg, #282a2d, #1a1c1f);
+    border: 2.5px solid #5f6368;
+    box-shadow:
+        0 0 0 1px rgba(95,99,104,0.2),
+        inset 0 1px 0 rgba(255,255,255,0.07),
+        inset 0 -1px 0 rgba(0,0,0,0.3),
+        0 2px 4px rgba(0,0,0,0.3),
+        0 10px 24px rgba(0,0,0,0.35),
+        0 20px 52px rgba(0,0,0,0.5);
+}
+/* OnePlus (12/13) — alert slider detail, curved glass */
+.phone-frame.android.oneplus {
+    border-radius: 34px;
+    background: linear-gradient(145deg, #151518, #0a0a0c);
+    border: 2px solid #c41e3a;
+    box-shadow:
+        0 0 0 1px rgba(196,30,58,0.1),
+        inset 0 1px 0 rgba(255,255,255,0.04),
+        inset 0 -1px 0 rgba(0,0,0,0.3),
+        0 2px 4px rgba(0,0,0,0.3),
+        0 20px 56px rgba(0,0,0,0.55),
+        0 0 12px rgba(196,30,58,0.06);
+}
+/* Xiaomi (14/15) — flat edges, matte frame */
+.phone-frame.android.xiaomi {
+    border-radius: 24px;
+    background: linear-gradient(145deg, #1e1e21, #111113);
+    border: 2px solid #555;
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.05),
+        inset 0 -1px 0 rgba(0,0,0,0.3),
+        0 2px 4px rgba(0,0,0,0.3),
+        0 16px 48px rgba(0,0,0,0.5);
+}
+/* Nothing Phone — transparent-inspired, glyph accent */
+.phone-frame.android.nothing {
+    border-radius: 30px;
+    background: linear-gradient(145deg, #0e0e0e, #050505);
+    border: 2px solid #d4d4d4;
+    box-shadow:
+        0 0 0 1px rgba(212,212,212,0.15),
+        inset 0 1px 0 rgba(255,255,255,0.08),
+        inset 0 -1px 0 rgba(0,0,0,0.3),
+        0 2px 4px rgba(0,0,0,0.3),
+        0 18px 52px rgba(0,0,0,0.5),
+        0 0 16px rgba(212,212,212,0.04);
+}
+/* Motorola Edge/Razr — vegan leather texture, rounded */
+.phone-frame.android.motorola {
+    border-radius: 32px;
+    background: linear-gradient(155deg, #2a1f1a, #1a120e);
+    border: 2px solid #6b4c3b;
+    box-shadow:
+        inset 0 1px 0 rgba(255,220,180,0.06),
+        inset 0 -1px 0 rgba(0,0,0,0.35),
+        0 2px 4px rgba(0,0,0,0.3),
+        0 16px 48px rgba(0,0,0,0.5),
+        0 0 8px rgba(107,76,59,0.1);
+}
+/* Sony Xperia — tall 21:9, flat industrial */
+.phone-frame.android.xperia {
+    border-radius: 18px;
+    background: linear-gradient(145deg, #1c1c2e, #0e0e18);
+    border: 2.5px solid #484868;
+    box-shadow:
+        0 0 0 1px rgba(72,72,104,0.2),
+        inset 0 1px 0 rgba(140,140,200,0.06),
+        inset 0 -1px 0 rgba(0,0,0,0.35),
+        0 2px 4px rgba(0,0,0,0.3),
+        0 18px 52px rgba(0,0,0,0.5);
+    aspect-ratio: 9 / 21;
+}
+/* Huawei Mate/P series — leatherette back, gold accent */
+.phone-frame.android.huawei {
+    border-radius: 28px;
+    background: linear-gradient(150deg, #1e1e22, #111114);
+    border: 2px solid #a68b5b;
+    box-shadow:
+        0 0 0 1px rgba(166,139,91,0.12),
+        inset 0 1px 0 rgba(255,230,180,0.05),
+        inset 0 -1px 0 rgba(0,0,0,0.35),
+        0 2px 4px rgba(0,0,0,0.3),
+        0 20px 54px rgba(0,0,0,0.5),
+        0 0 10px rgba(166,139,91,0.06);
+}
+/* Oppo / Realme — hasselblad-inspired, sleek curves */
+.phone-frame.android.oppo {
+    border-radius: 30px;
+    background: linear-gradient(145deg, #181820, #0c0c12);
+    border: 2px solid #4a9e60;
+    box-shadow:
+        0 0 0 1px rgba(74,158,96,0.1),
+        inset 0 1px 0 rgba(255,255,255,0.05),
+        inset 0 -1px 0 rgba(0,0,0,0.3),
+        0 2px 4px rgba(0,0,0,0.3),
+        0 18px 50px rgba(0,0,0,0.5),
+        0 0 10px rgba(74,158,96,0.05);
+}
+/* Asus ROG Phone — gaming RGB accent, angular feel */
+.phone-frame.android.rog {
+    border-radius: 20px;
+    background: linear-gradient(145deg, #141418, #080808);
+    border: 2px solid #e13333;
+    box-shadow:
+        0 0 0 1px rgba(225,51,51,0.15),
+        inset 0 1px 0 rgba(255,80,80,0.08),
+        inset 0 -1px 0 rgba(0,0,0,0.4),
+        0 2px 4px rgba(0,0,0,0.3),
+        0 16px 48px rgba(0,0,0,0.55),
+        0 0 18px rgba(225,51,51,0.08);
+}
+/* Samsung Z Fold — wider foldable aspect */
+.phone-frame.android.galaxy-fold {
+    border-radius: 22px;
+    background: linear-gradient(145deg, #1a1a20, #0e0e12);
+    border: 2px solid #55556a;
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.05),
+        inset 0 -1px 0 rgba(0,0,0,0.3),
+        0 2px 4px rgba(0,0,0,0.3),
+        0 16px 44px rgba(0,0,0,0.5);
+    aspect-ratio: 10 / 16;
+}
+/* Samsung Z Flip — compact clamshell */
+.phone-frame.android.galaxy-flip {
+    border-radius: 26px;
+    background: linear-gradient(145deg, #2a1a2e, #180e1c);
+    border: 2px solid #9966aa;
+    box-shadow:
+        0 0 0 1px rgba(153,102,170,0.12),
+        inset 0 1px 0 rgba(255,200,255,0.05),
+        inset 0 -1px 0 rgba(0,0,0,0.35),
+        0 2px 4px rgba(0,0,0,0.3),
+        0 16px 44px rgba(0,0,0,0.5),
+        0 0 8px rgba(153,102,170,0.06);
+    aspect-ratio: 9 / 22;
+}
+
+/* Android notch variants */
+.phone-notch.android-punch-hole {
+    height: 24px;
+    background: #000;
+    justify-content: flex-end;
+    padding-right: 30%;
+}
+.android-hole-punch {
+    width: 10px;
+    height: 10px;
+    background: #1a1a1a;
+    border-radius: 50%;
+    border: 1.5px solid #333;
+}
+/* Pixel camera bar */
+.phone-notch.pixel-bar {
+    height: 28px;
+    background: #000;
+    justify-content: center;
+}
+.pixel-camera-dot {
+    width: 8px;
+    height: 8px;
+    background: #202124;
+    border-radius: 50%;
+    border: 1.5px solid #5f6368;
+}
+
+/* iPhone — titanium / space-black frame (base styles) */
 .phone-frame.ios {
+    background: linear-gradient(145deg, #2e2e32, #222226);
+    border: 2.5px solid #5a5a5e;
+    box-shadow:
+        0 0 0 1px rgba(180,180,185,0.12),
+        inset 0 1px 0 rgba(255,255,255,0.08),
+        inset 0 -1px 0 rgba(0,0,0,0.25),
+        0 2px 4px rgba(0,0,0,0.3),
+        0 8px 20px rgba(0,0,0,0.35),
+        0 20px 60px rgba(0,0,0,0.55),
+        0 0 18px rgba(0,0,0,0.2);
+}
+
+/* iPhone 6/7/8 — classic with home button, thick bezels, rounded body */
+.phone-frame.ios.iphone-classic {
+    border-radius: 36px;
+    background: linear-gradient(145deg, #d8d8dc, #c5c5ca);
+    border: 2px solid #b0b0b5;
+    box-shadow:
+        0 0 0 1px rgba(200,200,205,0.2),
+        inset 0 1px 0 rgba(255,255,255,0.4),
+        inset 0 -1px 0 rgba(0,0,0,0.1),
+        0 2px 4px rgba(0,0,0,0.2),
+        0 8px 20px rgba(0,0,0,0.25),
+        0 16px 48px rgba(0,0,0,0.45);
+}
+/* iPhone X / 11 — large notch, rounded stainless steel frame */
+.phone-frame.ios.iphone-notch {
     border-radius: 44px;
+    background: linear-gradient(145deg, #222224, #141416);
+    border: 2.5px solid #48484a;
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.06),
+        inset 0 -1px 0 rgba(0,0,0,0.3),
+        0 2px 4px rgba(0,0,0,0.3),
+        0 8px 20px rgba(0,0,0,0.35),
+        0 20px 56px rgba(0,0,0,0.5);
+}
+/* iPhone 12–14 — flat edges, notch, aluminium frame */
+.phone-frame.ios.iphone-modern {
+    border-radius: 40px;
+    background: linear-gradient(145deg, #222224, #151517);
+    border: 2.5px solid #636366;
+    box-shadow:
+        0 0 0 1px rgba(160,160,165,0.15),
+        inset 0 1px 0 rgba(255,255,255,0.06),
+        inset 0 -1px 0 rgba(0,0,0,0.3),
+        0 2px 4px rgba(0,0,0,0.3),
+        0 10px 24px rgba(0,0,0,0.35),
+        0 18px 54px rgba(0,0,0,0.50);
+}
+/* iPhone 15/16 — Dynamic Island, titanium frame */
+.phone-frame.ios.iphone-island {
+    border-radius: 48px;
+    background: linear-gradient(145deg, #2e2e32, #222226);
+    border: 2.5px solid #5a5a5e;
 }
 
 /* Top notch / camera area */
 .phone-notch {
     height: 28px;
-    background: #1a1a1a;
+    background: #1a3a3a;
     display: flex;
     align-items: center;
     justify-content: center;
     position: relative;
     flex-shrink: 0;
+}
+.phone-notch.ios-notch {
+    height: 32px;
+    background: #000;
+}
+/* Classic top bar — silver/space-grey with speaker grille + front camera, no notch */
+.phone-notch.ios-classic-top {
+    height: 48px;
+    background: #d1d1d6;
+    gap: 10px;
+}
+.phone-speaker {
+    width: 42px;
+    height: 5px;
+    background: #999;
+    border-radius: 3px;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.3);
+}
+/* Classic front camera dot next to speaker */
+.phone-notch.ios-classic-top::after {
+    content: "";
+    width: 8px;
+    height: 8px;
+    background: #1c1c1e;
+    border-radius: 50%;
+    border: 1.5px solid #888;
+    box-shadow: inset 0 0 2px rgba(0,0,0,0.5);
+}
+/* Notch cutout for X/11/12-14 — wide dark notch shape */
+.ios-notch-cutout {
+    width: 160px;
+    height: 26px;
+    background: #000;
+    border-radius: 0 0 18px 18px;
+    position: relative;
+}
+.ios-notch-cutout::before {
+    content: "";
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    background: #333;
+    border-radius: 50%;
+    right: 20px;
+    top: 50%;
+    transform: translateY(-50%);
+    box-shadow: inset 0 0 2px rgba(0,0,0,0.6);
 }
 .phone-camera {
     width: 10px;
@@ -748,15 +1188,85 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
     border: 1.5px solid #333;
     box-shadow: inset 0 0 2px rgba(0,0,0,0.5);
 }
+/* Dynamic Island — pill-shaped cutout (iPhone 15/16) */
+.dynamic-island {
+    width: 90px;
+    height: 22px;
+    background: #111;
+    border-radius: 14px;
+    border: 1px solid #222;
+    box-shadow:
+        inset 0 1px 3px rgba(0,0,0,0.6),
+        0 0 4px rgba(0,0,0,0.3);
+}
 
-/* Screen area */
+/* Bezel selector dropdown */
+.bezel-select {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.2rem 0.4rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+    max-width: 200px;
+}
+.bezel-select:hover {
+    border-color: var(--accent);
+}
+.bezel-select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(127,255,212,0.15);
+}
+
+/* Screen area — default 16:9 for classic iPhone */
 .phone-screen {
     width: 100%;
-    aspect-ratio: 9 / 19.5;
+    aspect-ratio: 9 / 16;
     background: #000;
     position: relative;
     overflow: hidden;
-    flex-shrink: 0;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+/* Glass reflection overlay */
+.phone-screen::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    background: linear-gradient(
+        135deg,
+        rgba(255,255,255,0.06) 0%,
+        rgba(255,255,255,0.02) 30%,
+        transparent 50%,
+        transparent 100%
+    );
+}
+/* Modern Android — typically 20:9 (1080×2400), reduced for fit */
+.phone-frame.android .phone-screen {
+    aspect-ratio: 9 / 18;
+}
+/* iPhone 6/7/8 — 16:9 (750×1334), visible side bezels (~65% screen-to-body) */
+.iphone-classic .phone-screen {
+    aspect-ratio: 9 / 16;
+    width: calc(100% - 10px);
+    margin: 0 auto;
+    border-radius: 2px;
+}
+/* iPhone X/11 — 19.5:9 body, slightly reduced for fit */
+.iphone-notch .phone-screen {
+    aspect-ratio: 9 / 18;
+}
+/* iPhone 12–14 — 19.5:9 body, slightly reduced for fit */
+.iphone-modern .phone-screen {
+    aspect-ratio: 9 / 18;
+}
+/* iPhone 15/16 — 19.5:9 body, slightly reduced for fit */
+.iphone-island .phone-screen {
+    aspect-ratio: 9 / 18;
 }
 .phone-screen img {
     display: block;
@@ -780,19 +1290,54 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
 }
+/* iOS boot screen — Apple logo + progress bar */
+.ios-boot {
+    background: #000;
+    color: #fff;
+    gap: 2rem;
+}
+.apple-logo {
+    font-size: 3.5rem;
+    opacity: 0.95;
+    animation: ios-fade-in 1.2s ease-in-out;
+}
+.ios-progress-bar {
+    width: 40%;
+    height: 4px;
+    background: #333;
+    border-radius: 2px;
+    overflow: hidden;
+}
+.ios-progress-fill {
+    width: 100%;
+    height: 100%;
+    background: #fff;
+    border-radius: 2px;
+    animation: ios-loading 2.5s ease-in-out infinite;
+}
+@keyframes ios-fade-in {
+    0% { opacity: 0; }
+    100% { opacity: 0.95; }
+}
+@keyframes ios-loading {
+    0% { transform: translateX(-100%); }
+    50% { transform: translateX(0%); }
+    100% { transform: translateX(100%); }
+}
 
 /* Bottom navigation bar */
 .phone-navbar {
     height: 40px;
-    background: #1a1a1a;
+    background: #1a3a3a;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 2rem;
     flex-shrink: 0;
+    border-top: none;
 }
 .android-navbar {
-    border-top: 1px solid #2a2a2a;
+    border-top: 1px solid rgba(127,255,212,0.3);
 }
 .nav-btn {
     background: transparent;
@@ -819,6 +1364,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 /* iOS home indicator */
 .ios-navbar {
     height: 30px;
+    background: #000;
+    border-top: none;
 }
 .ios-home-indicator {
     width: 120px;
@@ -826,15 +1373,40 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
     background: #555;
     border-radius: 2px;
 }
+/* iPhone classic (6/7/8) — taller bottom bar with circular home button */
+.classic-navbar {
+    height: 52px;
+    background: #d1d1d6;
+    border-top: none;
+}
+.ios-home-button {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 2px solid #999;
+    background: #c8c8cc;
+    box-shadow:
+        inset 0 1px 3px rgba(0,0,0,0.15),
+        0 1px 2px rgba(0,0,0,0.1);
+}
+.ios-home-button:active {
+    background: #b8b8bc;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.25);
+}
 
 /* Side buttons (power, volume) */
 .phone-side-buttons {
     position: absolute;
-    right: -36px;
     top: 80px;
     display: flex;
     flex-direction: column;
     gap: 8px;
+}
+.phone-side-buttons.side-right {
+    right: -36px;
+}
+.phone-side-buttons.side-left {
+    left: -36px;
 }
 .side-btn {
     width: 28px;
@@ -861,47 +1433,65 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .power-btn {
     margin-bottom: 12px;
 }
+/* iOS power button — taller, like the real side button */
+.ios-power {
+    height: 48px;
+    border-radius: 8px;
+}
+/* iOS action button */
+.ios-action-btn {
+    margin-bottom: 8px;
+}
 
 /* Stream info panel */
 .stream-info {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-    font-size: 0.85rem;
+    gap: 0.15rem;
+    font-size: 0.78rem;
 }
 .info-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.25rem 0;
+    padding: 0.1rem 0;
+    min-width: 0;
+}
+.info-row > span:last-child,
+.info-row > .mono {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 60%;
 }
 .info-label {
     color: var(--text-muted);
-    font-size: 0.8rem;
+    font-size: 0.72rem;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    flex-shrink: 0;
 }
 
 /* Interaction guide */
 .interaction-guide {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: 0.35rem;
 }
 .guide-item {
     display: flex;
-    align-items: flex-start;
-    gap: 0.75rem;
-    font-size: 0.8rem;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.72rem;
 }
 .guide-icon {
-    font-size: 1.1rem;
+    font-size: 0.9rem;
     flex-shrink: 0;
-    width: 28px;
+    width: 22px;
     text-align: center;
 }
 .guide-item p {
     color: var(--text-muted);
-    margin-top: 2px;
-    font-size: 0.75rem;
+    margin-top: 0;
+    font-size: 0.68rem;
 }

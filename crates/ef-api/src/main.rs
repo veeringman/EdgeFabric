@@ -55,6 +55,10 @@ async fn main() -> Result<()> {
     // Spawn session reaper (P5.3 — auto-expire timed-out sessions every 30s)
     session_manager::spawn_session_reaper(pool.clone(), nats.clone(), 30);
 
+    // Spawn heartbeat-based stale device checker — mark devices offline if no
+    // heartbeat received within 60 s (checked every 15 s).
+    ef_control::state::spawn_stale_device_checker(pool.clone(), 60, 15);
+
     let state = AppState {
         pool,
         jwt_secret: cfg.auth.jwt_secret.clone(),

@@ -85,45 +85,59 @@ impl DeviceDiscovery {
             .output()
             .await;
 
-        if let Ok(out) = output {
+        let mut devices = if let Ok(out) = output {
             if out.status.success() {
                 let stdout = String::from_utf8_lossy(&out.stdout);
-                let devices = parse_xctrace_output(&stdout);
-                info!(count = devices.len(), "iOS xctrace scan complete");
-                return Ok(devices);
+                parse_xctrace_output(&stdout)
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+
+        // Fallback: idevice_id -l (libimobiledevice)
+        if devices.is_empty() {
+            let output = Command::new("idevice_id").arg("-l").output().await;
+            if let Ok(out) = output {
+                if out.status.success() {
+                    let stdout = String::from_utf8_lossy(&out.stdout);
+                    devices = stdout
+                        .lines()
+                        .filter(|l| !l.trim().is_empty())
+                        .map(|udid| Device {
+                            id: Uuid::new_v4(),
+                            name: format!("iOS-{}", &udid[..8.min(udid.len())]),
+                            serial: Some(udid.trim().to_string()),
+                            os: Os::Ios,
+                            os_version: String::new(),
+                            kind: DeviceKind::Real,
+                            status: DeviceStatus::Available,
+                            region: "local".into(),
+                            capabilities: vec!["usb".into()],
+                            registered_at: Utc::now(),
+                            last_heartbeat: Some(Utc::now()),
+                        })
+                        .collect();
+                }
             }
         }
 
-        // Fallback: idevice_id -l (libimobiledevice)
-        let output = Command::new("idevice_id").arg("-l").output().await;
-        match output {
-            Ok(out) if out.status.success() => {
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                let devices: Vec<Device> = stdout
-                    .lines()
-                    .filter(|l| !l.trim().is_empty())
-                    .map(|udid| Device {
-                        id: Uuid::new_v4(),
-                        name: format!("iOS-{}", &udid[..8.min(udid.len())]),
-                        serial: Some(udid.trim().to_string()),
-                        os: Os::Ios,
-                        os_version: String::new(),
-                        kind: DeviceKind::Real,
-                        status: DeviceStatus::Available,
-                        region: "local".into(),
-                        capabilities: vec!["usb".into()],
-                        registered_at: Utc::now(),
-                        last_heartbeat: Some(Utc::now()),
-                    })
-                    .collect();
-                info!(count = devices.len(), "iOS idevice_id scan complete");
-                Ok(devices)
-            }
-            _ => {
-                tracing::warn!("No iOS discovery tools available (xcrun / idevice_id)");
-                Ok(vec![])
+        if devices.is_empty() {
+            tracing::warn!("No iOS discovery tools available (xcrun / idevice_id)");
+        }
+
+        // Enrich each device with model info from ideviceinfo
+        for device in &mut devices {
+            if let Some(ref udid) = device.serial {
+                if let Some(model) = query_ios_model(udid).await {
+                    device.capabilities.push(format!("model:{model}"));
+                }
             }
         }
+
+        info!(count = devices.len(), "iOS scan complete");
+        Ok(devices)
     }
 
     /// Scan for IoT devices via USB serial ports (`/dev/ttyACM*`, `/dev/ttyUSB*`)
@@ -219,7 +233,32 @@ async fn scan_serial_ports_linux() -> Vec<Device> {
                 let name = name.trim();
                 if name.is_empty() { continue; }
 
+                // Skip Android/iOS phones that expose a USB serial interface —
+                // they are already discovered by ADB / idevice scanners.
+                let lower = name.to_lowercase();
+                if lower.contains("android")
+                    || lower.contains("samsung")
+                    || lower.contains("xiaomi")
+                    || lower.contains("redmi")
+                    || lower.contains("oneplus")
+                    || lower.contains("google")
+                    || lower.contains("pixel")
+                    || lower.contains("huawei")
+                    || lower.contains("oppo")
+                    || lower.contains("vivo")
+                    || lower.contains("motorola")
+                    || lower.contains("sony_mobile")
+                    || lower.contains("apple")
+                    || lower.contains("iphone")
+                    || lower.contains("ipad")
+                {
+                    tracing::debug!(name, "Skipping phone serial device (handled by ADB/iOS scanner)");
+                    continue;
+                }
+
                 let target = format!("/dev/serial/by-id/{name}");
+                // Use the by-id name as stable serial (persists across port changes)
+                // and resolve the symlink for the actual device path
                 let resolved = tokio::fs::canonicalize(&target).await
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_else(|_| target.clone());
@@ -229,7 +268,7 @@ async fn scan_serial_ports_linux() -> Vec<Device> {
                 devices.push(Device {
                     id: Uuid::new_v4(),
                     name: friendly,
-                    serial: Some(resolved),
+                    serial: Some(target),
                     os: Os::Iot,
                     os_version: String::new(),
                     kind: DeviceKind::Real,
@@ -577,6 +616,22 @@ async fn scan_mdns_iot() -> Vec<Device> {
         devices.extend(scan_mdns_service(service).await);
     }
     devices
+}
+
+/// Query ideviceinfo for the ProductType (e.g. "iPhone7,2", "iPhone14,3").
+async fn query_ios_model(udid: &str) -> Option<String> {
+    let out = Command::new("ideviceinfo")
+        .args(["-u", udid, "-k", "ProductType"])
+        .output()
+        .await
+        .ok()?;
+    if out.status.success() {
+        let model = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !model.is_empty() {
+            return Some(model);
+        }
+    }
+    None
 }
 
 /// Parse `xcrun xctrace list devices` output.

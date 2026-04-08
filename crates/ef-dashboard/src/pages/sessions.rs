@@ -11,6 +11,14 @@ pub fn SessionsPage() -> impl IntoView {
     let (show_create, set_show_create) = signal(false);
     let (error, set_error) = signal(Option::<String>::None);
 
+    // Auto-refresh every 5 seconds
+    Effect::new(move || {
+        let handle = gloo_timers::callback::Interval::new(5_000, move || {
+            set_refresh.update(|n| *n = n.wrapping_add(1));
+        });
+        std::mem::forget(handle);
+    });
+
     let sessions = LocalResource::new(move || {
         let _ = refresh.get();
         async move {

@@ -9,6 +9,7 @@ jwt_secret = "dev-secret-not-for-production"
 [agent]
 control_plane_url = "http://192.168.29.78:6060"
 tls_skip_verify = true
+device_scan_interval_seconds = 5
 
 [logging]
 level = "debug"

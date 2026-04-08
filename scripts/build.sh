@@ -57,9 +57,25 @@ if ! command -v cargo &>/dev/null; then
   exit 1
 fi
 
-if ! command -v protoc &>/dev/null; then
-  err "protoc not found. Run: ./scripts/install.sh"
-  exit 1
+# protoc is only needed for crates that compile .proto files (ef-api, or 'all')
+NEEDS_PROTOC=false
+for target in "${TARGETS[@]}"; do
+  case "$target" in
+    all|api) NEEDS_PROTOC=true ;;
+  esac
+done
+
+if [[ "$NEEDS_PROTOC" == true ]] && ! command -v protoc &>/dev/null; then
+  if [[ "$(uname)" == "Darwin" ]] && command -v brew &>/dev/null; then
+    info "protoc not found — installing via Homebrew..."
+    brew install protobuf
+  elif command -v apt-get &>/dev/null; then
+    info "protoc not found — installing via apt..."
+    sudo apt-get update -qq && sudo apt-get install -y protobuf-compiler
+  else
+    err "protoc not found. Run: ./scripts/install.sh"
+    exit 1
+  fi
 fi
 
 # ── macOS: check device discovery tooling ─────────────────────────

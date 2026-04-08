@@ -63,9 +63,13 @@ function Invoke-Build {
     }
 
     Write-Info "Building ef-agent..."
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     & cargo build --bin ef-agent 2>&1 | ForEach-Object { Write-Host $_ }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Err "Build failed (exit code $LASTEXITCODE)"
+    $buildExit = $LASTEXITCODE
+    $ErrorActionPreference = $prevPref
+    if ($buildExit -ne 0) {
+        Write-Err "Build failed (exit code $buildExit)"
         exit 1
     }
     Write-Ok "Build complete: $Binary"

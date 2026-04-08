@@ -55,6 +55,13 @@ function Test-AgentRunning {
 
 # ── Commands ───────────────────────────────────────────────────────
 function Invoke-Build {
+    # On Windows, cargo can't overwrite a running exe — stop agent first
+    if (Test-AgentRunning) {
+        Write-Warn "Stopping agent before build (Windows file lock)..."
+        Invoke-Stop
+        Start-Sleep -Seconds 1
+    }
+
     Write-Info "Building ef-agent..."
     & cargo build --bin ef-agent 2>&1 | ForEach-Object { Write-Host $_ }
     if ($LASTEXITCODE -ne 0) {

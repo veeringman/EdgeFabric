@@ -51,7 +51,12 @@ pub fn LiveSessionsPage() -> impl IntoView {
                                             let dev_id = d.id.clone();
                                             let dev_name = d.name.clone();
                                             let dev_os = d.os.clone();
-                                            let os_icon = if d.os == "android" { "🤖" } else if d.os == "ios" { "🍎" } else { "📱" };
+                                            let os_icon = if d.os == "android" { "🤖" } else if d.os == "ios" { "🍎" } else if d.os == "iot" { "🔌" } else { "📱" };
+                                            let status = d.status.clone();
+                                            let os_label = if d.os == "android" { "Android".to_string() }
+                                                else if d.os == "ios" { "iOS".to_string() }
+                                                else if d.os == "iot" { "IoT".to_string() }
+                                                else { d.os.clone() };
                                             let status = d.status.clone();
                                             view! {
                                                 <div class="device-card" on:click=move |_| {
@@ -60,7 +65,7 @@ pub fn LiveSessionsPage() -> impl IntoView {
                                                     <div class="device-card-icon">{os_icon}</div>
                                                     <div class="device-card-name">{d.name.clone()}</div>
                                                     <div class="device-card-info">
-                                                        {format!("{} {}", if d.os == "android" { "Android" } else if d.os == "ios" { "iOS" } else { &d.os }, d.os_version)}
+                                                        {format!("{} {}", os_label, d.os_version)}
                                                     </div>
                                                     <div class="device-card-serial">{d.serial.clone().unwrap_or_default()}</div>
                                                     <StatusBadge status=status/>
@@ -94,9 +99,14 @@ fn DeviceViewer(
     let (resolution, set_resolution) = signal([1080u32, 2340]);
     let (fps, set_fps) = signal(0.0f64);
     let (touch_start, set_touch_start) = signal(Option::<(f64, f64, f64)>::None);
+    let (serial_lines, set_serial_lines) = signal(Vec::<String>::new());
+    let (shell_input, set_shell_input) = signal(String::new());
+    let (cmd_history, set_cmd_history) = signal(Vec::<String>::new());
+    let (history_idx, set_history_idx) = signal(Option::<usize>::None);
 
     let dev_id = device_id.clone();
     let is_android = device_os == "android";
+    let is_iot = device_os == "iot";
 
     // FPS counter
     let last_frame_time = std::cell::Cell::new(0.0f64);
@@ -168,14 +178,30 @@ fn DeviceViewer(
                 } else if let Ok(text) = evt.data().dyn_into::<js_sys::JsString>() {
                     let s: String = text.into();
                     if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&s) {
-                        if msg.get("type").and_then(|t| t.as_str()) == Some("stream_ready") {
-                            if let Some(res) = msg.get("resolution").and_then(|r| r.as_array()) {
-                                if res.len() == 2 {
-                                    let w = res[0].as_u64().unwrap_or(1080) as u32;
-                                    let h = res[1].as_u64().unwrap_or(2340) as u32;
-                                    set_resolution.set([w, h]);
+                        match msg.get("type").and_then(|t| t.as_str()) {
+                            Some("stream_ready") => {
+                                if let Some(res) = msg.get("resolution").and_then(|r| r.as_array()) {
+                                    if res.len() == 2 {
+                                        let w = res[0].as_u64().unwrap_or(1080) as u32;
+                                        let h = res[1].as_u64().unwrap_or(2340) as u32;
+                                        set_resolution.set([w, h]);
+                                    }
                                 }
                             }
+                            Some("serial_data") => {
+                                if let Some(data) = msg.get("data").and_then(|d| d.as_str()) {
+                                    set_serial_lines.update(|lines| {
+                                        lines.push(data.to_string());
+                                        // Keep last 500 lines
+                                        if lines.len() > 500 {
+                                            let drain = lines.len() - 500;
+                                            lines.drain(..drain);
+                                        }
+                                    });
+                                    set_frame_count.update(|c| *c += 1);
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -292,6 +318,143 @@ fn DeviceViewer(
 
     view! {
         <div class="viewer-layout">
+            // ── IoT serial terminal OR Phone simulator ──
+            {if is_iot {
+                view! {
+                    <div class="card" style="flex: 1; min-width: 0;">
+                        <div class="card-header">
+                            <h2>"🔌 Serial Console"</h2>
+                            <button class="btn btn-ghost btn-sm" on:click=move |_| {
+                                if let Some(ws) = ws_handle.get_untracked() {
+                                    let _ = ws.close();
+                                }
+                                on_close();
+                            }>"✕ Close"</button>
+                        </div>
+                        <Show
+                            when=move || connected.get()
+                            fallback=|| view! {
+                                <div class="loading">"Connecting to serial port…"</div>
+                            }
+                        >
+                            <div class="log-viewer" id="iot-terminal" style="max-height: 600px; min-height: 400px; overflow-y: auto; font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace; font-size: 0.82rem; background: #0d1117; color: #c9d1d9; padding: 0.5rem; border-radius: 6px;">
+                                {move || {
+                                    // Auto-scroll to bottom
+                                    if let Some(w) = web_sys::window() {
+                                        if let Some(d) = w.document() {
+                                            if let Some(el) = d.get_element_by_id("iot-terminal") {
+                                                let _ = el.set_scroll_top(el.scroll_height());
+                                            }
+                                        }
+                                    }
+                                    serial_lines.get().into_iter().map(|line| {
+                                        view! { <div class="log-line" style="white-space: pre-wrap; word-break: break-all; line-height: 1.5; padding: 1px 0;">{line}</div> }
+                                    }).collect::<Vec<_>>()
+                                }}
+                            </div>
+                            // ── Shell command input ──
+                            <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem; align-items: center;">
+                                <span style="color: #58a6ff; font-family: monospace; font-weight: 600; flex-shrink: 0;">"$"</span>
+                                <input
+                                    type="text"
+                                    class="form-control"
+                                    placeholder="Type a command…"
+                                    style="flex: 1; font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; background: #161b22; color: #c9d1d9; border: 1px solid #30363d; border-radius: 4px; padding: 0.4rem 0.6rem;"
+                                    prop:value=move || shell_input.get()
+                                    on:input=move |ev| {
+                                        set_shell_input.set(event_target_value(&ev));
+                                        set_history_idx.set(None);
+                                    }
+                                    on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                        if ev.key() == "Enter" {
+                                            let cmd = shell_input.get_untracked();
+                                            if !cmd.trim().is_empty() {
+                                                if let Some(ws) = ws_handle.get_untracked() {
+                                                    let msg = serde_json::json!({
+                                                        "type": "send_text",
+                                                        "data": format!("{}\r\n", cmd)
+                                                    });
+                                                    let _ = ws.send_with_str(&msg.to_string());
+                                                }
+                                                set_cmd_history.update(|h| h.push(cmd));
+                                                set_shell_input.set(String::new());
+                                                set_history_idx.set(None);
+                                            }
+                                        } else if ev.key() == "ArrowUp" {
+                                            ev.prevent_default();
+                                            let hist = cmd_history.get_untracked();
+                                            if !hist.is_empty() {
+                                                let idx = match history_idx.get_untracked() {
+                                                    Some(i) if i > 0 => i - 1,
+                                                    Some(0) => 0,
+                                                    _ => hist.len() - 1,
+                                                };
+                                                set_shell_input.set(hist[idx].clone());
+                                                set_history_idx.set(Some(idx));
+                                            }
+                                        } else if ev.key() == "ArrowDown" {
+                                            ev.prevent_default();
+                                            let hist = cmd_history.get_untracked();
+                                            if let Some(i) = history_idx.get_untracked() {
+                                                if i + 1 < hist.len() {
+                                                    set_shell_input.set(hist[i + 1].clone());
+                                                    set_history_idx.set(Some(i + 1));
+                                                } else {
+                                                    set_shell_input.set(String::new());
+                                                    set_history_idx.set(None);
+                                                }
+                                            }
+                                        }
+                                    }
+                                />
+                                <button
+                                    class="btn btn-primary btn-sm"
+                                    style="flex-shrink: 0;"
+                                    on:click=move |_| {
+                                        let cmd = shell_input.get_untracked();
+                                        if !cmd.trim().is_empty() {
+                                            if let Some(ws) = ws_handle.get_untracked() {
+                                                let msg = serde_json::json!({
+                                                    "type": "send_text",
+                                                    "data": format!("{}\r\n", cmd)
+                                                });
+                                                let _ = ws.send_with_str(&msg.to_string());
+                                            }
+                                            set_cmd_history.update(|h| h.push(cmd));
+                                            set_shell_input.set(String::new());
+                                            set_history_idx.set(None);
+                                        }
+                                    }
+                                >"Send"</button>
+                            </div>
+                        </Show>
+                        <div class="stream-info" style="margin-top: 0.75rem;">
+                            <div class="info-row">
+                                <span class="info-label">"Device"</span>
+                                <span>{device_name.clone()}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">"Status"</span>
+                                {move || if connected.get() {
+                                    view! { <span class="badge active">"● Connected"</span> }.into_any()
+                                } else {
+                                    view! { <span class="badge queued">"○ Connecting…"</span> }.into_any()
+                                }}
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">"Lines"</span>
+                                <span>{move || frame_count.get()}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">"ID"</span>
+                                <span class="mono" style="font-size: 0.75rem">{full_id}</span>
+                            </div>
+                        </div>
+                    </div>
+                }.into_any()
+            } else {
+            view! {
+                <>
             // ── Phone simulator ──
             <div class="phone-wrapper">
                 <div class={if is_android { "phone-frame android" } else { "phone-frame ios" }}>
@@ -432,6 +595,9 @@ fn DeviceViewer(
                     </div>
                 </div>
             </div>
+                </>
+            }.into_any()
+            }}
         </div>
     }
 }

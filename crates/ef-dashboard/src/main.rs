@@ -16,6 +16,11 @@ use pages::{
     overview::OverviewPage, sessions::SessionsPage, sessions_live::LiveSessionsPage,
 };
 
+/// Global signal for mobile sidebar open/close.
+/// Provided via context so sidebar & shell can share state.
+#[derive(Clone, Copy)]
+struct SidebarOpen(ReadSignal<bool>, WriteSignal<bool>);
+
 fn main() {
     console_error_panic_hook::set_once();
     mount_to_body(App);
@@ -66,13 +71,40 @@ fn AuthGuard(children: Children) -> impl IntoView {
 /// App shell with sidebar + topbar.
 #[component]
 fn Shell(children: Children) -> impl IntoView {
+    let (sidebar_open, set_sidebar_open) = signal(false);
+    provide_context(SidebarOpen(sidebar_open, set_sidebar_open));
+
+    let toggle = move |_| set_sidebar_open.update(|v| *v = !*v);
+    let close_sidebar = move |_| set_sidebar_open.set(false);
+
     view! {
         <div class="app-shell">
+            // Backdrop overlay for mobile
+            <div
+                class="sidebar-backdrop"
+                class:open=move || sidebar_open.get()
+                on:click=close_sidebar
+            />
             <Sidebar/>
             <div class="main-content">
                 <header class="topbar">
-                    <span class="topbar-title">"EdgeFabric"</span>
+                    <div class="topbar-left">
+                        <button class="hamburger-btn" on:click=toggle aria-label="Toggle menu">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                                <line x1="3" y1="6" x2="21" y2="6"/>
+                                <line x1="3" y1="12" x2="21" y2="12"/>
+                                <line x1="3" y1="18" x2="21" y2="18"/>
+                            </svg>
+                        </button>
+                        <img class="topbar-logo" src="/logo.png" alt="EdgeFabric" />
+                        <span class="topbar-title topbar-title-full">"Unified Device Management & Test Orchestration Platform"</span>
+                        <span class="topbar-title topbar-title-short">"Device Management Platform"</span>
+                    </div>
                     <div class="topbar-actions">
+                        <span class="topbar-status">
+                            <span class="status-dot online"></span>
+                            "API Connected"
+                        </span>
                         <LogoutButton/>
                     </div>
                 </header>

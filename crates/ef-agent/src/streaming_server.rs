@@ -22,8 +22,8 @@ use tokio::io::AsyncBufReadExt;
 /// Start the agent's streaming HTTP server on the given port.
 pub async fn start_streaming_server(port: u16) -> anyhow::Result<()> {
     let app = Router::new()
-        .route("/ws/stream/{serial}", get(ws_stream_handler))
-        .route("/ws/logs/{serial}", get(ws_logs_handler))
+        .route("/ws/stream/{*serial}", get(ws_stream_handler))
+        .route("/ws/logs/{*serial}", get(ws_logs_handler))
         .route("/health", get(health));
 
     let addr = format!("0.0.0.0:{port}");
@@ -44,6 +44,12 @@ async fn ws_stream_handler(
     ws: WebSocketUpgrade,
     Path(serial): Path<String>,
 ) -> impl IntoResponse {
+    // Wildcard captures with leading '/' — keep device paths like /dev/ttyACM0 intact
+    let serial = if serial.starts_with("/dev/") || serial.starts_with("/dev\\") {
+        serial
+    } else {
+        serial.strip_prefix('/').unwrap_or(&serial).to_string()
+    };
     tracing::info!(%serial, "Stream WebSocket upgrade");
     ws.on_upgrade(move |socket| handle_stream(socket, serial))
 }
@@ -58,6 +64,13 @@ async fn handle_stream(socket: WebSocket, serial: String) {
     let _ = ws_tx.send(Message::Text(
         json!({"type": "stream_ready", "serial": &serial, "os": &os}).to_string().into()
     )).await;
+
+    // IoT devices: stream serial console as text, not screenshots
+    if os == "iot" {
+        run_iot_serial_stream(ws_tx, ws_rx, &serial).await;
+        tracing::info!(%serial, "IoT stream ended");
+        return;
+    }
 
     let (stop_tx, _) = tokio::sync::watch::channel(false);
     let stop_tx2 = stop_tx.clone();
@@ -133,6 +146,12 @@ async fn ws_logs_handler(
     ws: WebSocketUpgrade,
     Path(serial): Path<String>,
 ) -> impl IntoResponse {
+    // Wildcard captures with leading '/' — keep device paths like /dev/ttyACM0 intact
+    let serial = if serial.starts_with("/dev/") || serial.starts_with("/dev\\") {
+        serial
+    } else {
+        serial.strip_prefix('/').unwrap_or(&serial).to_string()
+    };
     tracing::info!(%serial, "Logs WebSocket upgrade");
     ws.on_upgrade(move |socket| handle_logs(socket, serial))
 }
@@ -156,6 +175,55 @@ async fn handle_logs(socket: WebSocket, serial: String) {
     });
 
     let mut stop_rx = stop_tx.subscribe();
+
+    // IoT: read serial port directly
+    if os == "iot" {
+        let _ = tokio::process::Command::new("stty")
+            .args(["-F", &serial, "115200", "raw", "-echo"])
+            .output()
+            .await;
+
+        let mut child = match tokio::process::Command::new("cat")
+            .arg(&serial)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = ws_tx.send(Message::Text(
+                    json!({"type":"error","message":format!("Failed to open serial port: {e}")}).to_string().into()
+                )).await;
+                return;
+            }
+        };
+
+        let stdout = child.stdout.take().unwrap();
+        let reader = tokio::io::BufReader::new(stdout);
+        let mut lines = reader.lines();
+
+        loop {
+            tokio::select! {
+                line = lines.next_line() => {
+                    match line {
+                        Ok(Some(text)) => {
+                            let entry = parse_iot_log_line(&text);
+                            if ws_tx.send(Message::Text(entry.to_string().into())).await.is_err() {
+                                break;
+                            }
+                        }
+                        Ok(None) => break,
+                        Err(_) => break,
+                    }
+                }
+                _ = stop_rx.changed() => break,
+            }
+        }
+        let _ = child.kill().await;
+        tracing::info!(%serial, "IoT log stream ended");
+        return;
+    }
 
     // Spawn the appropriate log process
     let mut child = match os.as_str() {
@@ -366,12 +434,21 @@ async fn handle_input_event(serial: &str, os: &str, event_json: &str) {
 
 // ── Helpers ───────────────────────────────────────────────────────
 
-/// Detect whether a device serial belongs to an iOS or Android device.
+/// Detect whether a device serial belongs to an iOS, Android, or IoT device.
 async fn detect_device_os(serial: &str) -> String {
+    // IoT: serial port paths
+    // Linux: /dev/ttyACM0, /dev/ttyUSB0, /dev/serial/by-id/...
+    // macOS: /dev/cu.usbmodem*, /dev/cu.usbserial*, /dev/cu.SLAB*
+    // Windows: COM3, COM4, etc.
+    if serial.starts_with("/dev/tty") || serial.starts_with("/dev/serial/")
+        || serial.starts_with("/dev/cu.")
+        || (serial.starts_with("COM") && serial[3..].chars().all(|c| c.is_ascii_digit()))
+    {
+        return "iot".into();
+    }
+
     // iOS UDIDs are 40 hex chars (or 25 chars for newer devices)
-    // Also check if ideviceinfo can talk to it
     if serial.len() >= 24 && serial.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
-        // Likely iOS UDID — verify with ideviceinfo
         let result = tokio::process::Command::new("ideviceinfo")
             .args(["-u", serial, "-k", "DeviceClass"])
             .output()
@@ -429,9 +506,179 @@ fn parse_ios_log_line(line: &str) -> serde_json::Value {
 }
 
 fn shell_escape(s: &str) -> String {
-    if s.chars().all(|c| c.is_alphanumeric() || ".-_:".contains(c)) {
+    if s.chars().all(|c| c.is_alphanumeric() || ".-_:/".contains(c)) {
         s.to_string()
     } else {
         format!("'{}'", s.replace('\'', "'\\''"))
     }
+}
+
+// ── IoT serial helpers ────────────────────────────────────────────
+
+/// Stream IoT serial console as text WebSocket frames.
+/// Cross-platform: Linux (`stty -F` + `cat`), macOS (`stty -f` + `cat`),
+/// Windows (PowerShell `[System.IO.Ports.SerialPort]`).
+async fn run_iot_serial_stream(
+    mut ws_tx: futures::stream::SplitSink<WebSocket, Message>,
+    mut ws_rx: futures::stream::SplitStream<WebSocket>,
+    serial_port: &str,
+) {
+    let (stop_tx, _) = tokio::sync::watch::channel(false);
+    let stop_tx2 = stop_tx.clone();
+    let port_for_input = serial_port.to_string();
+    let is_windows = cfg!(target_os = "windows");
+
+    tokio::spawn(async move {
+        while let Some(Ok(msg)) = ws_rx.next().await {
+            match msg {
+                Message::Text(t) => {
+                    let text = t.to_string();
+                    if text.contains("stop_stream") || text.contains("stop") {
+                        let _ = stop_tx2.send(true);
+                        break;
+                    }
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if v.get("type").and_then(|t| t.as_str()) == Some("send_text") {
+                            if let Some(data) = v.get("data").and_then(|d| d.as_str()) {
+                                serial_write(&port_for_input, data, is_windows).await;
+                            }
+                        }
+                    }
+                }
+                Message::Close(_) => { let _ = stop_tx2.send(true); break; }
+                _ => {}
+            }
+        }
+    });
+
+    let mut stop_rx = stop_tx.subscribe();
+
+    // Spawn platform-appropriate serial reader
+    let mut child = match spawn_serial_reader(serial_port).await {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = ws_tx.send(Message::Text(
+                json!({"type":"error","message":format!("Failed to open serial: {e}")}).to_string().into()
+            )).await;
+            return;
+        }
+    };
+
+    let stdout = child.stdout.take().unwrap();
+    let reader = tokio::io::BufReader::new(stdout);
+    let mut lines = reader.lines();
+    let mut line_count: u64 = 0;
+
+    loop {
+        tokio::select! {
+            line = lines.next_line() => {
+                match line {
+                    Ok(Some(text)) => {
+                        line_count += 1;
+                        let msg = json!({
+                            "type": "serial_data",
+                            "line": line_count,
+                            "data": text,
+                        });
+                        if ws_tx.send(Message::Text(msg.to_string().into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(_) => break,
+                }
+            }
+            _ = stop_rx.changed() => break,
+        }
+    }
+
+    let _ = child.kill().await;
+    tracing::info!(serial_port, line_count, "IoT serial stream ended");
+}
+
+/// Spawn a platform-appropriate process to read from a serial port.
+/// Linux: `stty -F <port> 115200 raw -echo` then `cat <port>`
+/// macOS: `stty -f <port> 115200 raw -echo` then `cat <port>`
+/// Windows: PowerShell script using `[System.IO.Ports.SerialPort]`
+async fn spawn_serial_reader(serial_port: &str) -> Result<tokio::process::Child, std::io::Error> {
+    if cfg!(target_os = "windows") {
+        // Windows: use PowerShell to read serial output line by line
+        let ps_script = format!(
+            r#"$port = New-Object System.IO.Ports.SerialPort '{port}', 115200, 'None', 8, 'One'
+$port.ReadTimeout = -1
+$port.Open()
+try {{ while ($true) {{ $line = $port.ReadLine(); Write-Output $line }} }}
+finally {{ $port.Close() }}"#,
+            port = serial_port,
+        );
+        tokio::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+    } else {
+        // Linux / macOS: configure with stty then `cat`
+        let stty_flag = if cfg!(target_os = "macos") { "-f" } else { "-F" };
+        let _ = tokio::process::Command::new("stty")
+            .args([stty_flag, serial_port, "115200", "raw", "-echo"])
+            .output()
+            .await;
+
+        tokio::process::Command::new("cat")
+            .arg(serial_port)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+    }
+}
+
+/// Write data to a serial port (cross-platform).
+/// Linux/macOS: direct file write. Windows: PowerShell SerialPort.Write().
+async fn serial_write(serial_port: &str, data: &str, is_windows: bool) {
+    if is_windows {
+        let ps = format!(
+            r#"$p = New-Object System.IO.Ports.SerialPort '{port}', 115200; $p.Open(); $p.Write('{data}'); $p.Close()"#,
+            port = serial_port,
+            data = data.replace('\'', "''"),
+        );
+        let _ = tokio::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &ps])
+            .output()
+            .await;
+    } else {
+        let _ = tokio::fs::write(serial_port, data.as_bytes()).await;
+    }
+}
+
+/// Parse an IoT serial line into a structured log entry.
+/// Handles ESP-IDF format: `I (12345) TAG: message`
+fn parse_iot_log_line(line: &str) -> serde_json::Value {
+    let trimmed = line.trim();
+
+    if trimmed.len() >= 3 {
+        let first_char = &trimmed[..1];
+        if matches!(first_char, "I" | "W" | "E" | "D" | "V") && trimmed[1..].starts_with(" (") {
+            let level = match first_char {
+                "I" => "info", "W" => "warn", "E" => "error", "D" => "debug", "V" => "verbose",
+                _ => "info",
+            };
+            let ts = trimmed.find(')').map(|end| &trimmed[3..end]).unwrap_or("");
+            let after = trimmed.find(')').map(|i| &trimmed[i + 1..]).unwrap_or("");
+            let (tag, message) = if let Some(c) = after.find(':') {
+                (after[..c].trim(), after[c + 1..].trim())
+            } else {
+                ("", after.trim())
+            };
+            return json!({ "type": "log", "timestamp": ts, "level": level, "tag": tag, "message": message });
+        }
+    }
+
+    let level = if trimmed.contains("ERROR") || trimmed.contains("[error]") { "error" }
+        else if trimmed.contains("WARN") || trimmed.contains("[warn]") { "warn" }
+        else if trimmed.contains("DEBUG") || trimmed.contains("[debug]") { "debug" }
+        else { "info" };
+
+    json!({ "type": "log", "timestamp": "", "level": level, "tag": "serial", "message": trimmed })
 }

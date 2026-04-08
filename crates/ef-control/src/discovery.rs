@@ -126,62 +126,21 @@ impl DeviceDiscovery {
         }
     }
 
-    /// Scan for IoT devices via mDNS (`avahi-browse` on Linux, `dns-sd` on macOS).
+    /// Scan for IoT devices via USB serial ports (`/dev/ttyACM*`, `/dev/ttyUSB*`)
+    /// and mDNS (`avahi-browse` on Linux, `dns-sd` on macOS).
     pub async fn scan_iot() -> Result<Vec<Device>> {
         info!("Scanning for IoT devices...");
 
-        // Try avahi-browse first (Linux) — the -t flag ensures it terminates
-        let output = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            Command::new("avahi-browse")
-                .args(["-t", "-r", "-p", "_edgefabric._tcp"])
-                .output(),
-        ).await;
+        let mut all_devices = Vec::new();
 
-        if let Ok(Ok(out)) = output {
-            if out.status.success() {
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                let devices = parse_avahi_output(&stdout);
-                info!(count = devices.len(), "IoT avahi scan complete");
-                return Ok(devices);
-            }
-        }
+        // ── USB serial port scan ──────────────────────────────────────
+        all_devices.extend(scan_serial_ports().await);
 
-        // Fallback: dns-sd (macOS built-in)
-        // dns-sd runs indefinitely, so spawn with kill_on_drop and timeout
-        let dns_sd_result = tokio::time::timeout(
-            std::time::Duration::from_secs(3),
-            Command::new("dns-sd")
-                .args(["-Z", "_edgefabric._tcp", "local."])
-                .kill_on_drop(true)
-                .output(),
-        ).await;
+        // ── mDNS scan ─────────────────────────────────────────────────
+        all_devices.extend(scan_mdns_iot().await);
 
-        if let Ok(Ok(out)) = dns_sd_result {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            if !stdout.trim().is_empty() {
-                let devices = parse_dns_sd_output(&stdout);
-                info!(count = devices.len(), "IoT dns-sd scan complete");
-                return Ok(devices);
-            }
-        }
-
-        // Also try generic IoT mDNS service types common in edge deployments
-        let iot_services = ["_mqtt._tcp", "_coap._udp", "_http._tcp"];
-        let mut iot_devices = Vec::new();
-
-        for service in &iot_services {
-            let result = scan_mdns_service(service).await;
-            iot_devices.extend(result);
-        }
-
-        if !iot_devices.is_empty() {
-            info!(count = iot_devices.len(), "IoT mDNS scan complete (generic services)");
-            return Ok(iot_devices);
-        }
-
-        tracing::warn!("No mDNS tools available (avahi-browse / dns-sd); IoT scan skipped");
-        Ok(vec![])
+        info!(count = all_devices.len(), "IoT scan complete (serial + mDNS)");
+        Ok(all_devices)
     }
 
     /// Scan for iOS/iPadOS simulators via `xcrun simctl list devices`.
@@ -228,6 +187,396 @@ impl DeviceDiscovery {
         info!(total = all.len(), "Full device scan complete");
         Ok(all)
     }
+}
+
+/// Scan USB serial ports for IoT devices (ESP32, Arduino, Raspberry Pi Pico, etc.).
+/// Cross-platform: Linux `/dev/serial/by-id/` + `/dev/ttyACM*`, macOS `/dev/cu.usb*`,
+/// Windows `Win32_SerialPort` via PowerShell.
+async fn scan_serial_ports() -> Vec<Device> {
+    if cfg!(target_os = "windows") {
+        scan_serial_ports_windows().await
+    } else if cfg!(target_os = "macos") {
+        scan_serial_ports_macos().await
+    } else {
+        scan_serial_ports_linux().await
+    }
+}
+
+/// Linux: check `/dev/serial/by-id/` for friendly names, fallback to `/dev/ttyACM*` + `/dev/ttyUSB*`.
+async fn scan_serial_ports_linux() -> Vec<Device> {
+    let mut devices = Vec::new();
+
+    // Try /dev/serial/by-id/ first — provides manufacturer info in the symlink name
+    let by_id = Command::new("ls")
+        .args(["-1", "/dev/serial/by-id/"])
+        .output()
+        .await;
+
+    if let Ok(out) = by_id {
+        if out.status.success() {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            for name in stdout.lines() {
+                let name = name.trim();
+                if name.is_empty() { continue; }
+
+                let target = format!("/dev/serial/by-id/{name}");
+                let resolved = tokio::fs::canonicalize(&target).await
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|_| target.clone());
+
+                let friendly = parse_serial_device_name(name);
+
+                devices.push(Device {
+                    id: Uuid::new_v4(),
+                    name: friendly,
+                    serial: Some(resolved),
+                    os: Os::Iot,
+                    os_version: String::new(),
+                    kind: DeviceKind::Real,
+                    status: DeviceStatus::Available,
+                    region: "local".into(),
+                    capabilities: vec!["serial".into(), "usb".into()],
+                    registered_at: Utc::now(),
+                    last_heartbeat: Some(Utc::now()),
+                });
+            }
+        }
+    }
+
+    // Fallback: raw tty devices
+    if devices.is_empty() {
+        for pattern in &["/dev/ttyACM*", "/dev/ttyUSB*"] {
+            if let Ok(out) = Command::new("sh")
+                .args(["-c", &format!("ls -1 {pattern} 2>/dev/null")])
+                .output()
+                .await
+            {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                for dev in stdout.lines() {
+                    let dev = dev.trim();
+                    if dev.is_empty() { continue; }
+                    let short = dev.rsplit('/').next().unwrap_or(dev);
+                    devices.push(Device {
+                        id: Uuid::new_v4(),
+                        name: format!("IoT Serial ({short})"),
+                        serial: Some(dev.to_string()),
+                        os: Os::Iot,
+                        os_version: String::new(),
+                        kind: DeviceKind::Real,
+                        status: DeviceStatus::Available,
+                        region: "local".into(),
+                        capabilities: vec!["serial".into(), "usb".into()],
+                        registered_at: Utc::now(),
+                        last_heartbeat: Some(Utc::now()),
+                    });
+                }
+            }
+        }
+    }
+
+    info!(count = devices.len(), "Serial port scan complete");
+    devices
+}
+
+/// macOS: scan `/dev/cu.usbmodem*` and `/dev/cu.usbserial*`, use `system_profiler` for names.
+async fn scan_serial_ports_macos() -> Vec<Device> {
+    let mut devices = Vec::new();
+
+    // List /dev/cu.usb* ports
+    if let Ok(out) = Command::new("sh")
+        .args(["-c", "ls -1 /dev/cu.usbmodem* /dev/cu.usbserial* /dev/cu.SLAB* 2>/dev/null"])
+        .output()
+        .await
+    {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+
+        // Try system_profiler for friendly USB device names
+        let usb_info = Command::new("system_profiler")
+            .args(["SPUSBDataType", "-detailLevel", "mini"])
+            .output()
+            .await
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .unwrap_or_default();
+
+        for dev in stdout.lines() {
+            let dev = dev.trim();
+            if dev.is_empty() { continue; }
+
+            // Derive a friendly name from the dev path or USB info
+            let short = dev.rsplit('/').next().unwrap_or(dev);
+            let friendly = extract_macos_usb_name(&usb_info, short)
+                .unwrap_or_else(|| format!("IoT Serial ({short})"));
+
+            devices.push(Device {
+                id: Uuid::new_v4(),
+                name: friendly,
+                serial: Some(dev.to_string()),
+                os: Os::Iot,
+                os_version: String::new(),
+                kind: DeviceKind::Real,
+                status: DeviceStatus::Available,
+                region: "local".into(),
+                capabilities: vec!["serial".into(), "usb".into()],
+                registered_at: Utc::now(),
+                last_heartbeat: Some(Utc::now()),
+            });
+        }
+    }
+
+    info!(count = devices.len(), "Serial port scan complete (macOS)");
+    devices
+}
+
+/// Try to extract a USB device name from `system_profiler SPUSBDataType` output
+/// by matching the serial port suffix (e.g. "usbmodem14101").
+fn extract_macos_usb_name(usb_info: &str, port_short: &str) -> Option<String> {
+    // system_profiler lists entries like:
+    //   ESP32-S3:
+    //     ...
+    //     Serial Number: E4:B3:23:B5:DD:28
+    // We look for lines near each device heading.
+    if usb_info.is_empty() { return None; }
+
+    // Simple heuristic: find a device name line preceding a line that mentions our port number
+    let port_id = port_short
+        .strip_prefix("cu.usbmodem")
+        .or_else(|| port_short.strip_prefix("cu.usbserial-"))
+        .or_else(|| port_short.strip_prefix("cu.SLAB_USBtoUART"))
+        .unwrap_or(port_short);
+
+    let lines: Vec<&str> = usb_info.lines().collect();
+    let mut last_device_name = None;
+
+    for line in &lines {
+        let trimmed = line.trim();
+        // Device name lines end with ':'
+        if trimmed.ends_with(':') && !trimmed.starts_with("USB") && !trimmed.contains("Bus") {
+            last_device_name = Some(trimmed.trim_end_matches(':').to_string());
+        }
+        if trimmed.contains("Serial Number") || trimmed.contains("Location ID") {
+            if trimmed.contains(port_id) || trimmed.contains(&port_id.replace("0", "")) {
+                return last_device_name;
+            }
+        }
+    }
+
+    // If we found any Espressif/Arduino/Silicon Labs device, return it
+    for line in &lines {
+        let t = line.trim();
+        if t.ends_with(':') {
+            let name = t.trim_end_matches(':');
+            if name.contains("Espressif") || name.contains("ESP") ||
+               name.contains("Arduino") || name.contains("CP210") ||
+               name.contains("Silicon Labs") || name.contains("FTDI") {
+                return Some(name.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+/// Windows: scan COM ports via `Get-WmiObject Win32_SerialPort` in PowerShell.
+async fn scan_serial_ports_windows() -> Vec<Device> {
+    let mut devices = Vec::new();
+
+    // PowerShell command to list serial ports with description
+    let ps_script = r#"Get-CimInstance Win32_SerialPort | ForEach-Object { "$($_.DeviceID)|$($_.Description)|$($_.PNPDeviceID)" }"#;
+
+    if let Ok(out) = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", ps_script])
+        .output()
+        .await
+    {
+        if out.status.success() {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            for line in stdout.lines() {
+                let line = line.trim();
+                if line.is_empty() { continue; }
+
+                let parts: Vec<&str> = line.splitn(3, '|').collect();
+                let com_port = parts.first().copied().unwrap_or("");
+                let description = parts.get(1).copied().unwrap_or(com_port);
+                let pnp_id = parts.get(2).copied().unwrap_or("");
+
+                // Skip built-in serial ports (COM1 typically is motherboard)
+                if com_port.is_empty() { continue; }
+
+                // Extract a friendly name
+                let friendly = if description.contains("Espressif") || description.contains("USB") ||
+                                  description.contains("Arduino") || description.contains("Silicon") ||
+                                  description.contains("FTDI") || description.contains("CH340") ||
+                                  description.contains("CP210") {
+                    format!("{description} ({com_port})")
+                } else {
+                    format!("Serial {com_port} — {description}")
+                };
+
+                // Extract serial number from PNP ID (e.g. USB\VID_303A&PID_1001\E4:B3:23:B5:DD:28)
+                let serial_id = pnp_id.rsplit('\\').next().unwrap_or("");
+                let name = if serial_id.contains(':') || serial_id.len() > 8 {
+                    // Has a MAC or USB serial — include it
+                    if description.contains("Espressif") {
+                        format!("Espressif ({serial_id})")
+                    } else {
+                        format!("{description} ({serial_id})")
+                    }
+                } else {
+                    friendly
+                };
+
+                devices.push(Device {
+                    id: Uuid::new_v4(),
+                    name,
+                    serial: Some(com_port.to_string()),
+                    os: Os::Iot,
+                    os_version: String::new(),
+                    kind: DeviceKind::Real,
+                    status: DeviceStatus::Available,
+                    region: "local".into(),
+                    capabilities: vec!["serial".into(), "usb".into()],
+                    registered_at: Utc::now(),
+                    last_heartbeat: Some(Utc::now()),
+                });
+            }
+        }
+    }
+
+    // Fallback: try [System.IO.Ports.SerialPort]::GetPortNames()
+    if devices.is_empty() {
+        if let Ok(out) = Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command",
+                   "[System.IO.Ports.SerialPort]::GetPortNames()"])
+            .output()
+            .await
+        {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            for port in stdout.lines() {
+                let port = port.trim();
+                if port.is_empty() || !port.starts_with("COM") { continue; }
+                devices.push(Device {
+                    id: Uuid::new_v4(),
+                    name: format!("IoT Serial ({port})"),
+                    serial: Some(port.to_string()),
+                    os: Os::Iot,
+                    os_version: String::new(),
+                    kind: DeviceKind::Real,
+                    status: DeviceStatus::Available,
+                    region: "local".into(),
+                    capabilities: vec!["serial".into(), "usb".into()],
+                    registered_at: Utc::now(),
+                    last_heartbeat: Some(Utc::now()),
+                });
+            }
+        }
+    }
+
+    info!(count = devices.len(), "Serial port scan complete (Windows)");
+    devices
+}
+
+/// Extract a friendly name from a `/dev/serial/by-id/` symlink name.
+/// e.g. `usb-Espressif_USB_JTAG_serial_debug_unit_E4:B3:23:B5:DD:28-if00` → `Espressif USB JTAG (E4:B3:23:B5:DD:28)`
+fn parse_serial_device_name(by_id_name: &str) -> String {
+    // Strip "usb-" prefix
+    let s = by_id_name.strip_prefix("usb-").unwrap_or(by_id_name);
+    // Strip "-ifNN" suffix (interface number) precisely
+    let s = if let Some(pos) = s.rfind("-if") {
+        let suffix = &s[pos + 3..];
+        if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+            &s[..pos]
+        } else {
+            s
+        }
+    } else {
+        s
+    };
+
+    // Split on underscores
+    let parts: Vec<&str> = s.split('_').collect();
+
+    // Try to extract manufacturer and a MAC/serial identifier
+    if parts.len() >= 2 {
+        let manufacturer = parts[0].replace('_', " ");
+        // Look for a MAC-like pattern (XX:XX:XX...) or long serial at the end
+        let maybe_id = parts.last().unwrap_or(&"");
+        if maybe_id.contains(':') || maybe_id.len() > 8 {
+            format!("{manufacturer} ({maybe_id})")
+        } else {
+            parts.join(" ")
+        }
+    } else {
+        s.replace('_', " ")
+    }
+}
+
+/// Scan for IoT devices via mDNS.
+/// Linux: `avahi-browse`, macOS: `dns-sd`, Windows: `dns-sd` (Bonjour) or skip.
+async fn scan_mdns_iot() -> Vec<Device> {
+    if cfg!(target_os = "windows") {
+        // Windows: try dns-sd if Bonjour is installed (comes with iTunes / Bonjour SDK)
+        if let Ok(Ok(out)) = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            Command::new("dns-sd")
+                .args(["-Z", "_edgefabric._tcp", "local."])
+                .kill_on_drop(true)
+                .output(),
+        ).await {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            if !stdout.trim().is_empty() {
+                let devices = parse_dns_sd_output(&stdout);
+                if !devices.is_empty() {
+                    return devices;
+                }
+            }
+        } else {
+            info!("mDNS scan skipped on Windows (dns-sd / Bonjour not installed)");
+        }
+
+        return vec![];
+    }
+
+    // Try avahi-browse first (Linux)
+    if let Ok(Ok(out)) = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        Command::new("avahi-browse")
+            .args(["-t", "-r", "-p", "_edgefabric._tcp"])
+            .output(),
+    ).await {
+        if out.status.success() {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let devices = parse_avahi_output(&stdout);
+            if !devices.is_empty() {
+                info!(count = devices.len(), "IoT avahi scan complete");
+                return devices;
+            }
+        }
+    }
+
+    // Fallback: dns-sd (macOS)
+    if let Ok(Ok(out)) = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        Command::new("dns-sd")
+            .args(["-Z", "_edgefabric._tcp", "local."])
+            .kill_on_drop(true)
+            .output(),
+    ).await {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        if !stdout.trim().is_empty() {
+            let devices = parse_dns_sd_output(&stdout);
+            if !devices.is_empty() {
+                return devices;
+            }
+        }
+    }
+
+    // Try generic mDNS service types
+    let mut devices = Vec::new();
+    for service in &["_mqtt._tcp", "_coap._udp", "_http._tcp"] {
+        devices.extend(scan_mdns_service(service).await);
+    }
+    devices
 }
 
 /// Parse `xcrun xctrace list devices` output.

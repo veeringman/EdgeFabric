@@ -156,6 +156,23 @@ async fn handle_stream(socket: WebSocket, id: Uuid, state: AppState) {
     }
 
     // Local device — run capture directly
+
+    // IoT devices: stream serial console output as text frames
+    if device.os == "iot" {
+        tracing::info!(%id, serial = %serial, "Starting IoT serial stream");
+        let _ = ws_tx.send(Message::Text(
+            serde_json::json!({
+                "type": "stream_ready",
+                "device_id": id,
+                "serial": serial,
+                "device_type": "iot",
+            }).to_string().into()
+        )).await;
+        run_serial_stream(ws_tx, ws_rx, &serial, id).await;
+        tracing::info!(%id, "IoT stream ended");
+        return;
+    }
+
     let effective_serial = if let Some(ref ip) = device.ip_address {
         let addr = format!("{ip}:5555");
         tracing::info!(%addr, "Auto-connecting ADB to remote device");
@@ -431,6 +448,14 @@ async fn handle_logs(socket: WebSocket, device_id: Uuid, state: AppState) {
         }
     }
 
+    // IoT devices: stream serial console as log lines
+    if device.os == "iot" {
+        tracing::info!(%device_id, serial = %serial, "Starting IoT serial log stream");
+        run_serial_log_stream(ws_tx, ws_rx, &serial, device_id).await;
+        tracing::info!(%device_id, "IoT log stream ended");
+        return;
+    }
+
     // Local device: run ADB logcat directly
     let effective_serial = if let Some(ref ip) = device.ip_address {
         let addr = format!("{ip}:5555");
@@ -558,5 +583,281 @@ fn parse_logcat_line(line: &str) -> serde_json::Value {
         "level": level,
         "tag": tag.trim(),
         "message": message,
+    })
+}
+
+// ── IoT serial streaming ──────────────────────────────────────────
+
+/// Stream IoT serial console output as text WebSocket frames.
+/// The `serial` parameter is the device path (e.g. `/dev/ttyACM0`, `/dev/cu.usbmodem*`, `COM3`).
+/// Cross-platform: Linux (`stty -F`), macOS (`stty -f`), Windows (PowerShell SerialPort).
+async fn run_serial_stream(
+    mut ws_tx: futures::stream::SplitSink<WebSocket, Message>,
+    mut ws_rx: futures::stream::SplitStream<WebSocket>,
+    serial_port: &str,
+    device_id: Uuid,
+) {
+    let (stop_tx, _) = tokio::sync::watch::channel(false);
+    let stop_tx2 = stop_tx.clone();
+
+    // Handle client messages (stop, send_text for writing to serial)
+    let port_for_input = serial_port.to_string();
+    let is_windows = cfg!(target_os = "windows");
+    tokio::spawn(async move {
+        while let Some(Ok(msg)) = ws_rx.next().await {
+            match msg {
+                Message::Text(t) => {
+                    let text = t.to_string();
+                    if text.contains("stop_stream") || text.contains("stop") {
+                        let _ = stop_tx2.send(true);
+                        break;
+                    }
+                    // Allow sending text to the serial device
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if v.get("type").and_then(|t| t.as_str()) == Some("send_text") {
+                            if let Some(data) = v.get("data").and_then(|d| d.as_str()) {
+                                serial_write_local(&port_for_input, data, is_windows).await;
+                            }
+                        }
+                    }
+                }
+                Message::Close(_) => {
+                    let _ = stop_tx2.send(true);
+                    break;
+                }
+                _ => {}
+            }
+        }
+    });
+
+    let mut stop_rx = stop_tx.subscribe();
+
+    // Spawn platform-appropriate serial reader
+    let mut child = match spawn_serial_reader_local(serial_port).await {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = ws_tx.send(Message::Text(
+                serde_json::json!({"type":"error","message":format!("Failed to open {serial_port}: {e}")}).to_string().into()
+            )).await;
+            return;
+        }
+    };
+
+    let stdout = child.stdout.take().unwrap();
+    let reader = tokio::io::BufReader::new(stdout);
+    let mut lines = reader.lines();
+    let mut line_count: u64 = 0;
+
+    loop {
+        tokio::select! {
+            line = lines.next_line() => {
+                match line {
+                    Ok(Some(text)) => {
+                        line_count += 1;
+                        let msg = serde_json::json!({
+                            "type": "serial_data",
+                            "line": line_count,
+                            "data": text,
+                        });
+                        if ws_tx.send(Message::Text(msg.to_string().into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(_) => break,
+                }
+            }
+            _ = stop_rx.changed() => break,
+        }
+    }
+
+    let _ = child.kill().await;
+    tracing::info!(%device_id, line_count, "IoT serial stream ended");
+}
+
+/// Stream IoT serial console as structured log lines (cross-platform).
+async fn run_serial_log_stream(
+    mut ws_tx: futures::stream::SplitSink<WebSocket, Message>,
+    mut ws_rx: futures::stream::SplitStream<WebSocket>,
+    serial_port: &str,
+    device_id: Uuid,
+) {
+    let (stop_tx, _) = tokio::sync::watch::channel(false);
+    let stop_tx2 = stop_tx.clone();
+
+    tokio::spawn(async move {
+        while let Some(Ok(msg)) = ws_rx.next().await {
+            match msg {
+                Message::Text(t) => {
+                    let text = t.to_string();
+                    if text.contains("stop") {
+                        let _ = stop_tx2.send(true);
+                        break;
+                    }
+                }
+                Message::Close(_) => {
+                    let _ = stop_tx2.send(true);
+                    break;
+                }
+                _ => {}
+            }
+        }
+    });
+
+    let mut stop_rx = stop_tx.subscribe();
+
+    // Spawn platform-appropriate serial reader
+    let mut child = match spawn_serial_reader_local(serial_port).await {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = ws_tx.send(Message::Text(
+                serde_json::json!({"type":"error","message":format!("Failed to open {serial_port}: {e}")}).to_string().into()
+            )).await;
+            return;
+        }
+    };
+
+    let stdout = child.stdout.take().unwrap();
+    let reader = tokio::io::BufReader::new(stdout);
+    let mut lines = reader.lines();
+    let mut line_count: u64 = 0;
+
+    loop {
+        tokio::select! {
+            line = lines.next_line() => {
+                match line {
+                    Ok(Some(text)) => {
+                        line_count += 1;
+                        let entry = parse_iot_log_line(&text);
+                        if ws_tx.send(Message::Text(entry.to_string().into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(_) => break,
+                }
+            }
+            _ = stop_rx.changed() => break,
+        }
+    }
+
+    let _ = child.kill().await;
+    tracing::info!(%device_id, line_count, "IoT serial log stream ended");
+}
+
+/// Spawn a platform-appropriate process to read from a serial port.
+/// Linux: `stty -F` + `cat`, macOS: `stty -f` + `cat`, Windows: PowerShell SerialPort.
+async fn spawn_serial_reader_local(serial_port: &str) -> Result<tokio::process::Child, std::io::Error> {
+    if cfg!(target_os = "windows") {
+        let ps_script = format!(
+            r#"$port = New-Object System.IO.Ports.SerialPort '{port}', 115200, 'None', 8, 'One'
+$port.ReadTimeout = -1
+$port.Open()
+try {{ while ($true) {{ $line = $port.ReadLine(); Write-Output $line }} }}
+finally {{ $port.Close() }}"#,
+            port = serial_port,
+        );
+        tokio::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+    } else {
+        let stty_flag = if cfg!(target_os = "macos") { "-f" } else { "-F" };
+        let _ = tokio::process::Command::new("stty")
+            .args([stty_flag, serial_port, "115200", "raw", "-echo"])
+            .output()
+            .await;
+
+        tokio::process::Command::new("cat")
+            .arg(serial_port)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+    }
+}
+
+/// Write data to a serial port (cross-platform).
+/// Linux/macOS: direct file write. Windows: PowerShell SerialPort.Write().
+async fn serial_write_local(serial_port: &str, data: &str, is_windows: bool) {
+    if is_windows {
+        let ps = format!(
+            r#"$p = New-Object System.IO.Ports.SerialPort '{port}', 115200; $p.Open(); $p.Write('{data}'); $p.Close()"#,
+            port = serial_port,
+            data = data.replace('\'', "''"),
+        );
+        let _ = tokio::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &ps])
+            .output()
+            .await;
+    } else {
+        let _ = tokio::fs::write(serial_port, data.as_bytes()).await;
+    }
+}
+
+/// Parse an IoT serial line into a structured log entry.
+/// Tries to detect ESP-IDF log format: `I (12345) tag: message`
+/// Falls back to raw text with level detection.
+fn parse_iot_log_line(line: &str) -> serde_json::Value {
+    let trimmed = line.trim();
+
+    // ESP-IDF format: "I (12345) TAG: message" or "E (12345) TAG: message"
+    if trimmed.len() >= 3 {
+        let first_char = &trimmed[..1];
+        if matches!(first_char, "I" | "W" | "E" | "D" | "V")
+            && trimmed[1..].starts_with(" (")
+        {
+            let level = match first_char {
+                "I" => "info",
+                "W" => "warn",
+                "E" => "error",
+                "D" => "debug",
+                "V" => "verbose",
+                _ => "info",
+            };
+
+            // Extract timestamp from parentheses
+            let ts = trimmed
+                .find(')')
+                .map(|end| &trimmed[3..end])
+                .unwrap_or("");
+
+            // Extract tag and message after ")"
+            let after_paren = trimmed.find(')').map(|i| &trimmed[i + 1..]).unwrap_or("");
+            let (tag, message) = if let Some(colon) = after_paren.find(':') {
+                (after_paren[..colon].trim(), after_paren[colon + 1..].trim())
+            } else {
+                ("", after_paren.trim())
+            };
+
+            return serde_json::json!({
+                "type": "log",
+                "timestamp": ts,
+                "level": level,
+                "tag": tag,
+                "message": message,
+            });
+        }
+    }
+
+    // Fallback: detect level from keywords
+    let level = if trimmed.contains("[error]") || trimmed.contains("ERROR") {
+        "error"
+    } else if trimmed.contains("[warn]") || trimmed.contains("WARN") {
+        "warn"
+    } else if trimmed.contains("[debug]") || trimmed.contains("DEBUG") {
+        "debug"
+    } else {
+        "info"
+    };
+
+    serde_json::json!({
+        "type": "log",
+        "timestamp": "",
+        "level": level,
+        "tag": "serial",
+        "message": trimmed,
     })
 }

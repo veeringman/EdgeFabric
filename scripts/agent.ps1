@@ -10,7 +10,7 @@
 #   .\scripts\agent.ps1 pull           # git pull + build + restart
 #
 # Environment:
-#   $env:RUN_ENV = "development"       # default
+#   $env:EF_RUN_MODE = "development"    # default
 #   $env:AGENT_ID = "win-01"           # override agent ID
 
 param(
@@ -27,7 +27,7 @@ $ProjectRoot = Split-Path -Parent $ScriptDir
 $Binary      = Join-Path $ProjectRoot "target\debug\ef-agent.exe"
 $LogFile     = Join-Path $env:TEMP "ef-agent.log"
 $PidFile     = Join-Path $env:TEMP "ef-agent.pid"
-$RunEnv      = if ($env:RUN_ENV) { $env:RUN_ENV } else { "development" }
+$RunEnv      = if ($env:EF_RUN_MODE) { $env:EF_RUN_MODE } else { "development" }
 
 Set-Location $ProjectRoot
 
@@ -84,7 +84,7 @@ function Invoke-Start {
 
     Write-Info "Starting ef-agent (env=$RunEnv, log=$LogFile)..."
 
-    $env:RUN_ENV = $RunEnv
+    $env:EF_RUN_MODE = $RunEnv
 
     # Set agent ID override if provided
     if ($env:AGENT_ID) {
@@ -248,13 +248,13 @@ function Show-Help {
     pull        git pull + build + restart
 
   Environment:
-    `$env:RUN_ENV = "development"     Config profile (default: development)
+    `$env:EF_RUN_MODE = "development"  Config profile (default: development)
     `$env:AGENT_ID = "win-01"         Override agent ID
 
   Examples:
     .\scripts\agent.ps1 start
     .\scripts\agent.ps1 logs
-    `$env:AGENT_ID = "win-laptop"; .\scripts\agent.ps1 start
+    `$env:EF_RUN_MODE = "development"; .\scripts\agent.ps1 start
 
 "@
 }

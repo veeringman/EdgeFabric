@@ -66,7 +66,7 @@ async-nats = "0.38"
 rumqttc = "0.24"
 
 # HTTP client
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
 
 # WebRTC
 webrtc = "0.8"
@@ -103,7 +103,7 @@ dirs = "6"
 
 # Observability / Metrics
 metrics = "0.24"
-metrics-exporter-prometheus = "0.16"
+metrics-exporter-prometheus = { version = "0.16", default-features = false, features = ["http-listener"] }
 opentelemetry = { version = "0.27", features = ["trace"] }
 opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.27", features = ["tonic"] }

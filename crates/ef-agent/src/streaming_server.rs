@@ -17,10 +17,12 @@ use axum::{
 use futures::{SinkExt, StreamExt};
 use serde_json::json;
 use std::process::Stdio;
+#[cfg(target_os = "macos")]
 use std::sync::OnceLock;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 /// Resolve the ffmpeg binary path once (handles non-login shells missing /usr/local/bin).
+#[cfg(target_os = "macos")]
 fn ffmpeg_path() -> &'static str {
     static PATH: OnceLock<String> = OnceLock::new();
     PATH.get_or_init(|| {
@@ -249,6 +251,7 @@ async fn handle_logs(socket: WebSocket, serial: String) {
 
     // Spawn the appropriate log process
     let mut child = match os.as_str() {
+        #[cfg(target_os = "macos")]
         "simulator" => {
             // iOS Simulator: use xcrun simctl spawn to stream system log
             match tokio::process::Command::new("xcrun")
@@ -267,6 +270,7 @@ async fn handle_logs(socket: WebSocket, serial: String) {
                 }
             }
         }
+        #[cfg(target_os = "macos")]
         "ios" => {
             // Try idevicesyslog first
             match tokio::process::Command::new("idevicesyslog")
@@ -283,6 +287,13 @@ async fn handle_logs(socket: WebSocket, serial: String) {
                     return;
                 }
             }
+        }
+        #[cfg(not(target_os = "macos"))]
+        "simulator" | "ios" => {
+            let _ = ws_tx.send(Message::Text(
+                json!({"type":"error","message":"iOS/simulator logs require macOS agent"}).to_string().into()
+            )).await;
+            return;
         }
         _ => {
             // Android: adb logcat
@@ -336,8 +347,12 @@ async fn handle_logs(socket: WebSocket, serial: String) {
 
 async fn capture_frame(serial: &str, os: &str, ios_tmp: &str) -> anyhow::Result<Vec<u8>> {
     match os {
+        #[cfg(target_os = "macos")]
         "simulator" => capture_simulator_frame(serial, ios_tmp).await,
+        #[cfg(target_os = "macos")]
         "ios" => capture_ios_frame(serial, ios_tmp).await,
+        #[cfg(not(target_os = "macos"))]
+        "simulator" | "ios" => anyhow::bail!("iOS/simulator capture requires macOS agent"),
         _ => capture_android_frame(serial).await,
     }
 }
@@ -373,6 +388,7 @@ async fn capture_android_frame(serial: &str) -> anyhow::Result<Vec<u8>> {
 }
 
 /// iOS Simulator: xcrun simctl io screenshot → (optionally ffmpeg → JPEG)
+#[cfg(target_os = "macos")]
 async fn capture_simulator_frame(serial: &str, tmp: &str) -> anyhow::Result<Vec<u8>> {
     let png_tmp = format!("{tmp}.png");
 
@@ -417,6 +433,7 @@ async fn capture_simulator_frame(serial: &str, tmp: &str) -> anyhow::Result<Vec<
 }
 
 /// iOS: idevicescreenshot → ffmpeg → JPEG
+#[cfg(target_os = "macos")]
 async fn capture_ios_frame(serial: &str, tmp: &str) -> anyhow::Result<Vec<u8>> {
     // idevicescreenshot writes a TIFF to a file — we use a temp file then ffmpeg
 
@@ -468,6 +485,7 @@ async fn handle_input_event(serial: &str, os: &str, event_json: &str) {
     let etype = event.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
     match os {
+        #[cfg(target_os = "macos")]
         "simulator" => {
             tracing::info!(%serial, %etype, "Simulator input event");
             match etype {
@@ -532,6 +550,7 @@ async fn handle_input_event(serial: &str, os: &str, event_json: &str) {
                 }
             }
         }
+        #[cfg(target_os = "macos")]
         "ios" => {
             tracing::info!(%serial, %etype, "iOS input event");
             match etype {
@@ -570,6 +589,10 @@ async fn handle_input_event(serial: &str, os: &str, event_json: &str) {
                     tracing::debug!(%serial, %etype, "iOS input event not supported");
                 }
             }
+        }
+        #[cfg(not(target_os = "macos"))]
+        "simulator" | "ios" => {
+            tracing::debug!(%serial, %etype, "iOS/simulator input requires macOS agent");
         }
         _ => {
             // Android via ADB
@@ -638,31 +661,34 @@ async fn detect_device_os(serial: &str) -> String {
         return "iot".into();
     }
 
-    // iOS Simulator: UUID format (8-4-4-4-12 hex with dashes)
-    // Check before real iOS since simulator UUIDs also pass the hex check
-    if serial.len() == 36 && serial.chars().filter(|c| *c == '-').count() == 4 {
-        let result = tokio::process::Command::new("xcrun")
-            .args(["simctl", "list", "devices", "-j"])
-            .output()
-            .await;
-        if let Ok(out) = result {
-            let s = String::from_utf8_lossy(&out.stdout);
-            if s.contains(serial) {
-                return "simulator".into();
+    // iOS Simulator & real iOS: only probe on macOS where xcrun/ideviceinfo exist
+    #[cfg(target_os = "macos")]
+    {
+        // iOS Simulator: UUID format (8-4-4-4-12 hex with dashes)
+        if serial.len() == 36 && serial.chars().filter(|c| *c == '-').count() == 4 {
+            let result = tokio::process::Command::new("xcrun")
+                .args(["simctl", "list", "devices", "-j"])
+                .output()
+                .await;
+            if let Ok(out) = result {
+                let s = String::from_utf8_lossy(&out.stdout);
+                if s.contains(serial) {
+                    return "simulator".into();
+                }
             }
         }
-    }
 
-    // iOS UDIDs are 40 hex chars (or 25 chars for newer devices)
-    if serial.len() >= 24 && serial.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
-        let result = tokio::process::Command::new("ideviceinfo")
-            .args(["-u", serial, "-k", "DeviceClass"])
-            .output()
-            .await;
-        if let Ok(out) = result {
-            let s = String::from_utf8_lossy(&out.stdout);
-            if s.contains("iPhone") || s.contains("iPad") || s.contains("iPod") {
-                return "ios".into();
+        // iOS UDIDs are 40 hex chars (or 25 chars for newer devices)
+        if serial.len() >= 24 && serial.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
+            let result = tokio::process::Command::new("ideviceinfo")
+                .args(["-u", serial, "-k", "DeviceClass"])
+                .output()
+                .await;
+            if let Ok(out) = result {
+                let s = String::from_utf8_lossy(&out.stdout);
+                if s.contains("iPhone") || s.contains("iPad") || s.contains("iPod") {
+                    return "ios".into();
+                }
             }
         }
     }
@@ -1140,7 +1166,19 @@ async fn handle_ssh_session(socket: WebSocket, host: String, port: u16) {
 
     match &auth_method {
         SshAuth::Password(pw) => {
-            // Use sshpass for password auth (requires sshpass on the agent)
+            // Check sshpass availability before attempting password auth
+            let sshpass_ok = tokio::process::Command::new("which")
+                .arg("sshpass")
+                .output()
+                .await
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            if !sshpass_ok {
+                let _ = ws_tx.send(Message::Text(
+                    json!({"type":"error","message":"sshpass not installed on this agent — password auth unavailable"}).to_string().into()
+                )).await;
+                return;
+            }
             cmd = tokio::process::Command::new("sshpass");
             cmd.args(["-p", pw, "ssh",
                 "-tt",

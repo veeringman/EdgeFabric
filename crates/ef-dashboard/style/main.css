@@ -410,13 +410,55 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    padding: 2rem;
+    padding: 2.5rem 2rem 2rem;
     width: 100%;
-    max-width: 400px;
+    max-width: 420px;
     box-shadow: var(--shadow-lg);
 }
+.login-logo {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 0.5rem;
+}
+.login-logo-img {
+    max-width: 200px;
+    height: auto;
+}
 .login-card h1 { text-align: center; margin-bottom: 0.5rem; }
-.login-card .subtitle { text-align: center; color: var(--text-muted); margin-bottom: 1.5rem; font-size: 0.9rem; }
+.login-card .subtitle { text-align: center; color: var(--text-muted); margin-bottom: 1.25rem; font-size: 0.9rem; }
+.login-tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 1.25rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+.login-tab {
+    flex: 1;
+    padding: 0.6rem 0.75rem;
+    background: var(--bg-secondary);
+    color: var(--text-muted);
+    border: none;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 500;
+    transition: background 0.15s, color 0.15s;
+}
+.login-tab:first-child { border-right: 1px solid var(--border); }
+.login-tab:hover { background: var(--bg-hover); color: var(--text-primary); }
+.login-tab.active {
+    background: var(--accent);
+    color: #0f172a;
+    font-weight: 600;
+}
+.login-hint {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    margin-top: 0.75rem;
+    opacity: 0.7;
+}
 .login-card .form-group { margin-bottom: 1rem; }
 .login-card .btn { width: 100%; justify-content: center; margin-top: 0.5rem; }
 
@@ -1036,6 +1078,85 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
     aspect-ratio: 9 / 22;
 }
 
+/* ── Android Tablet Bezel Variants ── */
+/* Samsung Galaxy Tab S — landscape, thin bezels, dark */
+.phone-frame.android.galaxy-tab {
+    border-radius: 16px;
+    background: linear-gradient(145deg, #1e1e1e, #111111);
+    border: 2px solid #3a3a3a;
+    width: clamp(380px, 50vw, 640px);
+    flex-direction: row;
+    transform: none;
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.05),
+        0 2px 4px rgba(0,0,0,0.3),
+        0 10px 24px rgba(0,0,0,0.35),
+        0 18px 54px rgba(0,0,0,0.5);
+}
+.phone-frame.android.galaxy-tab:hover { transform: none; }
+/* Google Pixel Tablet — landscape, rounded, porcelain feel */
+.phone-frame.android.pixel-tablet {
+    border-radius: 20px;
+    background: linear-gradient(145deg, #e8e5e0, #d8d4cf);
+    border: 2.5px solid #c5c0b8;
+    width: clamp(380px, 50vw, 640px);
+    flex-direction: row;
+    transform: none;
+    box-shadow:
+        inset 0 0 1px rgba(255,255,255,0.5),
+        0 2px 4px rgba(0,0,0,0.2),
+        0 10px 24px rgba(0,0,0,0.25),
+        0 18px 54px rgba(0,0,0,0.4);
+}
+.phone-frame.android.pixel-tablet:hover { transform: none; }
+/* Generic Android Tablet — landscape, neutral dark */
+.phone-frame.android.android-tablet {
+    border-radius: 14px;
+    background: linear-gradient(145deg, #222226, #18181c);
+    border: 2px solid #555;
+    width: clamp(360px, 48vw, 600px);
+    flex-direction: row;
+    transform: none;
+}
+.phone-frame.android.android-tablet:hover { transform: none; }
+
+/* Android tablet screen — landscape 16:10 */
+.galaxy-tab .phone-screen,
+.pixel-tablet .phone-screen,
+.android-tablet .phone-screen {
+    aspect-ratio: 16 / 10;
+}
+/* Android tablet notch → left side camera bar */
+.galaxy-tab .phone-notch,
+.pixel-tablet .phone-notch,
+.android-tablet .phone-notch {
+    height: auto;
+    width: 16px;
+    min-height: 100%;
+    flex-direction: column;
+}
+/* Android tablet navbar → right side nav bar */
+.galaxy-tab .phone-navbar,
+.pixel-tablet .phone-navbar,
+.android-tablet .phone-navbar {
+    height: auto;
+    width: 20px;
+    min-height: 100%;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.galaxy-tab .phone-navbar .nav-btn,
+.pixel-tablet .phone-navbar .nav-btn,
+.android-tablet .phone-navbar .nav-btn {
+    padding: 3px;
+}
+.galaxy-tab .phone-navbar svg,
+.pixel-tablet .phone-navbar svg,
+.android-tablet .phone-navbar svg {
+    width: 14px;
+    height: 14px;
+}
+
 /* Android notch variants */
 .phone-notch.android-punch-hole {
     height: 24px;
@@ -1078,6 +1199,45 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
         0 0 18px rgba(0,0,0,0.2);
 }
 
+/* iPhone 3G/3GS — chrome-edged, thick bezels, very rounded, 3:2 screen */
+.phone-frame.ios.iphone-3g {
+    border-radius: 42px;
+    background: linear-gradient(145deg, #2a2a2c, #1a1a1c);
+    border: 3px solid #888;
+    box-shadow:
+        0 0 0 1px rgba(160,160,170,0.3),
+        inset 0 1px 0 rgba(255,255,255,0.15),
+        inset 0 -1px 0 rgba(0,0,0,0.2),
+        0 2px 4px rgba(0,0,0,0.25),
+        0 8px 20px rgba(0,0,0,0.3),
+        0 16px 48px rgba(0,0,0,0.45);
+}
+/* iPhone 4/4S — flat glass sandwich, stainless steel band */
+.phone-frame.ios.iphone-4 {
+    border-radius: 24px;
+    background: linear-gradient(145deg, #1e1e20, #111113);
+    border: 2.5px solid #9a9a9e;
+    box-shadow:
+        0 0 0 1px rgba(180,180,185,0.25),
+        inset 0 1px 0 rgba(255,255,255,0.1),
+        inset 0 -1px 0 rgba(0,0,0,0.2),
+        0 2px 4px rgba(0,0,0,0.25),
+        0 8px 20px rgba(0,0,0,0.3),
+        0 16px 48px rgba(0,0,0,0.45);
+}
+/* iPhone 5/5S/SE 1st — aluminium unibody, taller 16:9 */
+.phone-frame.ios.iphone-5 {
+    border-radius: 28px;
+    background: linear-gradient(145deg, #d0d0d4, #b8b8bc);
+    border: 2px solid #a8a8ac;
+    box-shadow:
+        0 0 0 1px rgba(190,190,195,0.2),
+        inset 0 1px 0 rgba(255,255,255,0.4),
+        inset 0 -1px 0 rgba(0,0,0,0.1),
+        0 2px 4px rgba(0,0,0,0.2),
+        0 8px 20px rgba(0,0,0,0.25),
+        0 16px 48px rgba(0,0,0,0.45);
+}
 /* iPhone 6/7/8 — classic with home button, thick bezels, rounded body */
 .phone-frame.ios.iphone-classic {
     border-radius: 36px;
@@ -1122,6 +1282,145 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
     background: linear-gradient(145deg, #2e2e32, #222226);
     border: 2.5px solid #5a5a5e;
 }
+/* iPhone 12/13 mini — same style as modern but smaller body */
+.phone-frame.ios.iphone-mini {
+    border-radius: 40px;
+    background: linear-gradient(145deg, #2a2a2e, #1e1e22);
+    border: 2.5px solid #555;
+    width: clamp(150px, 16vw, 220px);
+}
+
+/* ── iPad bezels — landscape orientation ────────── */
+/* iPad classic — thick bezels, home button, silver/space-grey */
+.phone-frame.ios.ipad-classic {
+    border-radius: 16px;
+    background: linear-gradient(145deg, #d8d8dc, #c0c0c4);
+    border: 2.5px solid #bbb;
+    width: clamp(380px, 50vw, 640px);
+    flex-direction: row;
+    box-shadow:
+        inset 0 0 1px rgba(255,255,255,0.5),
+        0 2px 4px rgba(0,0,0,0.2),
+        0 10px 24px rgba(0,0,0,0.3),
+        0 18px 54px rgba(0,0,0,0.40);
+    transform: none;
+}
+.phone-frame.ios.ipad-classic:hover { transform: none; }
+/* iPad Air / 10th gen — thin bezels, dark body */
+.phone-frame.ios.ipad-air {
+    border-radius: 18px;
+    background: linear-gradient(145deg, #2e2e32, #222226);
+    border: 2.5px solid #555;
+    width: clamp(380px, 50vw, 640px);
+    flex-direction: row;
+    transform: none;
+}
+.phone-frame.ios.ipad-air:hover { transform: none; }
+/* iPad Pro — generic modern thin bezels (fallback) */
+.phone-frame.ios.ipad-pro {
+    border-radius: 16px;
+    background: linear-gradient(145deg, #1c1c1e, #141416);
+    border: 2px solid #444;
+    width: clamp(400px, 52vw, 680px);
+    flex-direction: row;
+    transform: none;
+}
+.phone-frame.ios.ipad-pro:hover { transform: none; }
+/* iPad Pro 12.9" 1st/2nd gen (2015-2017) — thick bezels, home button */
+.phone-frame.ios.ipad-pro-classic {
+    border-radius: 16px;
+    background: linear-gradient(145deg, #d8d8dc, #c0c0c4);
+    border: 2.5px solid #bbb;
+    width: clamp(420px, 54vw, 720px);
+    flex-direction: row;
+    box-shadow:
+        inset 0 0 1px rgba(255,255,255,0.5),
+        0 2px 4px rgba(0,0,0,0.2),
+        0 10px 24px rgba(0,0,0,0.3),
+        0 18px 54px rgba(0,0,0,0.40);
+    transform: none;
+}
+.phone-frame.ios.ipad-pro-classic:hover { transform: none; }
+/* iPad Pro 9.7"/10.5" (2016-2017) — thick bezels, home button, smaller */
+.phone-frame.ios.ipad-pro-10 {
+    border-radius: 16px;
+    background: linear-gradient(145deg, #d8d8dc, #c0c0c4);
+    border: 2.5px solid #bbb;
+    width: clamp(360px, 48vw, 600px);
+    flex-direction: row;
+    box-shadow:
+        inset 0 0 1px rgba(255,255,255,0.5),
+        0 2px 4px rgba(0,0,0,0.2),
+        0 10px 24px rgba(0,0,0,0.3),
+        0 18px 54px rgba(0,0,0,0.40);
+    transform: none;
+}
+.phone-frame.ios.ipad-pro-10:hover { transform: none; }
+/* iPad Pro 11" (2018-2022) — thin bezels, Face ID, dark body */
+.phone-frame.ios.ipad-pro-11 {
+    border-radius: 18px;
+    background: linear-gradient(145deg, #1c1c1e, #141416);
+    border: 2px solid #444;
+    width: clamp(380px, 50vw, 640px);
+    flex-direction: row;
+    transform: none;
+}
+.phone-frame.ios.ipad-pro-11:hover { transform: none; }
+/* iPad Pro 12.9" (2018-2022) — thin bezels, Face ID, larger frame */
+.phone-frame.ios.ipad-pro-12 {
+    border-radius: 18px;
+    background: linear-gradient(145deg, #1c1c1e, #141416);
+    border: 2px solid #444;
+    width: clamp(440px, 56vw, 740px);
+    flex-direction: row;
+    transform: none;
+}
+.phone-frame.ios.ipad-pro-12:hover { transform: none; }
+/* iPad Pro 11" M4 (2024) — ultra-thin bezels, OLED, nano-texture */
+.phone-frame.ios.ipad-pro-m4 {
+    border-radius: 20px;
+    background: linear-gradient(145deg, #111113, #0a0a0c);
+    border: 1.5px solid #333;
+    width: clamp(380px, 50vw, 640px);
+    flex-direction: row;
+    transform: none;
+}
+.phone-frame.ios.ipad-pro-m4:hover { transform: none; }
+/* iPad Pro 13" M4 (2024) — ultra-thin bezels, OLED, largest */
+.phone-frame.ios.ipad-pro-m4-13 {
+    border-radius: 20px;
+    background: linear-gradient(145deg, #111113, #0a0a0c);
+    border: 1.5px solid #333;
+    width: clamp(460px, 58vw, 760px);
+    flex-direction: row;
+    transform: none;
+}
+.phone-frame.ios.ipad-pro-m4-13:hover { transform: none; }
+/* iPad mini classic — home button, silver, compact */
+.phone-frame.ios.ipad-mini-classic {
+    border-radius: 16px;
+    background: linear-gradient(145deg, #d8d8dc, #c0c0c4);
+    border: 2.5px solid #bbb;
+    width: clamp(320px, 42vw, 520px);
+    flex-direction: row;
+    box-shadow:
+        inset 0 0 1px rgba(255,255,255,0.5),
+        0 2px 4px rgba(0,0,0,0.2),
+        0 10px 24px rgba(0,0,0,0.3),
+        0 18px 54px rgba(0,0,0,0.40);
+    transform: none;
+}
+.phone-frame.ios.ipad-mini-classic:hover { transform: none; }
+/* iPad mini 6+ — thin bezels, rounded, no home button */
+.phone-frame.ios.ipad-mini-modern {
+    border-radius: 16px;
+    background: linear-gradient(145deg, #2e2e32, #222226);
+    border: 2.5px solid #555;
+    width: clamp(320px, 42vw, 520px);
+    flex-direction: row;
+    transform: none;
+}
+.phone-frame.ios.ipad-mini-modern:hover { transform: none; }
 
 /* Top notch / camera area */
 .phone-notch {
@@ -1142,6 +1441,16 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
     height: 48px;
     background: #d1d1d6;
     gap: 10px;
+}
+/* Darker top bar for black-faced iPhones */
+.iphone-3g .phone-notch.ios-classic-top,
+.iphone-4 .phone-notch.ios-classic-top {
+    background: #222;
+}
+.iphone-3g .phone-notch.ios-classic-top::after,
+.iphone-4 .phone-notch.ios-classic-top::after {
+    background: #1c1c1e;
+    border-color: #444;
 }
 .phone-speaker {
     width: 42px;
@@ -1199,6 +1508,171 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
         inset 0 1px 3px rgba(0,0,0,0.6),
         0 0 4px rgba(0,0,0,0.3);
 }
+/* iPhone mini — smaller notch cutout */
+.mini-notch {
+    width: 130px;
+    height: 22px;
+}
+
+/* ── iPad top bars → left side bars in landscape ──── */
+/* iPad classic top → left camera bar (thick bezel) */
+.phone-notch.ipad-classic-top {
+    height: auto;
+    width: 28px;
+    min-height: 100%;
+    background: #d1d1d6;
+    flex-direction: column;
+}
+/* iPad Pro classic (12.9" home button) → wider left camera bar */
+.phone-notch.ipad-pro-classic-top {
+    height: auto;
+    width: 32px;
+    min-height: 100%;
+    background: #d1d1d6;
+    flex-direction: column;
+}
+/* iPad Pro 9.7"/10.5" (home button) → medium left camera bar */
+.phone-notch.ipad-pro-10-top {
+    height: auto;
+    width: 26px;
+    min-height: 100%;
+    background: #d1d1d6;
+    flex-direction: column;
+}
+/* iPad modern top → left camera strip (thin bezel) */
+.phone-notch.ipad-modern-top {
+    height: auto;
+    width: 16px;
+    min-height: 100%;
+    background: #000;
+    flex-direction: column;
+}
+/* iPad Pro 11" (2018-2022) → left camera strip */
+.phone-notch.ipad-pro-11-top {
+    height: auto;
+    width: 14px;
+    min-height: 100%;
+    background: #000;
+    flex-direction: column;
+}
+/* iPad Pro 12.9" (2018-2022) → left camera strip, slightly wider */
+.phone-notch.ipad-pro-12-top {
+    height: auto;
+    width: 16px;
+    min-height: 100%;
+    background: #000;
+    flex-direction: column;
+}
+/* iPad Pro M4 11" (2024) → ultra-thin left camera strip */
+.phone-notch.ipad-pro-m4-top {
+    height: auto;
+    width: 10px;
+    min-height: 100%;
+    background: #000;
+    flex-direction: column;
+}
+/* iPad Pro M4 13" (2024) → ultra-thin left camera strip */
+.phone-notch.ipad-pro-m4-13-top {
+    height: auto;
+    width: 12px;
+    min-height: 100%;
+    background: #000;
+    flex-direction: column;
+}
+/* iPad front camera dot — centered in side bar */
+.ipad-camera-dot {
+    width: 6px;
+    height: 6px;
+    background: #1c1c1e;
+    border-radius: 50%;
+    border: 1px solid #555;
+    box-shadow: inset 0 0 2px rgba(0,0,0,0.5);
+}
+/* Smaller camera dot for ultra-thin bezels (M4) */
+.ipad-pro-m4 .ipad-camera-dot,
+.ipad-pro-m4-13 .ipad-camera-dot {
+    width: 4px;
+    height: 4px;
+}
+/* iPad navbar → right side bar */
+.phone-navbar.ipad-navbar {
+    height: auto;
+    width: 16px;
+    min-height: 100%;
+    flex-direction: column;
+    background: #000;
+    border-top: none;
+}
+/* iPad Pro 11" navbar — narrower right side */
+.ipad-pro-11 .phone-navbar.ipad-navbar {
+    width: 14px;
+}
+/* iPad Pro 12.9" navbar */
+.ipad-pro-12 .phone-navbar.ipad-navbar {
+    width: 16px;
+}
+/* iPad Pro M4 navbar — ultra-thin right side */
+.ipad-pro-m4 .phone-navbar.ipad-navbar {
+    width: 10px;
+}
+.ipad-pro-m4-13 .phone-navbar.ipad-navbar {
+    width: 12px;
+}
+/* iPad home indicator — rotated vertical for side bar */
+.ipad-air .ios-home-indicator,
+.ipad-pro .ios-home-indicator,
+.ipad-pro-11 .ios-home-indicator,
+.ipad-pro-12 .ios-home-indicator,
+.ipad-pro-m4 .ios-home-indicator,
+.ipad-pro-m4-13 .ios-home-indicator,
+.ipad-mini-modern .ios-home-indicator {
+    width: 4px;
+    height: 60px;
+    border-radius: 2px;
+}
+/* M4 home indicator — slightly smaller */
+.ipad-pro-m4 .ios-home-indicator,
+.ipad-pro-m4-13 .ios-home-indicator {
+    height: 50px;
+}
+/* iPad classic navbar → right side bar with home button */
+.ipad-classic .phone-navbar.classic-navbar,
+.ipad-mini-classic .phone-navbar.classic-navbar {
+    height: auto;
+    width: 36px;
+    min-height: 100%;
+    flex-direction: column;
+    background: #d1d1d6;
+}
+/* iPad Pro classic (12.9" home button) → wider right side bar */
+.ipad-pro-classic .phone-navbar.classic-navbar {
+    height: auto;
+    width: 40px;
+    min-height: 100%;
+    flex-direction: column;
+    background: #d1d1d6;
+}
+/* iPad Pro 9.7"/10.5" → narrower right side bar */
+.ipad-pro-10 .phone-navbar.classic-navbar {
+    height: auto;
+    width: 34px;
+    min-height: 100%;
+    flex-direction: column;
+    background: #d1d1d6;
+}
+.ipad-classic .phone-navbar .ios-home-button,
+.ipad-mini-classic .phone-navbar .ios-home-button {
+    width: 28px;
+    height: 28px;
+}
+.ipad-pro-classic .phone-navbar .ios-home-button {
+    width: 30px;
+    height: 30px;
+}
+.ipad-pro-10 .phone-navbar .ios-home-button {
+    width: 26px;
+    height: 26px;
+}
 
 /* Bezel selector dropdown */
 .bezel-select {
@@ -1249,6 +1723,27 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .phone-frame.android .phone-screen {
     aspect-ratio: 9 / 18;
 }
+/* iPhone 3G/3GS — 3:2 (320×480), thick side bezels */
+.iphone-3g .phone-screen {
+    aspect-ratio: 2 / 3;
+    width: calc(100% - 16px);
+    margin: 0 auto;
+    border-radius: 2px;
+}
+/* iPhone 4/4S — 3:2 (640×960), thick side bezels */
+.iphone-4 .phone-screen {
+    aspect-ratio: 2 / 3;
+    width: calc(100% - 14px);
+    margin: 0 auto;
+    border-radius: 2px;
+}
+/* iPhone 5/5S/SE — 16:9 (640×1136), slightly narrower bezels */
+.iphone-5 .phone-screen {
+    aspect-ratio: 9 / 16;
+    width: calc(100% - 12px);
+    margin: 0 auto;
+    border-radius: 2px;
+}
 /* iPhone 6/7/8 — 16:9 (750×1334), visible side bezels (~65% screen-to-body) */
 .iphone-classic .phone-screen {
     aspect-ratio: 9 / 16;
@@ -1267,6 +1762,66 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 /* iPhone 15/16 — 19.5:9 body, slightly reduced for fit */
 .iphone-island .phone-screen {
     aspect-ratio: 9 / 18;
+}
+/* iPhone mini — 19.5:9 same as modern, width handled by frame */
+.iphone-mini .phone-screen {
+    aspect-ratio: 9 / 18;
+}
+/* iPad classic — landscape 4:3 */
+.ipad-classic .phone-screen {
+    aspect-ratio: 4 / 3;
+    width: calc(100% - 14px);
+    margin: 0 auto;
+    border-radius: 2px;
+}
+/* iPad Air — landscape ~4.3:3 */
+.ipad-air .phone-screen {
+    aspect-ratio: 4.3 / 3;
+}
+/* iPad Pro — landscape ~4.3:3 (generic fallback) */
+.ipad-pro .phone-screen {
+    aspect-ratio: 4.3 / 3;
+}
+/* iPad Pro 12.9" classic (home button) — landscape 4:3 */
+.ipad-pro-classic .phone-screen {
+    aspect-ratio: 4 / 3;
+    width: calc(100% - 16px);
+    margin: 0 auto;
+    border-radius: 2px;
+}
+/* iPad Pro 9.7"/10.5" (home button) — landscape 4:3 */
+.ipad-pro-10 .phone-screen {
+    aspect-ratio: 4 / 3;
+    width: calc(100% - 12px);
+    margin: 0 auto;
+    border-radius: 2px;
+}
+/* iPad Pro 11" (2018-2022) — landscape ~4.3:3, narrow bezels */
+.ipad-pro-11 .phone-screen {
+    aspect-ratio: 4.3 / 3;
+}
+/* iPad Pro 12.9" (2018-2022) — landscape ~4.3:3 */
+.ipad-pro-12 .phone-screen {
+    aspect-ratio: 4.3 / 3;
+}
+/* iPad Pro 11" M4 (2024) — landscape ~4.3:3, OLED */
+.ipad-pro-m4 .phone-screen {
+    aspect-ratio: 4.3 / 3;
+}
+/* iPad Pro 13" M4 (2024) — landscape ~4.3:3, OLED */
+.ipad-pro-m4-13 .phone-screen {
+    aspect-ratio: 4.3 / 3;
+}
+/* iPad mini classic — landscape 4:3 */
+.ipad-mini-classic .phone-screen {
+    aspect-ratio: 4 / 3;
+    width: calc(100% - 10px);
+    margin: 0 auto;
+    border-radius: 2px;
+}
+/* iPad mini 6+ — landscape ~4.3:3 */
+.ipad-mini-modern .phone-screen {
+    aspect-ratio: 4.3 / 3;
 }
 .phone-screen img {
     display: block;
@@ -1372,6 +1927,13 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
     height: 4px;
     background: #555;
     border-radius: 2px;
+    cursor: pointer;
+}
+.ios-home-indicator:hover {
+    background: #777;
+}
+.ios-home-indicator:active {
+    background: #999;
 }
 /* iPhone classic (6/7/8) — taller bottom bar with circular home button */
 .classic-navbar {
@@ -1379,12 +1941,27 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
     background: #d1d1d6;
     border-top: none;
 }
+/* Darker navbar for black-faced iPhones */
+.iphone-3g .classic-navbar,
+.iphone-4 .classic-navbar {
+    background: #222;
+}
+.iphone-3g .ios-home-button,
+.iphone-4 .ios-home-button {
+    border-color: #555;
+    background: #333;
+}
+.iphone-3g .ios-home-button:active,
+.iphone-4 .ios-home-button:active {
+    background: #282828;
+}
 .ios-home-button {
     width: 40px;
     height: 40px;
     border-radius: 50%;
     border: 2px solid #999;
     background: #c8c8cc;
+    cursor: pointer;
     box-shadow:
         inset 0 1px 3px rgba(0,0,0,0.15),
         0 1px 2px rgba(0,0,0,0.1);
@@ -1392,6 +1969,391 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .ios-home-button:active {
     background: #b8b8bc;
     box-shadow: inset 0 2px 4px rgba(0,0,0,0.25);
+}
+
+/* ── Watch frame ───────────────────────────────── */
+.watch-wrapper {
+    position: relative;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    align-self: center;
+    gap: 0;
+}
+/* Wrist bands — wider, textured, premium silicone/leather feel */
+.watch-band-top, .watch-band-bottom {
+    width: 64px;
+    height: 56px;
+    background: linear-gradient(180deg, #2c2c30, #222225);
+    border-left: 1px solid rgba(255,255,255,0.04);
+    border-right: 1px solid rgba(0,0,0,0.3);
+    position: relative;
+}
+.watch-band-top {
+    border-radius: 8px 8px 0 0;
+    background: linear-gradient(180deg, #333338, #2a2a2e);
+}
+.watch-band-bottom {
+    border-radius: 0 0 10px 10px;
+    background: linear-gradient(0deg, #252528, #2a2a2e);
+}
+/* Band texture — horizontal stitching lines */
+.band-texture {
+    position: absolute;
+    inset: 8px 6px;
+    background: repeating-linear-gradient(
+        0deg,
+        transparent, transparent 5px,
+        rgba(255,255,255,0.03) 5px,
+        rgba(255,255,255,0.03) 6px
+    );
+    border-radius: 2px;
+}
+/* Lugs — metal connectors between band and case */
+.watch-lugs-top, .watch-lugs-bottom {
+    width: 44px;
+    height: 6px;
+    background: linear-gradient(90deg, #555 0%, #888 30%, #999 50%, #888 70%, #555 100%);
+    border-radius: 1px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+/* Watch case — base size bigger */
+.watch-frame {
+    width: 130px;
+    height: 155px;
+    border-radius: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: visible;
+}
+/* Watch display — larger, edge-to-edge feel */
+.watch-screen {
+    width: 108px;
+    height: 128px;
+    border-radius: 26px;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    box-shadow: inset 0 0 8px rgba(0,0,0,0.8);
+}
+/* Watch face content */
+.watch-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    color: #aaa;
+    width: 100%;
+    padding: 8px;
+}
+.watch-face-time {
+    font-size: 1.6rem;
+    font-weight: 200;
+    letter-spacing: 2px;
+    color: #e0e0e0;
+    font-family: -apple-system, 'Helvetica Neue', sans-serif;
+}
+.watch-face-complication {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.65rem;
+    color: #8f8;
+}
+.complication-icon { font-size: 0.7rem; }
+.complication-text { font-size: 0.6rem; color: #aaa; }
+.watch-label { font-size: 0.5rem; color: #555; margin-top: 2px; }
+/* Digital Crown — Apple Watch */
+.watch-crown {
+    position: absolute;
+    right: -8px;
+    top: 32%;
+    width: 7px;
+    height: 22px;
+    background: linear-gradient(to bottom, #bbb, #888, #999);
+    border-radius: 3px;
+    border: 1px solid #666;
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.4),
+        1px 0 3px rgba(0,0,0,0.3);
+}
+/* Side button — below crown on Apple Watch */
+.watch-side-btn {
+    position: absolute;
+    right: -7px;
+    top: 52%;
+    width: 6px;
+    height: 12px;
+    background: linear-gradient(to bottom, #aaa, #777);
+    border-radius: 2px;
+    border: 1px solid #666;
+    box-shadow: 1px 0 2px rgba(0,0,0,0.2);
+}
+/* Galaxy Watch — two buttons on right side */
+.watch-btn-top {
+    position: absolute;
+    right: -7px;
+    top: 28%;
+    width: 6px;
+    height: 16px;
+    background: linear-gradient(to bottom, #555, #333);
+    border-radius: 2px;
+    border: 1px solid #444;
+    box-shadow: 1px 0 2px rgba(0,0,0,0.3);
+}
+.watch-btn-bottom {
+    position: absolute;
+    right: -7px;
+    top: 50%;
+    width: 6px;
+    height: 16px;
+    background: linear-gradient(to bottom, #555, #333);
+    border-radius: 2px;
+    border: 1px solid #444;
+    box-shadow: 1px 0 2px rgba(0,0,0,0.3);
+}
+/* Pixel Watch — small nub crown */
+.pixel-crown {
+    width: 5px;
+    height: 14px;
+    right: -6px;
+    top: 38%;
+    background: linear-gradient(to bottom, #ddd, #bbb);
+    border-color: #aaa;
+}
+
+/* ── Watch variant styles ────────────────────────── */
+/* Apple Watch Series — rounded square, matte aluminium */
+.watch-frame.apple-watch {
+    border-radius: 36px;
+    background: linear-gradient(145deg, #b8b8bc 0%, #a8a8ac 30%, #b0b0b4 60%, #a0a0a4 100%);
+    border: 2.5px solid #9a9a9e;
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.25),
+        inset 0 -1px 0 rgba(0,0,0,0.12),
+        0 2px 6px rgba(0,0,0,0.22),
+        0 6px 16px rgba(0,0,0,0.24),
+        0 12px 32px rgba(0,0,0,0.28);
+}
+.watch-frame.apple-watch .watch-screen {
+    border-radius: 28px;
+}
+.watch-frame.apple-watch ~ .watch-band-top,
+.watch-frame.apple-watch ~ .watch-band-bottom {
+    background: linear-gradient(180deg, #2a2a2e, #222225);
+    width: 60px;
+}
+.watch-frame.apple-watch ~ .watch-lugs-top,
+.watch-frame.apple-watch ~ .watch-lugs-bottom {
+    background: linear-gradient(90deg, #909094 0%, #b0b0b4 30%, #b8b8bc 50%, #b0b0b4 70%, #909094 100%);
+}
+/* Apple Watch SS — polished stainless steel, silver mirror finish */
+.watch-frame.apple-watch-ss {
+    border-radius: 36px;
+    background: linear-gradient(145deg, #d0d0d6 0%, #b8b8c0 12%, #dcdce0 28%, #a8a8b2 45%, #c8c8d0 58%, #b0b0ba 72%, #d4d4da 88%, #bababf 100%);
+    border: 2.5px solid #b0b0b8;
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.65),
+        inset 0 -1px 0 rgba(0,0,0,0.15),
+        0 1px 2px rgba(255,255,255,0.12),
+        0 2px 6px rgba(0,0,0,0.22),
+        0 6px 16px rgba(0,0,0,0.25),
+        0 12px 32px rgba(0,0,0,0.30);
+}
+/* Mirror-polish highlight streak */
+.watch-frame.apple-watch-ss::before {
+    content: "";
+    position: absolute;
+    top: 8px;
+    left: 14px;
+    width: 38%;
+    height: 28%;
+    background: linear-gradient(155deg, rgba(255,255,255,0.32), transparent 60%);
+    border-radius: 30px;
+    pointer-events: none;
+    z-index: 1;
+}
+.watch-frame.apple-watch-ss .watch-screen {
+    border-radius: 28px;
+}
+.watch-frame.apple-watch-ss .watch-crown {
+    background: linear-gradient(to bottom, #c8c8d0, #9a9aa4, #b8b8c0);
+    border-color: #909098;
+}
+.watch-frame.apple-watch-ss .watch-side-btn {
+    background: linear-gradient(to bottom, #c0c0c8, #909098);
+    border-color: #909098;
+}
+.watch-frame.apple-watch-ss ~ .watch-band-top,
+.watch-frame.apple-watch-ss ~ .watch-band-bottom {
+    background: linear-gradient(180deg, #2a2a2e, #222225);
+    width: 60px;
+}
+.watch-frame.apple-watch-ss ~ .watch-lugs-top,
+.watch-frame.apple-watch-ss ~ .watch-lugs-bottom {
+    background: linear-gradient(90deg, #a0a0a8 0%, #c8c8d0 30%, #d8d8de 50%, #c8c8d0 70%, #a0a0a8 100%);
+}
+/* Apple Watch Ultra — titanium, larger, rugged */
+.watch-frame.apple-watch-ultra {
+    width: 145px;
+    height: 168px;
+    border-radius: 30px;
+    background: linear-gradient(145deg, #d4cfc0, #b8b2a2);
+    border: 3px solid #a8a290;
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.5),
+        inset 0 -1px 0 rgba(0,0,0,0.1),
+        0 2px 6px rgba(0,0,0,0.25),
+        0 8px 20px rgba(0,0,0,0.25),
+        0 14px 36px rgba(0,0,0,0.3);
+}
+.watch-frame.apple-watch-ultra .watch-screen {
+    width: 118px;
+    height: 138px;
+    border-radius: 22px;
+}
+.watch-frame.apple-watch-ultra .watch-crown {
+    width: 9px;
+    height: 26px;
+    right: -10px;
+    background: linear-gradient(to bottom, #c5bf90, #a8a270);
+    border-color: #908a70;
+}
+.watch-frame.apple-watch-ultra .watch-side-btn {
+    right: -9px;
+    width: 7px;
+    height: 14px;
+    background: linear-gradient(to bottom, #c0ba88, #a09a70);
+    border-color: #908a70;
+}
+.watch-frame.apple-watch-ultra ~ .watch-band-top,
+.watch-frame.apple-watch-ultra ~ .watch-band-bottom {
+    width: 66px;
+    background: linear-gradient(180deg, #3a3630, #2e2a24);
+}
+.watch-frame.apple-watch-ultra ~ .watch-lugs-top,
+.watch-frame.apple-watch-ultra ~ .watch-lugs-bottom {
+    width: 48px;
+    background: linear-gradient(90deg, #a09880 0%, #c5bf90 50%, #a09880 100%);
+}
+/* Galaxy Watch — circular, dark, rotating bezel ring */
+.watch-frame.galaxy-watch {
+    width: 142px;
+    height: 142px;
+    border-radius: 50%;
+    background: linear-gradient(145deg, #2a2a2e, #18181c);
+    border: 4px solid #3a3a3e;
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.08),
+        inset 0 -1px 0 rgba(0,0,0,0.4),
+        0 0 0 2px #222,
+        0 2px 6px rgba(0,0,0,0.3),
+        0 8px 20px rgba(0,0,0,0.3),
+        0 14px 36px rgba(0,0,0,0.35);
+}
+.watch-frame.galaxy-watch::before {
+    content: "";
+    position: absolute;
+    inset: -2px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.05);
+    pointer-events: none;
+}
+.watch-frame.galaxy-watch .watch-screen {
+    width: 114px;
+    height: 114px;
+    border-radius: 50%;
+}
+.watch-frame.galaxy-watch ~ .watch-band-top,
+.watch-frame.galaxy-watch ~ .watch-band-bottom {
+    width: 56px;
+    background: linear-gradient(180deg, #1e1e22, #18181c);
+}
+.watch-frame.galaxy-watch ~ .watch-lugs-top,
+.watch-frame.galaxy-watch ~ .watch-lugs-bottom {
+    width: 40px;
+    background: linear-gradient(90deg, #333 0%, #555 50%, #333 100%);
+}
+/* Pixel Watch — circular, domed glass, polished aluminium */
+.watch-frame.pixel-watch {
+    width: 138px;
+    height: 138px;
+    border-radius: 50%;
+    background: linear-gradient(145deg, #f0ece6, #d8d4cc);
+    border: 3px solid #ccc8c0;
+    box-shadow:
+        inset 0 2px 0 rgba(255,255,255,0.6),
+        inset 0 -2px 0 rgba(0,0,0,0.06),
+        0 2px 6px rgba(0,0,0,0.15),
+        0 8px 20px rgba(0,0,0,0.2),
+        0 14px 36px rgba(0,0,0,0.25);
+}
+/* Domed glass effect */
+.watch-frame.pixel-watch::before {
+    content: "";
+    position: absolute;
+    inset: 6px;
+    border-radius: 50%;
+    background: radial-gradient(ellipse at 30% 30%, rgba(255,255,255,0.12), transparent 60%);
+    pointer-events: none;
+    z-index: 1;
+}
+.watch-frame.pixel-watch .watch-screen {
+    width: 112px;
+    height: 112px;
+    border-radius: 50%;
+}
+.watch-frame.pixel-watch ~ .watch-band-top,
+.watch-frame.pixel-watch ~ .watch-band-bottom {
+    width: 56px;
+    background: linear-gradient(180deg, #e8e4de, #d4d0c8);
+    border-color: rgba(0,0,0,0.08);
+}
+.watch-frame.pixel-watch ~ .watch-band-top .band-texture,
+.watch-frame.pixel-watch ~ .watch-band-bottom .band-texture {
+    background: repeating-linear-gradient(
+        0deg,
+        transparent, transparent 5px,
+        rgba(0,0,0,0.03) 5px,
+        rgba(0,0,0,0.03) 6px
+    );
+}
+.watch-frame.pixel-watch ~ .watch-lugs-top,
+.watch-frame.pixel-watch ~ .watch-lugs-bottom {
+    width: 38px;
+    background: linear-gradient(90deg, #c8c4bc 0%, #e0dcd4 50%, #c8c4bc 100%);
+}
+/* Wear OS generic — circular, dark matte */
+.watch-frame.wear-os {
+    width: 135px;
+    height: 135px;
+    border-radius: 50%;
+    background: linear-gradient(145deg, #2c2c30, #151518);
+    border: 3px solid #484848;
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.06),
+        0 2px 6px rgba(0,0,0,0.3),
+        0 8px 20px rgba(0,0,0,0.3),
+        0 14px 36px rgba(0,0,0,0.35);
+}
+.watch-frame.wear-os .watch-screen {
+    width: 108px;
+    height: 108px;
+    border-radius: 50%;
+}
+.watch-frame.wear-os ~ .watch-band-top,
+.watch-frame.wear-os ~ .watch-band-bottom {
+    width: 56px;
+}
+.watch-frame.wear-os ~ .watch-lugs-top,
+.watch-frame.wear-os ~ .watch-lugs-bottom {
+    width: 38px;
+    background: linear-gradient(90deg, #444 0%, #666 50%, #444 100%);
 }
 
 /* Side buttons (power, volume) */

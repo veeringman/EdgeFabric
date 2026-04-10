@@ -17,6 +17,47 @@ struct SelectedDevice {
     capabilities: Vec<String>,
 }
 
+/// Map iPad ProductType identifiers to specific iPad Pro bezel variants.
+/// ProductType is lowercase, e.g. "ipad6,7", "ipad8,1", "ipad16,5".
+fn detect_ipad_pro_variant(product_type: &str) -> Option<String> {
+    // Parse "ipadN,M" → (N, M)
+    let rest = product_type.strip_prefix("ipad")?;
+    let (gen_str, _sub_str) = rest.split_once(',')?;
+    let gen: u32 = gen_str.parse().ok()?;
+    let sub: u32 = _sub_str.parse().ok()?;
+    match gen {
+        // iPad Pro 12.9" 1st gen (2015): iPad6,7-8 — thick bezels, home button
+        6 if sub >= 7 => Some("ipad-pro-classic".into()),
+        // iPad Pro 9.7" (2016): iPad6,3-4 — thick bezels, home button, smaller
+        6 if sub >= 3 => Some("ipad-pro-10".into()),
+        // iPad Pro 12.9" 2nd gen (2017): iPad7,1-2 — thick bezels, home button
+        7 if sub <= 2 => Some("ipad-pro-classic".into()),
+        // iPad Pro 10.5" (2017): iPad7,3-4 — thick bezels, home button
+        7 if sub <= 4 => Some("ipad-pro-10".into()),
+        // iPad Pro 11" 1st gen (2018): iPad8,1-4 — thin bezels, Face ID
+        8 if sub <= 4 => Some("ipad-pro-11".into()),
+        // iPad Pro 12.9" 3rd gen (2018): iPad8,5-8 — thin bezels, Face ID
+        8 if sub <= 8 => Some("ipad-pro-12".into()),
+        // iPad Pro 11" 2nd gen (2020): iPad8,9-10 — thin bezels
+        8 if sub <= 10 => Some("ipad-pro-11".into()),
+        // iPad Pro 12.9" 4th gen (2020): iPad8,11-12 — thin bezels
+        8 if sub <= 12 => Some("ipad-pro-12".into()),
+        // iPad Pro 11" 3rd gen (2021 M1): iPad13,4-7
+        13 if sub >= 4 && sub <= 7 => Some("ipad-pro-11".into()),
+        // iPad Pro 12.9" 5th gen (2021 M1): iPad13,8-9
+        13 if sub >= 8 && sub <= 9 => Some("ipad-pro-12".into()),
+        // iPad Pro 11" 4th gen (2022 M2): iPad14,3-4
+        14 if sub >= 3 && sub <= 4 => Some("ipad-pro-11".into()),
+        // iPad Pro 12.9" 6th gen (2022 M2): iPad14,5-6
+        14 if sub >= 5 && sub <= 6 => Some("ipad-pro-12".into()),
+        // iPad Pro 11" M4 (2024): iPad16,3-4 — ultra-thin bezels, OLED
+        16 if sub >= 3 && sub <= 4 => Some("ipad-pro-m4".into()),
+        // iPad Pro 13" M4 (2024): iPad16,5-6 — ultra-thin bezels, OLED
+        16 if sub >= 5 && sub <= 6 => Some("ipad-pro-m4-13".into()),
+        _ => None,
+    }
+}
+
 /// Extract the bezel style from capabilities (e.g. "bezel:iphone-modern" → "iphone-modern").
 /// Returns a sensible default based on OS version if not set.
 fn bezel_from_caps(caps: &[String], os: &str, os_version: &str) -> String {
@@ -26,12 +67,45 @@ fn bezel_from_caps(caps: &[String], os: &str, os_version: &str) -> String {
         }
     }
     // Auto-detect from OS version for iOS
-    if os == "ios" {
+    if os == "ios" || os == "ipados" {
+        // Check for iPad via model: or ProductType capability
+        let model_lower: String = caps.iter()
+            .find(|c| c.starts_with("model:"))
+            .map(|c| c[6..].to_lowercase())
+            .unwrap_or_default();
+        let product_lower: String = caps.iter()
+            .find(|c| c.starts_with("ProductType:"))
+            .map(|c| c[12..].to_lowercase())
+            .unwrap_or_default();
+        let is_ipad = os == "ipados" || model_lower.contains("ipad") || product_lower.starts_with("ipad");
+        let is_mini = model_lower.contains("mini") || product_lower.contains("mini");
+        if is_ipad {
+            let ver: f32 = os_version.split('.').next().unwrap_or("0").parse().unwrap_or(0.0);
+            if is_mini {
+                return if ver >= 15.0 { "ipad-mini-modern".into() } else { "ipad-mini-classic".into() };
+            }
+            // Auto-detect iPad Pro variant from ProductType
+            if let Some(pro_bezel) = detect_ipad_pro_variant(&product_lower) {
+                return pro_bezel;
+            }
+            if model_lower.contains("pro") {
+                return "ipad-pro".into();
+            }
+            if ver >= 15.0 { return "ipad-air".into(); }
+            return "ipad-classic".into();
+        }
+        // iPhone mini detection
+        if is_mini {
+            return "iphone-mini".into();
+        }
         let ver: f32 = os_version.split('.').next().unwrap_or("0").parse().unwrap_or(0.0);
         if ver >= 16.0 { return "iphone-island".into(); }
         if ver >= 14.0 { return "iphone-modern".into(); }
         if ver >= 11.0 { return "iphone-notch".into(); }
-        return "iphone-classic".into();
+        if ver >= 7.0 { return "iphone-classic".into(); }
+        if ver >= 6.0 { return "iphone-5".into(); }
+        if ver >= 4.0 { return "iphone-4".into(); }
+        return "iphone-3g".into();
     }
     // Auto-detect from device name / manufacturer for Android
     if os == "android" {
@@ -48,6 +122,8 @@ fn bezel_from_caps(caps: &[String], os: &str, os_version: &str) -> String {
         if name_lower.contains("huawei") || name_lower.contains("mate") { return "huawei".into(); }
         if name_lower.contains("oppo") || name_lower.contains("realme") || name_lower.contains("find") { return "oppo".into(); }
         if name_lower.contains("rog") || name_lower.contains("asus") { return "rog".into(); }
+        if name_lower.contains("tab") || name_lower.contains("sm-x") { return "galaxy-tab".into(); }
+        if name_lower.contains("pixel") && (name_lower.contains("tablet") || name_lower.contains("tab")) { return "pixel-tablet".into(); }
         if name_lower.contains("fold") || name_lower.contains("sm-f9") { return "galaxy-fold".into(); }
         if name_lower.contains("flip") || name_lower.contains("sm-f7") { return "galaxy-flip".into(); }
         if name_lower.contains("sm-a") { return "galaxy-a".into(); }
@@ -172,6 +248,8 @@ fn DeviceViewer(
     on_close: impl Fn() + Send + Sync + 'static,
 ) -> impl IntoView {
     let img_ref = NodeRef::<leptos::html::Img>::new();
+    let term_ref = NodeRef::<leptos::html::Div>::new();
+    let log_ref = NodeRef::<leptos::html::Div>::new();
     let (connected, set_connected) = signal(false);
     let (error, set_error) = signal(Option::<String>::None);
     let (frame_count, set_frame_count) = signal(0u64);
@@ -193,6 +271,9 @@ fn DeviceViewer(
 
     let initial_bezel = bezel_from_caps(&device_capabilities, &device_os, &device_os_version);
     let (bezel_style, set_bezel_style) = signal(initial_bezel);
+
+    // Watch pairing signals
+    let (watch_style, set_watch_style) = signal(String::from("none"));
 
     let dev_id = device_id.clone();
     let log_dev_id = device_id.clone();
@@ -224,6 +305,7 @@ fn DeviceViewer(
         let set_resolution = set_resolution.clone();
         let set_fps = set_fps.clone();
         let fps_counter = fps_counter.clone();
+        let img_ref = img_ref;
 
         leptos::task::spawn_local(async move {
             let host = web_sys::window()
@@ -258,11 +340,9 @@ fn DeviceViewer(
                     ).unwrap();
                     let url = web_sys::Url::create_object_url_with_blob(&blob).unwrap();
 
-                    let window = web_sys::window().unwrap();
-                    let document = window.document().unwrap();
-                    if let Some(img) = document.get_element_by_id("stream-img") {
-                        let old_src = img.get_attribute("src").unwrap_or_default();
-                        img.set_attribute("src", &url).ok();
+                    if let Some(img_el) = img_ref.get_untracked() {
+                        let old_src = img_el.get_attribute("src").unwrap_or_default();
+                        let _ = img_el.set_attribute("src", &url);
                         if !old_src.is_empty() {
                             web_sys::Url::revoke_object_url(&old_src).ok();
                         }
@@ -373,10 +453,8 @@ fn DeviceViewer(
                                 }
                             });
                             // Auto-scroll
-                            if let Some(el) = web_sys::window()
-                                .and_then(|w| w.document())
-                                .and_then(|d| d.get_element_by_id("inline-log-viewer"))
-                            {
+                            if let Some(el) = log_ref.get_untracked() {
+                                let el: &web_sys::Element = &el;
                                 el.set_scroll_top(el.scroll_height());
                             }
                         }
@@ -407,10 +485,8 @@ fn DeviceViewer(
 
     // Map screen coordinates from the displayed image to actual device pixels.
     let map_coords = move |client_x: f64, client_y: f64| -> Option<(i32, i32)> {
-        let window = web_sys::window()?;
-        let document = window.document()?;
-        let img = document.get_element_by_id("stream-img")?;
-        let rect = img.get_bounding_client_rect();
+        let img_el = img_ref.get_untracked()?;
+        let rect = img_el.get_bounding_client_rect();
 
         let img_w = rect.width();
         let img_h = rect.height();
@@ -484,6 +560,10 @@ fn DeviceViewer(
     let send_power = move |_| send_input("key", Some(serde_json::json!({"keycode": "KEYCODE_POWER"})));
     let send_vol_up = move |_| send_input("key", Some(serde_json::json!({"keycode": "KEYCODE_VOLUME_UP"})));
     let send_vol_down = move |_| send_input("key", Some(serde_json::json!({"keycode": "KEYCODE_VOLUME_DOWN"})));
+    // Extra closures for iOS home button/indicator (used separately in view)
+    let send_ios_home = move |_: web_sys::MouseEvent| send_input("home", None);
+    let send_ios_home2 = move |_: web_sys::MouseEvent| send_input("home", None);
+    let send_ios_home3 = move |_: web_sys::MouseEvent| send_input("home", None);
 
     let full_id = device_id.clone();
 
@@ -508,15 +588,11 @@ fn DeviceViewer(
                                 <div class="loading">"Connecting to serial port…"</div>
                             }
                         >
-                            <div class="log-viewer" id="iot-terminal" style="max-height: 600px; min-height: 400px; overflow-y: auto; font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace; font-size: 0.82rem; background: #0d1117; color: #c9d1d9; padding: 0.5rem; border-radius: 6px;">
+                            <div class="log-viewer" node_ref=term_ref style="max-height: 600px; min-height: 400px; overflow-y: auto; font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace; font-size: 0.82rem; background: #0d1117; color: #c9d1d9; padding: 0.5rem; border-radius: 6px;">
                                 {move || {
                                     // Auto-scroll to bottom
-                                    if let Some(w) = web_sys::window() {
-                                        if let Some(d) = w.document() {
-                                            if let Some(el) = d.get_element_by_id("iot-terminal") {
-                                                let _ = el.set_scroll_top(el.scroll_height());
-                                            }
-                                        }
+                                    if let Some(el) = term_ref.get_untracked() {
+                                        el.set_scroll_top(el.scroll_height());
                                     }
                                     serial_lines.get().into_iter().map(|line| {
                                         view! { <div class="log-line" style="white-space: pre-wrap; word-break: break-all; line-height: 1.5; padding: 1px 0;">{line}</div> }
@@ -655,13 +731,24 @@ fn DeviceViewer(
                     } else {
                         view! {
                             <div class={move || format!("phone-notch {}", match bezel_style.get().as_str() {
-                                "iphone-classic" => "ios-classic-top",
-                                "iphone-notch" | "iphone-modern" => "ios-notch",
+                                "iphone-3g" | "iphone-4" | "iphone-5" | "iphone-classic" => "ios-classic-top",
+                                "iphone-notch" | "iphone-modern" | "iphone-mini" => "ios-notch",
+                                "ipad-classic" | "ipad-mini-classic" => "ipad-classic-top",
+                                "ipad-pro-classic" => "ipad-pro-classic-top",
+                                "ipad-pro-10" => "ipad-pro-10-top",
+                                "ipad-pro-11" => "ipad-pro-11-top",
+                                "ipad-pro-12" => "ipad-pro-12-top",
+                                "ipad-pro-m4" => "ipad-pro-m4-top",
+                                "ipad-pro-m4-13" => "ipad-pro-m4-13-top",
+                                "ipad-air" | "ipad-pro" | "ipad-mini-modern" => "ipad-modern-top",
                                 _ => "ios-notch",
                             })}>
                                 {move || match bezel_style.get().as_str() {
-                                    "iphone-classic" => view! { <div class="phone-speaker"></div> }.into_any(),
+                                    "iphone-3g" | "iphone-4" | "iphone-5" | "iphone-classic" => view! { <div class="phone-speaker"></div> }.into_any(),
                                     "iphone-island" => view! { <div class="dynamic-island"></div> }.into_any(),
+                                    "iphone-mini" => view! { <div class="ios-notch-cutout mini-notch"></div> }.into_any(),
+                                    "ipad-classic" | "ipad-mini-classic" | "ipad-pro-classic" | "ipad-pro-10" => view! { <div class="ipad-camera-dot"></div> }.into_any(),
+                                    "ipad-air" | "ipad-pro" | "ipad-pro-11" | "ipad-pro-12" | "ipad-pro-m4" | "ipad-pro-m4-13" | "ipad-mini-modern" => view! { <div class="ipad-camera-dot"></div> }.into_any(),
                                     _ => view! { <div class="ios-notch-cutout"></div> }.into_any(),
                                 }}
                             </div>
@@ -694,7 +781,7 @@ fn DeviceViewer(
                                 }
                             }
                         >
-                            <img id="stream-img" node_ref=img_ref
+                            <img node_ref=img_ref
                                  draggable="false"
                                  style="width: 100%; height: 100%; object-fit: cover; user-select: none; -webkit-user-drag: none; color: transparent;"
                                  alt=""
@@ -740,14 +827,19 @@ fn DeviceViewer(
                     } else {
                         view! {
                             {move || match bezel_style.get().as_str() {
-                                "iphone-classic" => view! {
+                                "iphone-3g" | "iphone-4" | "iphone-5" | "iphone-classic" | "ipad-classic" | "ipad-mini-classic" | "ipad-pro-classic" | "ipad-pro-10" => view! {
                                     <div class="phone-navbar ios-navbar classic-navbar">
-                                        <div class="ios-home-button"></div>
+                                        <div class="ios-home-button" on:click=send_ios_home title="Home"></div>
+                                    </div>
+                                }.into_any(),
+                                "ipad-air" | "ipad-pro" | "ipad-pro-11" | "ipad-pro-12" | "ipad-pro-m4" | "ipad-pro-m4-13" | "ipad-mini-modern" => view! {
+                                    <div class="phone-navbar ios-navbar ipad-navbar">
+                                        <div class="ios-home-indicator" on:click=send_ios_home2 title="Home"></div>
                                     </div>
                                 }.into_any(),
                                 _ => view! {
                                     <div class="phone-navbar ios-navbar">
-                                        <div class="ios-home-indicator"></div>
+                                        <div class="ios-home-indicator" on:click=send_ios_home3 title="Home"></div>
                                     </div>
                                 }.into_any(),
                             }}
@@ -781,6 +873,70 @@ fn DeviceViewer(
                     }.into_any()
                 }}
             </div>
+
+            // ── Paired Watch ──
+            <Show when=move || watch_style.get() != "none">
+                <div class="watch-wrapper">
+                    <div class="watch-band-top">
+                        <div class="band-texture"></div>
+                    </div>
+                    <div class="watch-lugs-top"></div>
+                    <div class={move || format!("watch-frame {}", watch_style.get())}>
+                        <div class="watch-screen">
+                            <div class="watch-placeholder">
+                                {move || match watch_style.get().as_str() {
+                                    "apple-watch" | "apple-watch-ss" | "apple-watch-ultra" => view! {
+                                        <div class="watch-face-time">"10:09"</div>
+                                        <div class="watch-face-complication">
+                                            <span class="complication-icon">"❤️"</span>
+                                            <span class="complication-text">"72 BPM"</span>
+                                        </div>
+                                        <span class="watch-label">"Apple Watch"</span>
+                                    }.into_any(),
+                                    "galaxy-watch" => view! {
+                                        <div class="watch-face-time">"10:09"</div>
+                                        <div class="watch-face-complication">
+                                            <span class="complication-icon">"👣"</span>
+                                            <span class="complication-text">"4,521"</span>
+                                        </div>
+                                        <span class="watch-label">"Galaxy Watch"</span>
+                                    }.into_any(),
+                                    _ => view! {
+                                        <div class="watch-face-time">"10:09"</div>
+                                        <div class="watch-face-complication">
+                                            <span class="complication-icon">"⚡"</span>
+                                            <span class="complication-text">"85%"</span>
+                                        </div>
+                                        <span class="watch-label">"Wear OS"</span>
+                                    }.into_any(),
+                                }}
+                            </div>
+                        </div>
+                        {move || match watch_style.get().as_str() {
+                            "apple-watch" | "apple-watch-ss" | "apple-watch-ultra" => view! {
+                                <>
+                                <div class="watch-crown"></div>
+                                <div class="watch-side-btn"></div>
+                                </>
+                            }.into_any(),
+                            "galaxy-watch" => view! {
+                                <>
+                                <div class="watch-btn-top"></div>
+                                <div class="watch-btn-bottom"></div>
+                                </>
+                            }.into_any(),
+                            "pixel-watch" => view! {
+                                <div class="watch-crown pixel-crown"></div>
+                            }.into_any(),
+                            _ => view! { <span></span> }.into_any(),
+                        }}
+                    </div>
+                    <div class="watch-lugs-bottom"></div>
+                    <div class="watch-band-bottom">
+                        <div class="band-texture"></div>
+                    </div>
+                </div>
+            </Show>
 
             // ── Info panel ──
             <div class="viewer-panel">
@@ -840,10 +996,25 @@ fn DeviceViewer(
                                                 });
                                             }
                                         >
+                                            <option value="iphone-3g" selected=move || bezel_style.get() == "iphone-3g">"iPhone 3G/3GS"</option>
+                                            <option value="iphone-4" selected=move || bezel_style.get() == "iphone-4">"iPhone 4/4S"</option>
+                                            <option value="iphone-5" selected=move || bezel_style.get() == "iphone-5">"iPhone 5/5S/SE"</option>
                                             <option value="iphone-classic" selected=move || bezel_style.get() == "iphone-classic">"iPhone 6/7/8 (Classic)"</option>
                                             <option value="iphone-notch" selected=move || bezel_style.get() == "iphone-notch">"iPhone X/11 (Notch)"</option>
                                             <option value="iphone-modern" selected=move || bezel_style.get() == "iphone-modern">"iPhone 12–14 (Modern)"</option>
+                                            <option value="iphone-mini" selected=move || bezel_style.get() == "iphone-mini">"iPhone 12/13 mini"</option>
                                             <option value="iphone-island" selected=move || bezel_style.get() == "iphone-island">"iPhone 15/16 (Dynamic Island)"</option>
+                                            <option value="ipad-classic" selected=move || bezel_style.get() == "ipad-classic">"iPad (Home Button)"</option>
+                                            <option value="ipad-air" selected=move || bezel_style.get() == "ipad-air">"iPad Air / 10th Gen"</option>
+                                            <option value="ipad-pro" selected=move || bezel_style.get() == "ipad-pro">"iPad Pro"</option>
+                                            <option value="ipad-pro-classic" selected=move || bezel_style.get() == "ipad-pro-classic">"iPad Pro 12.9\" (1st/2nd Gen)"</option>
+                                            <option value="ipad-pro-10" selected=move || bezel_style.get() == "ipad-pro-10">"iPad Pro 9.7\"/10.5\""</option>
+                                            <option value="ipad-pro-11" selected=move || bezel_style.get() == "ipad-pro-11">"iPad Pro 11\" (2018-2022)"</option>
+                                            <option value="ipad-pro-12" selected=move || bezel_style.get() == "ipad-pro-12">"iPad Pro 12.9\" (2018-2022)"</option>
+                                            <option value="ipad-pro-m4" selected=move || bezel_style.get() == "ipad-pro-m4">"iPad Pro 11\" M4"</option>
+                                            <option value="ipad-pro-m4-13" selected=move || bezel_style.get() == "ipad-pro-m4-13">"iPad Pro 13\" M4"</option>
+                                            <option value="ipad-mini-classic" selected=move || bezel_style.get() == "ipad-mini-classic">"iPad mini (Home Button)"</option>
+                                            <option value="ipad-mini-modern" selected=move || bezel_style.get() == "ipad-mini-modern">"iPad mini 6+"</option>
                                         </select>
                                     </div>
                                 }.into_any()
@@ -878,12 +1049,50 @@ fn DeviceViewer(
                                             <option value="huawei" selected=move || bezel_style.get() == "huawei">"Huawei Mate/P"</option>
                                             <option value="oppo" selected=move || bezel_style.get() == "oppo">"Oppo / Realme"</option>
                                             <option value="rog" selected=move || bezel_style.get() == "rog">"Asus ROG Phone"</option>
+                                            <option value="galaxy-tab" selected=move || bezel_style.get() == "galaxy-tab">"Galaxy Tab S"</option>
+                                            <option value="pixel-tablet" selected=move || bezel_style.get() == "pixel-tablet">"Pixel Tablet"</option>
+                                            <option value="android-tablet" selected=move || bezel_style.get() == "android-tablet">"Android Tablet (Generic)"</option>
                                         </select>
                                     </div>
                                 }.into_any()
                             } else {
                                 view! { <span></span> }.into_any()
                             }
+                        }}
+                        {if is_ios {
+                            view! {
+                                <div class="info-row">
+                                    <span class="info-label">"Watch"</span>
+                                    <select class="bezel-select"
+                                        on:change=move |ev| {
+                                            set_watch_style.set(event_target_value(&ev));
+                                        }
+                                    >
+                                        <option value="none" selected=move || watch_style.get() == "none">"None"</option>
+                                        <option value="apple-watch" selected=move || watch_style.get() == "apple-watch">"Apple Watch"</option>
+                                        <option value="apple-watch-ss" selected=move || watch_style.get() == "apple-watch-ss">"Apple Watch SS"</option>
+                                        <option value="apple-watch-ultra" selected=move || watch_style.get() == "apple-watch-ultra">"Apple Watch Ultra"</option>
+                                    </select>
+                                </div>
+                            }.into_any()
+                        } else if is_android {
+                            view! {
+                                <div class="info-row">
+                                    <span class="info-label">"Watch"</span>
+                                    <select class="bezel-select"
+                                        on:change=move |ev| {
+                                            set_watch_style.set(event_target_value(&ev));
+                                        }
+                                    >
+                                        <option value="none" selected=move || watch_style.get() == "none">"None"</option>
+                                        <option value="galaxy-watch" selected=move || watch_style.get() == "galaxy-watch">"Galaxy Watch"</option>
+                                        <option value="pixel-watch" selected=move || watch_style.get() == "pixel-watch">"Pixel Watch"</option>
+                                        <option value="wear-os" selected=move || watch_style.get() == "wear-os">"Wear OS (Generic)"</option>
+                                    </select>
+                                </div>
+                            }.into_any()
+                        } else {
+                            view! { <span></span> }.into_any()
                         }}
                         <div class="info-row">
                             <span class="info-label">"Serial"</span>
@@ -975,7 +1184,7 @@ fn DeviceViewer(
                                 {move || format!("{} lines", log_lines.get().len())}
                             </span>
                         </div>
-                        <div id="inline-log-viewer" style="max-height: 260px; overflow-y: auto; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.72rem; background: #0d1117; color: #c9d1d9; padding: 0.4rem; border-radius: 0 0 6px 6px; line-height: 1.45;">
+                        <div node_ref=log_ref style="max-height: 260px; overflow-y: auto; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.72rem; background: #0d1117; color: #c9d1d9; padding: 0.4rem; border-radius: 0 0 6px 6px; line-height: 1.45;">
                             {move || {
                                 let filter = log_filter.get();
                                 let lines = log_lines.get();

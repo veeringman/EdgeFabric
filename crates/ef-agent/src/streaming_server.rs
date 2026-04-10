@@ -17,7 +17,19 @@ use axum::{
 use futures::{SinkExt, StreamExt};
 use serde_json::json;
 use std::process::Stdio;
+use std::sync::OnceLock;
 use tokio::io::AsyncBufReadExt;
+
+/// Resolve the ffmpeg binary path once (handles non-login shells missing /usr/local/bin).
+fn ffmpeg_path() -> &'static str {
+    static PATH: OnceLock<String> = OnceLock::new();
+    PATH.get_or_init(|| {
+        for p in ["/usr/local/bin/ffmpeg", "/opt/homebrew/bin/ffmpeg", "/usr/bin/ffmpeg"] {
+            if std::path::Path::new(p).exists() { return p.to_string(); }
+        }
+        "ffmpeg".to_string() // fallback to PATH lookup
+    })
+}
 
 /// Start the agent's streaming HTTP server on the given port.
 pub async fn start_streaming_server(port: u16) -> anyhow::Result<()> {
@@ -103,10 +115,15 @@ async fn handle_stream(socket: WebSocket, serial: String) {
     let mut stop_rx = stop_tx.subscribe();
     let mut frame_count: u64 = 0;
 
+    // Generate per-connection temp file path for iOS capture
+    let conn_id = uuid::Uuid::new_v4().simple().to_string();
+    let ios_tmp = format!("/tmp/ef-ios-{}-{}.tiff", &serial[..8.min(serial.len())], &conn_id[..8]);
+
     // Double-buffered capture loop
     let s = serial.clone();
     let o = os.clone();
-    let mut pending = tokio::spawn(async move { capture_frame(&s, &o).await });
+    let t = ios_tmp.clone();
+    let mut pending = tokio::spawn(async move { capture_frame(&s, &o, &t).await });
 
     loop {
         if *stop_rx.borrow() { break; }
@@ -118,7 +135,8 @@ async fn handle_stream(socket: WebSocket, serial: String) {
 
         let s = serial.clone();
         let o = os.clone();
-        pending = tokio::spawn(async move { capture_frame(&s, &o).await });
+        let t = ios_tmp.clone();
+        pending = tokio::spawn(async move { capture_frame(&s, &o, &t).await });
 
         match result {
             Ok(data) => {
@@ -136,6 +154,9 @@ async fn handle_stream(socket: WebSocket, serial: String) {
             }
         }
     }
+
+    // Clean up connection-scoped temp file
+    let _ = tokio::fs::remove_file(&ios_tmp).await;
 
     tracing::info!(%serial, frame_count, "Stream ended");
 }
@@ -227,6 +248,24 @@ async fn handle_logs(socket: WebSocket, serial: String) {
 
     // Spawn the appropriate log process
     let mut child = match os.as_str() {
+        "simulator" => {
+            // iOS Simulator: use xcrun simctl spawn to stream system log
+            match tokio::process::Command::new("xcrun")
+                .args(["simctl", "spawn", &serial, "log", "stream", "--level=debug", "--style=compact"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .kill_on_drop(true)
+                .spawn()
+            {
+                Ok(c) => c,
+                Err(_) => {
+                    let _ = ws_tx.send(Message::Text(
+                        json!({"type":"error","message":"xcrun simctl spawn log failed"}).to_string().into()
+                    )).await;
+                    return;
+                }
+            }
+        }
         "ios" => {
             // Try idevicesyslog first
             match tokio::process::Command::new("idevicesyslog")
@@ -272,10 +311,9 @@ async fn handle_logs(socket: WebSocket, serial: String) {
             line = lines.next_line() => {
                 match line {
                     Ok(Some(line)) => {
-                        let entry = if os == "ios" {
-                            parse_ios_log_line(&line)
-                        } else {
-                            parse_logcat_line(&line)
+                        let entry = match os.as_str() {
+                            "simulator" | "ios" => parse_ios_log_line(&line),
+                            _ => parse_logcat_line(&line),
                         };
                         if ws_tx.send(Message::Text(entry.to_string().into())).await.is_err() {
                             break;
@@ -295,9 +333,10 @@ async fn handle_logs(socket: WebSocket, serial: String) {
 
 // ── Capture functions (Android + iOS) ─────────────────────────────
 
-async fn capture_frame(serial: &str, os: &str) -> anyhow::Result<Vec<u8>> {
+async fn capture_frame(serial: &str, os: &str, ios_tmp: &str) -> anyhow::Result<Vec<u8>> {
     match os {
-        "ios" => capture_ios_frame(serial).await,
+        "simulator" => capture_simulator_frame(serial, ios_tmp).await,
+        "ios" => capture_ios_frame(serial, ios_tmp).await,
         _ => capture_android_frame(serial).await,
     }
 }
@@ -332,13 +371,56 @@ async fn capture_android_frame(serial: &str) -> anyhow::Result<Vec<u8>> {
     Ok(output.stdout)
 }
 
+/// iOS Simulator: xcrun simctl io screenshot → (optionally ffmpeg → JPEG)
+async fn capture_simulator_frame(serial: &str, tmp: &str) -> anyhow::Result<Vec<u8>> {
+    let png_tmp = format!("{tmp}.png");
+
+    let status = tokio::process::Command::new("xcrun")
+        .args(["simctl", "io", serial, "screenshot", "--type=png", &png_tmp])
+        .stderr(Stdio::null())
+        .stdout(Stdio::null())
+        .status()
+        .await?;
+
+    if !status.success() {
+        anyhow::bail!("xcrun simctl io screenshot failed");
+    }
+
+    // Try to convert PNG → JPEG via ffmpeg (smaller, faster for streaming)
+    if let Ok(output) = tokio::process::Command::new(ffmpeg_path())
+        .args([
+            "-y", "-hide_banner", "-loglevel", "error",
+            "-i", &png_tmp,
+            "-vframes", "1", "-f", "mjpeg", "-q:v", "15", "-vf", "scale=540:-1",
+            "pipe:1",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .await
+    {
+        if output.status.success() && output.stdout.len() > 100 {
+            let _ = tokio::fs::remove_file(&png_tmp).await;
+            return Ok(output.stdout);
+        }
+    }
+
+    // Fallback: return raw PNG (larger but universally supported)
+    let data = tokio::fs::read(&png_tmp).await?;
+    let _ = tokio::fs::remove_file(&png_tmp).await;
+    if data.len() > 100 {
+        return Ok(data);
+    }
+
+    anyhow::bail!("simulator screenshot too small ({} bytes)", data.len())
+}
+
 /// iOS: idevicescreenshot → ffmpeg → JPEG
-async fn capture_ios_frame(serial: &str) -> anyhow::Result<Vec<u8>> {
+async fn capture_ios_frame(serial: &str, tmp: &str) -> anyhow::Result<Vec<u8>> {
     // idevicescreenshot writes a TIFF to a file — we use a temp file then ffmpeg
-    let tmp = format!("/tmp/ef-ios-{}.tiff", &serial[..8.min(serial.len())]);
 
     let status = tokio::process::Command::new("idevicescreenshot")
-        .args(["-u", serial, &tmp])
+        .args(["-u", serial, tmp])
         .stderr(Stdio::null())
         .status()
         .await?;
@@ -348,10 +430,10 @@ async fn capture_ios_frame(serial: &str) -> anyhow::Result<Vec<u8>> {
     }
 
     // Convert TIFF → JPEG via ffmpeg
-    let output = tokio::process::Command::new("ffmpeg")
+    let output = tokio::process::Command::new(ffmpeg_path())
         .args([
             "-y", "-hide_banner", "-loglevel", "error",
-            "-i", &tmp,
+            "-i", tmp,
             "-vframes", "1", "-f", "mjpeg", "-q:v", "15", "-vf", "scale=540:-1",
             "pipe:1",
         ])
@@ -361,7 +443,7 @@ async fn capture_ios_frame(serial: &str) -> anyhow::Result<Vec<u8>> {
         .await?;
 
     // Clean up temp file
-    let _ = tokio::fs::remove_file(&tmp).await;
+    let _ = tokio::fs::remove_file(tmp).await;
 
     if output.status.success() && output.stdout.len() > 100 {
         return Ok(output.stdout);
@@ -385,6 +467,70 @@ async fn handle_input_event(serial: &str, os: &str, event_json: &str) {
     let etype = event.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
     match os {
+        "simulator" => {
+            tracing::info!(%serial, %etype, "Simulator input event");
+            match etype {
+                "home" => {
+                    let _ = tokio::process::Command::new("xcrun")
+                        .args(["simctl", "io", serial, "sendkey", "home"])
+                        .stderr(Stdio::null())
+                        .stdout(Stdio::null())
+                        .status()
+                        .await;
+                }
+                "tap" => {
+                    let x = event["x"].as_f64().unwrap_or(0.0);
+                    let y = event["y"].as_f64().unwrap_or(0.0);
+                    let _ = tokio::process::Command::new("xcrun")
+                        .args(["simctl", "io", serial, "tap", &format!("{x:.0}"), &format!("{y:.0}")])
+                        .stderr(Stdio::null())
+                        .stdout(Stdio::null())
+                        .status()
+                        .await;
+                }
+                "swipe" => {
+                    let x1 = event["x1"].as_f64().unwrap_or(0.0);
+                    let y1 = event["y1"].as_f64().unwrap_or(0.0);
+                    let x2 = event["x2"].as_f64().unwrap_or(0.0);
+                    let y2 = event["y2"].as_f64().unwrap_or(0.0);
+                    let _ = tokio::process::Command::new("xcrun")
+                        .args(["simctl", "io", serial, "swipe",
+                               &format!("{x1:.0}"), &format!("{y1:.0}"),
+                               &format!("{x2:.0}"), &format!("{y2:.0}")])
+                        .stderr(Stdio::null())
+                        .stdout(Stdio::null())
+                        .status()
+                        .await;
+                }
+                "key" => {
+                    let code = event.get("keycode").and_then(|v| v.as_str()).unwrap_or("");
+                    let simkey = match code {
+                        "KEYCODE_POWER" => "power",
+                        "KEYCODE_VOLUME_UP" => "volumeUp",
+                        "KEYCODE_VOLUME_DOWN" => "volumeDown",
+                        _ => code,
+                    };
+                    let _ = tokio::process::Command::new("xcrun")
+                        .args(["simctl", "io", serial, "sendkey", simkey])
+                        .stderr(Stdio::null())
+                        .stdout(Stdio::null())
+                        .status()
+                        .await;
+                }
+                "text" => {
+                    let text = event["text"].as_str().unwrap_or("");
+                    let _ = tokio::process::Command::new("xcrun")
+                        .args(["simctl", "io", serial, "sendtext", text])
+                        .stderr(Stdio::null())
+                        .stdout(Stdio::null())
+                        .status()
+                        .await;
+                }
+                _ => {
+                    tracing::debug!(%serial, %etype, "Simulator input event not supported");
+                }
+            }
+        }
         "ios" => {
             tracing::info!(%serial, %etype, "iOS input event");
             match etype {
@@ -478,7 +624,7 @@ async fn handle_input_event(serial: &str, os: &str, event_json: &str) {
 
 // ── Helpers ───────────────────────────────────────────────────────
 
-/// Detect whether a device serial belongs to an iOS, Android, or IoT device.
+/// Detect whether a device serial belongs to an iOS, Android, IoT, or simulator device.
 async fn detect_device_os(serial: &str) -> String {
     // IoT: serial port paths
     // Linux: /dev/ttyACM0, /dev/ttyUSB0, /dev/serial/by-id/...
@@ -489,6 +635,21 @@ async fn detect_device_os(serial: &str) -> String {
         || (serial.starts_with("COM") && serial[3..].chars().all(|c| c.is_ascii_digit()))
     {
         return "iot".into();
+    }
+
+    // iOS Simulator: UUID format (8-4-4-4-12 hex with dashes)
+    // Check before real iOS since simulator UUIDs also pass the hex check
+    if serial.len() == 36 && serial.chars().filter(|c| *c == '-').count() == 4 {
+        let result = tokio::process::Command::new("xcrun")
+            .args(["simctl", "list", "devices", "-j"])
+            .output()
+            .await;
+        if let Ok(out) = result {
+            let s = String::from_utf8_lossy(&out.stdout);
+            if s.contains(serial) {
+                return "simulator".into();
+            }
+        }
     }
 
     // iOS UDIDs are 40 hex chars (or 25 chars for newer devices)
@@ -523,29 +684,68 @@ async fn detect_device_os(serial: &str) -> String {
 /// Parse Android logcat threadtime line into JSON.
 fn parse_logcat_line(line: &str) -> serde_json::Value {
     // Format: "04-07 18:30:15.123  1234  5678 I Tag     : Message"
-    let parts: Vec<&str> = line.splitn(6, ' ').collect();
-    if parts.len() >= 6 {
-        let level = parts.get(4).unwrap_or(&"?");
-        json!({
-            "timestamp": format!("{} {}", parts.first().unwrap_or(&""), parts.get(1).unwrap_or(&"")),
-            "level": level.trim(),
-            "tag": parts.get(5).and_then(|s| s.split(':').next()).unwrap_or("").trim(),
-            "message": line,
-        })
+    let mut parts = line.split_whitespace();
+    let date = parts.next().unwrap_or("");
+    let time = parts.next().unwrap_or("");
+    let _pid = parts.next().unwrap_or("");
+    let _tid = parts.next().unwrap_or("");
+    let level_char = parts.next().unwrap_or("I");
+    let rest: String = parts.collect::<Vec<_>>().join(" ");
+
+    let level = match level_char {
+        "V" => "verbose",
+        "D" => "debug",
+        "I" => "info",
+        "W" => "warn",
+        "E" => "error",
+        "F" => "fatal",
+        _ => "info",
+    };
+
+    let (tag, message) = if let Some(colon_pos) = rest.find(':') {
+        (&rest[..colon_pos], rest[colon_pos + 1..].trim_start())
     } else {
-        json!({"message": line, "level": "V"})
-    }
+        ("", rest.as_str())
+    };
+
+    json!({
+        "type": "log",
+        "timestamp": format!("{date} {time}"),
+        "level": level,
+        "tag": tag.trim(),
+        "message": message,
+    })
 }
 
 /// Parse iOS syslog line into JSON.
 fn parse_ios_log_line(line: &str) -> serde_json::Value {
-    // idevicesyslog format: "Apr  7 18:30:15 iPhone process[pid] <level>: message"
+    // idevicesyslog format: "Apr  7 18:30:15 DeviceName process[pid] <Level>: message"
+    let level = if line.contains("<Error>") { "error" }
+        else if line.contains("<Warning>") { "warn" }
+        else if line.contains("<Notice>") { "info" }
+        else if line.contains("<Debug>") { "debug" }
+        else { "info" };
+
+    // Extract process name as tag: find "process[pid]" pattern
+    let tag = line.split_whitespace()
+        .find(|w| w.contains('[') && w.contains(']'))
+        .and_then(|w| w.split('[').next())
+        .unwrap_or("");
+
+    // Extract timestamp (first 3 fields: "Apr  7 18:30:15")
+    let ts_parts: Vec<&str> = line.splitn(4, ' ').collect();
+    let timestamp = if ts_parts.len() >= 3 {
+        format!("{} {} {}", ts_parts[0], ts_parts[1], ts_parts[2])
+    } else {
+        String::new()
+    };
+
     json!({
+        "type": "log",
+        "timestamp": timestamp,
+        "level": level,
+        "tag": tag,
         "message": line,
-        "level": if line.contains("<Error>") { "E" }
-                 else if line.contains("<Warning>") { "W" }
-                 else if line.contains("<Notice>") { "I" }
-                 else { "D" },
     })
 }
 

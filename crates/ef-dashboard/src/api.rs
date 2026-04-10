@@ -143,6 +143,32 @@ struct LoginRequest {
     api_key: String,
 }
 
+/// Login with username/password — OAuth2 via AuthBuddy (placeholder endpoint)
+pub async fn login_password(username: &str, password: &str) -> Result<LoginResponse, String> {
+    let resp = Request::post(&format!("{}/auth/login", base_url()))
+        .header("Content-Type", "application/json")
+        .body(serde_json::to_string(&PasswordLoginRequest {
+            username: username.to_string(),
+            password: password.to_string(),
+        }).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !resp.ok() {
+        return Err("Invalid username or password".to_string());
+    }
+
+    resp.json::<LoginResponse>().await.map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+struct PasswordLoginRequest {
+    username: String,
+    password: String,
+}
+
 #[derive(Deserialize, Clone, Debug)]
 pub struct LoginResponse {
     pub token: String,

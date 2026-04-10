@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 
 use crate::api::{self, DeviceListResponse, JobListResponse, SessionListResponse};
+use crate::components::device_icon::DeviceOsIcon;
 use crate::components::stat_card::StatCard;
 
 /// Dashboard overview — quick stats + recent activity.
@@ -86,7 +87,7 @@ pub fn OverviewPage() -> impl IntoView {
                                             view! {
                                                 <tr>
                                                     <td>{d.name}</td>
-                                                    <td>{os_icon(&d.os)} " " {d.os}</td>
+                                                    <td><DeviceOsIcon os=d.os.clone()/> " " {d.os}</td>
                                                     <td>{d.os_version}</td>
                                                     <td><crate::components::status_badge::StatusBadge status=status/></td>
                                                 </tr>
@@ -137,13 +138,5 @@ pub fn OverviewPage() -> impl IntoView {
                 </Transition>
             </div>
         </div>
-    }
-}
-
-fn os_icon(os: &str) -> &'static str {
-    match os.to_lowercase().as_str() {
-        "android" => "🤖",
-        "ios" => "🍎",
-        _ => "📟",
     }
 }

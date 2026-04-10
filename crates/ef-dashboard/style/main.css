@@ -41,7 +41,7 @@ body {
 .app-shell { display: flex; min-height: 100vh; overflow-x: hidden; }
 
 .sidebar {
-    width: 240px;
+    width: 220px;
     background: var(--bg-secondary);
     border-right: 1px solid var(--border);
     display: flex;
@@ -86,6 +86,21 @@ body {
 .sidebar-nav a:hover, .sidebar-nav button:hover { background: var(--bg-hover); color: var(--text-primary); }
 .sidebar-nav a.active { background: var(--accent); color: #fff; }
 
+.nav-icon {
+    width: 1.05rem;
+    height: 1.05rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 1.05rem;
+}
+
+.nav-icon svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
 .sidebar-footer {
     padding: 0.75rem 1rem;
     border-top: 1px solid var(--border);
@@ -108,7 +123,7 @@ body {
 }
 
 .main-content {
-    margin-left: 240px;
+    margin-left: 220px;
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -264,7 +279,30 @@ tbody tr:hover { background: var(--bg-hover); }
 .badge.queued::before { background: var(--text-secondary); }
 
 /* ---- OS icons ---- */
-.os-icon { font-size: 1.1rem; }
+.os-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.05em;
+    height: 1.05em;
+    vertical-align: -0.1em;
+}
+
+.os-icon svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.os-icon-lg {
+    width: 1.3em;
+    height: 1.3em;
+}
+
+.os-icon-title {
+    width: 1.1em;
+    height: 1.1em;
+}
 
 /* ---- Buttons ---- */
 .btn {
@@ -509,10 +547,10 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 /* ---- Responsive: Tablet (≤1024px) ---- */
 @media (max-width: 1024px) {
     .sidebar {
-        width: 200px;
+        width: 184px;
     }
     .main-content {
-        margin-left: 200px;
+        margin-left: 184px;
     }
     .session-layout {
         grid-template-columns: 1fr 280px;
@@ -608,13 +646,47 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
         flex-direction: column;
         align-items: center;
     }
+    .draggable-shell {
+        width: 100%;
+    }
+    .drag-icon-btn {
+        min-width: 26px;
+        padding: 0.14rem 0.28rem;
+    }
+    .phone-wrapper.landscape-orientation {
+        /* Keep layout safe near hamburger/sidebar overlay on small screens */
+        transform: none;
+        margin: 0;
+        min-height: min(72vw, 340px);
+        justify-content: center;
+    }
+    .phone-wrapper.portrait-for-tablet {
+        transform: none;
+        margin: 0;
+        min-height: min(72vw, 340px);
+        justify-content: center;
+    }
     .phone-frame {
         width: clamp(220px, 65vw, 320px);
         max-height: 60svh;
         transform: none;
     }
+    .phone-wrapper.landscape-orientation .phone-frame {
+        transform: rotate(90deg);
+        transform-origin: center center;
+    }
+    .phone-wrapper.portrait-for-tablet .phone-frame {
+        transform: rotate(90deg);
+        transform-origin: center center;
+    }
     .phone-frame:hover {
         transform: none;
+    }
+    .phone-wrapper.landscape-orientation .phone-frame:hover {
+        transform: rotate(90deg);
+    }
+    .phone-wrapper.portrait-for-tablet .phone-frame:hover {
+        transform: rotate(90deg);
     }
     /* Side buttons become horizontal bar below phone */
     .phone-side-buttons {
@@ -724,6 +796,30 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
         flex-direction: column;
         align-items: center;
         margin-left: 0;
+    }
+    .drag-icon-btn {
+        min-width: 24px;
+        padding: 0.12rem 0.24rem;
+    }
+    .phone-wrapper.landscape-orientation {
+        transform: none;
+        margin: 0;
+        min-height: min(82vw, 300px);
+        justify-content: center;
+    }
+    .phone-wrapper.portrait-for-tablet {
+        transform: none;
+        margin: 0;
+        min-height: min(82vw, 300px);
+        justify-content: center;
+    }
+    .phone-wrapper.landscape-orientation .phone-frame {
+        transform: rotate(90deg);
+        transform-origin: center center;
+    }
+    .phone-wrapper.portrait-for-tablet .phone-frame {
+        transform: rotate(90deg);
+        transform-origin: center center;
     }
     .phone-side-buttons {
         position: static;
@@ -846,16 +942,21 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
     display: flex;
     gap: 2rem;
     align-items: stretch;
+    position: relative;
+    overflow: visible;
+    isolation: isolate;
 }
 .viewer-panel {
     flex: 0 0 260px;
     min-width: 220px;
     max-height: calc(100vh - 100px);
-    overflow: hidden;
+    overflow: visible;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
     margin-left: 20px;
+    position: relative;
+    z-index: 20;
 }
 .viewer-panel .card {
     margin-top: 0;
@@ -869,11 +970,109 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
     font-size: 0.85rem;
 }
 
+/* Drag wrappers around movable phone/watch mockups */
+.draggable-shell {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    touch-action: none;
+}
+.draggable-shell.dragging {
+    z-index: 30;
+}
+.phone-shell { z-index: 3; }
+.watch-shell { z-index: 2; }
+
+.draggable-panel {
+    position: relative;
+    z-index: 22;
+    transition: box-shadow 0.15s ease;
+}
+.draggable-panel.dragging {
+    z-index: 200;
+    box-shadow: 0 10px 34px rgba(0,0,0,0.45);
+}
+
+.drag-icon-btn {
+    cursor: grab;
+    min-width: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.2rem 0.35rem;
+}
+.drag-icon-btn:active {
+    cursor: grabbing;
+}
+
+.phone-frame {
+    cursor: grab;
+}
+.phone-frame:active {
+    cursor: grabbing;
+}
+.watch-band-top,
+.watch-band-bottom,
+.band-texture {
+    cursor: grab;
+}
+.watch-band-top:active,
+.watch-band-bottom:active,
+.band-texture:active {
+    cursor: grabbing;
+}
+
 /* Phone wrapper (frame + side buttons) — left margin clears sidebar */
 .phone-wrapper {
     position: relative;
     flex-shrink: 0;
     margin-left: 40px;
+}
+
+/* Landscape orientation: rotate 90° CW.
+   Phone frame width ≈ clamp(180px,20vw,280px) ≈ 220px, height ≈ 500–600px.
+   After rotation the visual dimensions swap so we compensate with negative
+   top/bottom margins so the flex row doesn't waste vertical space. */
+.phone-wrapper.landscape-orientation {
+    transform: rotate(90deg);
+    transform-origin: center center;
+    /* Keep rotated device clear of sidebar and info panel */
+    margin-left: 180px;
+    margin-right: 160px;
+    margin-top: 0;
+    margin-bottom: 0;
+    transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+                margin 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Tablet/iPad bezels are landscape by default; portrait is the inverse rotation. */
+.phone-wrapper.portrait-for-tablet {
+    transform: rotate(90deg);
+    transform-origin: center center;
+    margin-left: 180px;
+    margin-right: 160px;
+    margin-top: 0;
+    margin-bottom: 0;
+    transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+                margin 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (max-width: 1280px) {
+    .phone-wrapper.landscape-orientation {
+        margin-left: 140px;
+        margin-right: 120px;
+    }
+    .phone-wrapper.portrait-for-tablet {
+        margin-left: 140px;
+        margin-right: 120px;
+    }
+}
+
+/* Smooth portrait → landscape transition on the frame itself */
+.phone-wrapper {
+    transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+                margin 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Phone frame — the bezel, adaptive width, fits viewport height */

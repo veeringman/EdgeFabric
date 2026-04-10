@@ -3,6 +3,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use crate::api::{self, DeviceListResponse};
+use crate::components::device_icon::DeviceOsIcon;
 use crate::components::status_badge::StatusBadge;
 
 /// Device info passed from card selection to the viewer.
@@ -132,6 +133,10 @@ fn bezel_from_caps(caps: &[String], os: &str, os_version: &str) -> String {
     "galaxy-s".into()
 }
 
+fn is_tablet_bezel_style(style: &str) -> bool {
+    style.starts_with("ipad") || matches!(style, "galaxy-tab" | "pixel-tablet" | "android-tablet")
+}
+
 /// Live session viewer — screenshot streaming via WebSocket + input relay.
 #[component]
 pub fn LiveSessionsPage() -> impl IntoView {
@@ -203,8 +208,6 @@ pub fn LiveSessionsPage() -> impl IntoView {
                                                 kind: d.kind.clone(),
                                                 capabilities: caps,
                                             };
-                                            let os_icon = if d.os == "android" { "🤖" } else if d.os == "ios" { "🍎" } else if d.os == "iot" { "🔌" } else if d.os == "ssh" { "🖥️" } else { "📱" };
-                                            let status = d.status.clone();
                                             let os_label = if d.os == "android" { "Android".to_string() }
                                                 else if d.os == "ios" { "iOS".to_string() }
                                                 else if d.os == "iot" { "IoT".to_string() }
@@ -215,7 +218,7 @@ pub fn LiveSessionsPage() -> impl IntoView {
                                                 <div class="device-card" on:click=move |_| {
                                                     set_selected_device.set(Some(sel.clone()));
                                                 }>
-                                                    <div class="device-card-icon">{os_icon}</div>
+                                                    <div class="device-card-icon"><DeviceOsIcon os=d.os.clone() class="os-icon-lg"/></div>
                                                     <div class="device-card-name">{d.name.clone()}</div>
                                                     <div class="device-card-info">
                                                         {format!("{} {}", os_label, d.os_version)}
@@ -271,10 +274,50 @@ fn DeviceViewer(
     let (log_ws_handle, set_log_ws_handle) = signal(Option::<web_sys::WebSocket>::None);
 
     let initial_bezel = bezel_from_caps(&device_capabilities, &device_os, &device_os_version);
+    let default_landscape = initial_bezel.starts_with("ipad")
+        || matches!(
+            initial_bezel.as_str(),
+            "galaxy-tab" | "pixel-tablet" | "android-tablet"
+        );
     let (bezel_style, set_bezel_style) = signal(initial_bezel);
+
+    // Orientation toggle (portrait / landscape) — iOS & Android only.
+    // Tablets default to landscape; phones default to portrait.
+    let (landscape, set_landscape) = signal(default_landscape);
 
     // Watch pairing signals
     let (watch_style, set_watch_style) = signal(String::from("none"));
+
+    // Drag state for moving phone/watch previews around the live viewer.
+    let (phone_pos, set_phone_pos) = signal((0.0f64, 0.0f64));
+    let (phone_dragging, set_phone_dragging) = signal(false);
+    let (phone_drag_origin, set_phone_drag_origin) = signal((0.0f64, 0.0f64));
+    let (phone_drag_start_pos, set_phone_drag_start_pos) = signal((0.0f64, 0.0f64));
+    let (phone_drag_start_rect, set_phone_drag_start_rect) = signal((0.0f64, 0.0f64, 0.0f64, 0.0f64));
+
+    let (watch_pos, set_watch_pos) = signal((0.0f64, 0.0f64));
+    let (watch_dragging, set_watch_dragging) = signal(false);
+    let (watch_drag_origin, set_watch_drag_origin) = signal((0.0f64, 0.0f64));
+    let (watch_drag_start_pos, set_watch_drag_start_pos) = signal((0.0f64, 0.0f64));
+    let (watch_drag_start_rect, set_watch_drag_start_rect) = signal((0.0f64, 0.0f64, 0.0f64, 0.0f64));
+
+    let (details_pos, set_details_pos) = signal((0.0f64, 0.0f64));
+    let (details_dragging, set_details_dragging) = signal(false);
+    let (details_drag_origin, set_details_drag_origin) = signal((0.0f64, 0.0f64));
+    let (details_drag_start_pos, set_details_drag_start_pos) = signal((0.0f64, 0.0f64));
+    let (details_drag_start_rect, set_details_drag_start_rect) = signal((0.0f64, 0.0f64, 0.0f64, 0.0f64));
+
+    let (guide_pos, set_guide_pos) = signal((0.0f64, 0.0f64));
+    let (guide_dragging, set_guide_dragging) = signal(false);
+    let (guide_drag_origin, set_guide_drag_origin) = signal((0.0f64, 0.0f64));
+    let (guide_drag_start_pos, set_guide_drag_start_pos) = signal((0.0f64, 0.0f64));
+    let (guide_drag_start_rect, set_guide_drag_start_rect) = signal((0.0f64, 0.0f64, 0.0f64, 0.0f64));
+
+    let (logs_pos, set_logs_pos) = signal((0.0f64, 0.0f64));
+    let (logs_dragging, set_logs_dragging) = signal(false);
+    let (logs_drag_origin, set_logs_drag_origin) = signal((0.0f64, 0.0f64));
+    let (logs_drag_start_pos, set_logs_drag_start_pos) = signal((0.0f64, 0.0f64));
+    let (logs_drag_start_rect, set_logs_drag_start_rect) = signal((0.0f64, 0.0f64, 0.0f64, 0.0f64));
 
     // SSH auth signals
     let (ssh_auth_needed, set_ssh_auth_needed) = signal(false);
@@ -553,11 +596,24 @@ fn DeviceViewer(
         }
 
         let [dev_w, dev_h] = resolution.get_untracked();
-        // The capture is downscaled to 540px wide, maintain aspect ratio
         let scale_w = dev_w as f64;
         let scale_h = dev_h as f64;
 
-        Some(((rel_x * scale_w) as i32, (rel_y * scale_h) as i32))
+        // When visually rotated 90° the img bounding rect is already in rotated-space.
+        // Tablets are landscape by default in bezel style; phones are portrait by default.
+        // So "effective rotation" differs by bezel type.
+        let bezel_now = bezel_style.get_untracked();
+        let rotated = if is_tablet_bezel_style(&bezel_now) {
+            !landscape.get_untracked()
+        } else {
+            landscape.get_untracked()
+        };
+
+        if rotated {
+            Some(((rel_y * scale_w) as i32, ((1.0 - rel_x) * scale_h) as i32))
+        } else {
+            Some(((rel_x * scale_w) as i32, (rel_y * scale_h) as i32))
+        }
     };
 
     // Mouse/touch event handlers for tap and swipe
@@ -605,6 +661,295 @@ fn DeviceViewer(
         set_touch_start.set(None);
     };
 
+    let clamp_drag_delta = |start_left: f64, start_top: f64, width: f64, height: f64, dx: f64, dy: f64| -> (f64, f64) {
+        let (vw, vh) = web_sys::window()
+            .and_then(|w| {
+                let vw = w.inner_width().ok()?.as_f64()?;
+                let vh = w.inner_height().ok()?.as_f64()?;
+                Some((vw, vh))
+            })
+            .unwrap_or((1920.0, 1080.0));
+
+        let padding = 8.0;
+        let min_left = padding;
+        let min_top = padding;
+        let max_left = (vw - width - padding).max(min_left);
+        let max_top = (vh - height - padding).max(min_top);
+
+        let proposed_left = start_left + dx;
+        let proposed_top = start_top + dy;
+
+        let clamped_left = proposed_left.max(min_left).min(max_left);
+        let clamped_top = proposed_top.max(min_top).min(max_top);
+
+        (clamped_left - start_left, clamped_top - start_top)
+    };
+
+    // Drag handlers (separate from device input pointer handlers)
+    let on_phone_drag_start = move |evt: web_sys::PointerEvent| {
+        if let Some(target) = evt.target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()) {
+            // Keep taps/swipes on the live screen for input events, not dragging.
+            if target.closest(".phone-screen").ok().flatten().is_some() {
+                return;
+            }
+        }
+        evt.prevent_default();
+        evt.stop_propagation();
+        set_phone_dragging.set(true);
+        set_phone_drag_origin.set((evt.client_x() as f64, evt.client_y() as f64));
+        set_phone_drag_start_pos.set(phone_pos.get_untracked());
+        if let Some(target) = evt.current_target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()) {
+            if let Some(shell) = target.closest(".draggable-shell").ok().flatten() {
+                let rect = shell.get_bounding_client_rect();
+                set_phone_drag_start_rect.set((rect.left(), rect.top(), rect.width(), rect.height()));
+            }
+        }
+        if let Some(target) = evt.current_target() {
+            if let Ok(el) = target.dyn_into::<web_sys::Element>() {
+                let _ = el.set_pointer_capture(evt.pointer_id());
+            }
+        }
+    };
+
+    let on_phone_drag_move = move |evt: web_sys::PointerEvent| {
+        if !phone_dragging.get_untracked() {
+            return;
+        }
+        evt.prevent_default();
+        let (sx, sy) = phone_drag_origin.get_untracked();
+        let (px, py) = phone_drag_start_pos.get_untracked();
+        let dx = evt.client_x() as f64 - sx;
+        let dy = evt.client_y() as f64 - sy;
+        let (left, top, w, h) = phone_drag_start_rect.get_untracked();
+        let (cdx, cdy) = clamp_drag_delta(left, top, w, h, dx, dy);
+        set_phone_pos.set((px + cdx, py + cdy));
+    };
+
+    let on_phone_drag_end = move |evt: web_sys::PointerEvent| {
+        if phone_dragging.get_untracked() {
+            set_phone_dragging.set(false);
+            if let Some(target) = evt.current_target() {
+                if let Ok(el) = target.dyn_into::<web_sys::Element>() {
+                    let _ = el.release_pointer_capture(evt.pointer_id());
+                }
+            }
+        }
+    };
+
+    let on_watch_drag_start = move |evt: web_sys::PointerEvent| {
+        let mut allow_drag = false;
+        if let Some(target) = evt.target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()) {
+            allow_drag = target
+                .closest(".watch-band-top, .watch-band-bottom, .band-texture")
+                .ok()
+                .flatten()
+                .is_some();
+        }
+        if !allow_drag {
+            return;
+        }
+        evt.prevent_default();
+        evt.stop_propagation();
+        set_watch_dragging.set(true);
+        set_watch_drag_origin.set((evt.client_x() as f64, evt.client_y() as f64));
+        set_watch_drag_start_pos.set(watch_pos.get_untracked());
+        if let Some(target) = evt.current_target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()) {
+            if let Some(shell) = target.closest(".draggable-shell").ok().flatten() {
+                let rect = shell.get_bounding_client_rect();
+                set_watch_drag_start_rect.set((rect.left(), rect.top(), rect.width(), rect.height()));
+            }
+        }
+        if let Some(target) = evt.current_target() {
+            if let Ok(el) = target.dyn_into::<web_sys::Element>() {
+                let _ = el.set_pointer_capture(evt.pointer_id());
+            }
+        }
+    };
+
+    let on_watch_drag_move = move |evt: web_sys::PointerEvent| {
+        if !watch_dragging.get_untracked() {
+            return;
+        }
+        evt.prevent_default();
+        let (sx, sy) = watch_drag_origin.get_untracked();
+        let (wx, wy) = watch_drag_start_pos.get_untracked();
+        let dx = evt.client_x() as f64 - sx;
+        let dy = evt.client_y() as f64 - sy;
+        let (left, top, w, h) = watch_drag_start_rect.get_untracked();
+        let (cdx, cdy) = clamp_drag_delta(left, top, w, h, dx, dy);
+        set_watch_pos.set((wx + cdx, wy + cdy));
+    };
+
+    let on_watch_drag_end = move |evt: web_sys::PointerEvent| {
+        if watch_dragging.get_untracked() {
+            set_watch_dragging.set(false);
+            if let Some(target) = evt.current_target() {
+                if let Ok(el) = target.dyn_into::<web_sys::Element>() {
+                    let _ = el.release_pointer_capture(evt.pointer_id());
+                }
+            }
+        }
+    };
+
+    let on_details_drag_start = move |evt: web_sys::PointerEvent| {
+        evt.prevent_default();
+        evt.stop_propagation();
+        set_details_dragging.set(true);
+        set_details_drag_origin.set((evt.client_x() as f64, evt.client_y() as f64));
+        set_details_drag_start_pos.set(details_pos.get_untracked());
+        if let Some(target) = evt.current_target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()) {
+            if let Some(panel) = target.closest(".draggable-panel").ok().flatten() {
+                let rect = panel.get_bounding_client_rect();
+                set_details_drag_start_rect.set((rect.left(), rect.top(), rect.width(), rect.height()));
+            }
+        }
+        if let Some(target) = evt.current_target() {
+            if let Ok(el) = target.dyn_into::<web_sys::Element>() {
+                let _ = el.set_pointer_capture(evt.pointer_id());
+            }
+        }
+    };
+
+    let on_details_drag_move = move |evt: web_sys::PointerEvent| {
+        if !details_dragging.get_untracked() {
+            return;
+        }
+        evt.prevent_default();
+        let (sx, sy) = details_drag_origin.get_untracked();
+        let (px, py) = details_drag_start_pos.get_untracked();
+        let dx = evt.client_x() as f64 - sx;
+        let dy = evt.client_y() as f64 - sy;
+        let (left, top, w, h) = details_drag_start_rect.get_untracked();
+        let (cdx, cdy) = clamp_drag_delta(left, top, w, h, dx, dy);
+        set_details_pos.set((px + cdx, py + cdy));
+    };
+
+    let on_details_drag_end = move |evt: web_sys::PointerEvent| {
+        if details_dragging.get_untracked() {
+            set_details_dragging.set(false);
+            if let Some(target) = evt.current_target() {
+                if let Ok(el) = target.dyn_into::<web_sys::Element>() {
+                    let _ = el.release_pointer_capture(evt.pointer_id());
+                }
+            }
+        }
+    };
+
+    let on_guide_drag_start = move |evt: web_sys::PointerEvent| {
+        evt.prevent_default();
+        evt.stop_propagation();
+        set_guide_dragging.set(true);
+        set_guide_drag_origin.set((evt.client_x() as f64, evt.client_y() as f64));
+        set_guide_drag_start_pos.set(guide_pos.get_untracked());
+        if let Some(target) = evt.current_target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()) {
+            if let Some(panel) = target.closest(".draggable-panel").ok().flatten() {
+                let rect = panel.get_bounding_client_rect();
+                set_guide_drag_start_rect.set((rect.left(), rect.top(), rect.width(), rect.height()));
+            }
+        }
+        if let Some(target) = evt.current_target() {
+            if let Ok(el) = target.dyn_into::<web_sys::Element>() {
+                let _ = el.set_pointer_capture(evt.pointer_id());
+            }
+        }
+    };
+
+    let on_guide_drag_move = move |evt: web_sys::PointerEvent| {
+        if !guide_dragging.get_untracked() {
+            return;
+        }
+        evt.prevent_default();
+        let (sx, sy) = guide_drag_origin.get_untracked();
+        let (px, py) = guide_drag_start_pos.get_untracked();
+        let dx = evt.client_x() as f64 - sx;
+        let dy = evt.client_y() as f64 - sy;
+        let (left, top, w, h) = guide_drag_start_rect.get_untracked();
+        let (cdx, cdy) = clamp_drag_delta(left, top, w, h, dx, dy);
+        set_guide_pos.set((px + cdx, py + cdy));
+    };
+
+    let on_guide_drag_end = move |evt: web_sys::PointerEvent| {
+        if guide_dragging.get_untracked() {
+            set_guide_dragging.set(false);
+            if let Some(target) = evt.current_target() {
+                if let Ok(el) = target.dyn_into::<web_sys::Element>() {
+                    let _ = el.release_pointer_capture(evt.pointer_id());
+                }
+            }
+        }
+    };
+
+    let on_logs_drag_start = move |evt: web_sys::PointerEvent| {
+        evt.prevent_default();
+        evt.stop_propagation();
+        set_logs_dragging.set(true);
+        set_logs_drag_origin.set((evt.client_x() as f64, evt.client_y() as f64));
+        set_logs_drag_start_pos.set(logs_pos.get_untracked());
+        if let Some(target) = evt.current_target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()) {
+            if let Some(panel) = target.closest(".draggable-panel").ok().flatten() {
+                let rect = panel.get_bounding_client_rect();
+                set_logs_drag_start_rect.set((rect.left(), rect.top(), rect.width(), rect.height()));
+            }
+        }
+        if let Some(target) = evt.current_target() {
+            if let Ok(el) = target.dyn_into::<web_sys::Element>() {
+                let _ = el.set_pointer_capture(evt.pointer_id());
+            }
+        }
+    };
+
+    let on_logs_drag_move = move |evt: web_sys::PointerEvent| {
+        if !logs_dragging.get_untracked() {
+            return;
+        }
+        evt.prevent_default();
+        let (sx, sy) = logs_drag_origin.get_untracked();
+        let (px, py) = logs_drag_start_pos.get_untracked();
+        let dx = evt.client_x() as f64 - sx;
+        let dy = evt.client_y() as f64 - sy;
+        let (left, top, w, h) = logs_drag_start_rect.get_untracked();
+        let (cdx, cdy) = clamp_drag_delta(left, top, w, h, dx, dy);
+        set_logs_pos.set((px + cdx, py + cdy));
+    };
+
+    let on_logs_drag_end = move |evt: web_sys::PointerEvent| {
+        if logs_dragging.get_untracked() {
+            set_logs_dragging.set(false);
+            if let Some(target) = evt.current_target() {
+                if let Ok(el) = target.dyn_into::<web_sys::Element>() {
+                    let _ = el.release_pointer_capture(evt.pointer_id());
+                }
+            }
+        }
+    };
+
+    let reset_layout_positions = move |ev: web_sys::MouseEvent| {
+        ev.prevent_default();
+        ev.stop_propagation();
+        set_phone_pos.set((0.0, 0.0));
+        set_watch_pos.set((0.0, 0.0));
+        set_details_pos.set((0.0, 0.0));
+        set_guide_pos.set((0.0, 0.0));
+        set_logs_pos.set((0.0, 0.0));
+    };
+
+    let snap_layout_positions = move |ev: web_sys::MouseEvent| {
+        ev.prevent_default();
+        ev.stop_propagation();
+        const GRID: f64 = 24.0;
+        let snap = |v: f64| (v / GRID).round() * GRID;
+        let (x1, y1) = phone_pos.get_untracked();
+        let (x2, y2) = watch_pos.get_untracked();
+        let (x3, y3) = details_pos.get_untracked();
+        let (x4, y4) = guide_pos.get_untracked();
+        let (x5, y5) = logs_pos.get_untracked();
+        set_phone_pos.set((snap(x1), snap(y1)));
+        set_watch_pos.set((snap(x2), snap(y2)));
+        set_details_pos.set((snap(x3), snap(y3)));
+        set_guide_pos.set((snap(x4), snap(y4)));
+        set_logs_pos.set((snap(x5), snap(y5)));
+    };
+
     let send_home = move |_| send_input("home", None);
     let send_back = move |_| send_input("back", None);
     let send_recent = move |_| send_input("recent", None);
@@ -625,7 +970,11 @@ fn DeviceViewer(
                 view! {
                     <div class="card" style="flex: 1; min-width: 0;">
                         <div class="card-header">
-                            <h2>{if is_ssh { "🖥️ SSH Terminal" } else { "🔌 Serial Console" }}</h2>
+                            <h2>
+                                <DeviceOsIcon os=if is_ssh { "ssh".to_string() } else { "iot".to_string() } class="os-icon-title"/>
+                                " "
+                                {if is_ssh { "SSH Terminal" } else { "Serial Console" }}
+                            </h2>
                             <button class="btn btn-ghost btn-sm" on:click=move |_| {
                                 // Clean up xterm instance
                                 let win = web_sys::window().unwrap();
@@ -907,8 +1256,30 @@ fn DeviceViewer(
             view! {
                 <>
             // ── Phone simulator ──
-            <div class="phone-wrapper">
-                <div class={move || if is_android { format!("phone-frame android {}", bezel_style.get()) } else { format!("phone-frame ios {}", bezel_style.get()) }}>
+            <div
+                class={move || if phone_dragging.get() { "draggable-shell phone-shell dragging" } else { "draggable-shell phone-shell" }}
+                style=move || {
+                    let (x, y) = phone_pos.get();
+                    format!("transform: translate({x:.1}px, {y:.1}px);")
+                }
+            >
+                <div class={move || {
+                    let bezel = bezel_style.get();
+                    if is_tablet_bezel_style(&bezel) {
+                        if landscape.get() { "phone-wrapper" } else { "phone-wrapper portrait-for-tablet" }
+                    } else if landscape.get() {
+                        "phone-wrapper landscape-orientation"
+                    } else {
+                        "phone-wrapper"
+                    }
+                }}>
+                <div
+                    class={move || if is_android { format!("phone-frame android {}", bezel_style.get()) } else { format!("phone-frame ios {}", bezel_style.get()) }}
+                    on:pointerdown=on_phone_drag_start
+                    on:pointermove=on_phone_drag_move
+                    on:pointerup=on_phone_drag_end
+                    on:pointercancel=on_phone_drag_end
+                >
                     // Top bezel
                     {if is_android {
                         view! {
@@ -1069,10 +1440,23 @@ fn DeviceViewer(
                     }.into_any()
                 }}
             </div>
+            </div>
 
             // ── Paired Watch ──
             <Show when=move || watch_style.get() != "none">
-                <div class="watch-wrapper">
+                <div
+                    class={move || if watch_dragging.get() { "draggable-shell watch-shell dragging" } else { "draggable-shell watch-shell" }}
+                    style=move || {
+                        let (x, y) = watch_pos.get();
+                        format!("transform: translate({x:.1}px, {y:.1}px);")
+                    }
+                >
+                <div class="watch-wrapper"
+                    on:pointerdown=on_watch_drag_start
+                    on:pointermove=on_watch_drag_move
+                    on:pointerup=on_watch_drag_end
+                    on:pointercancel=on_watch_drag_end
+                >
                     <div class="watch-band-top">
                         <div class="band-texture"></div>
                     </div>
@@ -1132,26 +1516,81 @@ fn DeviceViewer(
                         <div class="band-texture"></div>
                     </div>
                 </div>
+                </div>
             </Show>
 
             // ── Info panel ──
             <div class="viewer-panel">
-                <div class="card">
+                <div
+                    class={move || if details_dragging.get() { "card draggable-panel dragging" } else { "card draggable-panel" }}
+                    style=move || {
+                        let (x, y) = details_pos.get();
+                        format!("transform: translate({x:.1}px, {y:.1}px);")
+                    }
+                >
                     <div class="card-header">
                         <h2>{phone_name2}</h2>
-                        <button class="btn btn-ghost btn-sm" on:click=move |_| {
-                            if let Some(ws) = ws_handle.get_untracked() {
-                                let _ = ws.close();
-                            }
-                            on_close();
-                        }>"✕ Close"</button>
+                        <div style="display:flex; align-items:center; gap:0.35rem;">
+                            <button class="btn btn-ghost btn-sm drag-icon-btn"
+                                title="Drag panel"
+                                on:pointerdown=on_details_drag_start
+                                on:pointermove=on_details_drag_move
+                                on:pointerup=on_details_drag_end
+                                on:pointercancel=on_details_drag_end
+                            >
+                                <svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><circle cx="7" cy="5" r="1.2" fill="currentColor"/><circle cx="13" cy="5" r="1.2" fill="currentColor"/><circle cx="7" cy="10" r="1.2" fill="currentColor"/><circle cx="13" cy="10" r="1.2" fill="currentColor"/><circle cx="7" cy="15" r="1.2" fill="currentColor"/><circle cx="13" cy="15" r="1.2" fill="currentColor"/></svg>
+                            </button>
+                            <button class="btn btn-ghost btn-sm" on:click=move |_| {
+                                if let Some(ws) = ws_handle.get_untracked() {
+                                    let _ = ws.close();
+                                }
+                                on_close();
+                            }>"✕ Close"</button>
+                        </div>
                     </div>
 
                     <Show when=move || error.get().is_some()>
                         <div class="alert error">{move || error.get().unwrap_or_default()}</div>
                     </Show>
 
+                    <div style="display:flex; gap:0.35rem; margin-bottom:0.4rem; justify-content:flex-end;">
+                        <button class="btn btn-ghost btn-sm" title="Snap dragged items to grid" on:click=snap_layout_positions>
+                            <svg viewBox="0 0 20 20" width="12" height="12" aria-hidden="true"><path d="M2 2h6v6H2V2zm10 0h6v6h-6V2zM2 12h6v6H2v-6zm10 0h6v6h-6v-6z" fill="currentColor"/></svg>
+                        </button>
+                        <button class="btn btn-ghost btn-sm" title="Reset dragged items" on:click=reset_layout_positions>
+                            <svg viewBox="0 0 20 20" width="12" height="12" aria-hidden="true"><path d="M10 3a7 7 0 1 1-6.8 8.7h2.1A5 5 0 1 0 10 5c-1.4 0-2.7.6-3.6 1.5L8 8H2V2l2.1 2.1A7 7 0 0 1 10 3z" fill="currentColor"/></svg>
+                        </button>
+                    </div>
+
                     <div class="stream-info">
+                        // ── Orientation toggle (iOS / Android only) ──
+                        {if is_ios || is_android {
+                            view! {
+                                <div class="info-row" style="align-items: center;">
+                                    <span class="info-label">"Orientation"</span>
+                                    <div style="display: flex; gap: 0.35rem;">
+                                        <button
+                                            class={move || if !landscape.get() { "btn btn-primary btn-sm" } else { "btn btn-ghost btn-sm" }}
+                                            on:click=move |ev: web_sys::MouseEvent| { ev.prevent_default(); ev.stop_propagation(); set_landscape.set(false); }
+                                            title="Portrait"
+                                        >
+                                            <svg viewBox="0 0 20 20" width="13" height="13" style="vertical-align: middle; margin-right: 3px;"><rect x="5" y="1" width="10" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+                                            "Portrait"
+                                        </button>
+                                        <button
+                                            class={move || if landscape.get() { "btn btn-primary btn-sm" } else { "btn btn-ghost btn-sm" }}
+                                            on:click=move |ev: web_sys::MouseEvent| { ev.prevent_default(); ev.stop_propagation(); set_landscape.set(true); }
+                                            title="Landscape"
+                                        >
+                                            <svg viewBox="0 0 20 20" width="13" height="13" style="vertical-align: middle; margin-right: 3px;"><rect x="1" y="5" width="18" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+                                            "Landscape"
+                                        </button>
+                                    </div>
+                                </div>
+                            }.into_any()
+                        } else {
+                            view! { <span></span> }.into_any()
+                        }}
                         <div class="info-row">
                             <span class="info-label">"Status"</span>
                             {move || if connected.get() {
@@ -1182,6 +1621,7 @@ fn DeviceViewer(
                                             on:change=move |ev| {
                                                 let val = event_target_value(&ev);
                                                 set_bezel_style.set(val.clone());
+                                                set_landscape.set(val.starts_with("ipad"));
                                                 let dev_id = dev_id_for_bezel.clone();
                                                 leptos::task::spawn_local(async move {
                                                     let body = serde_json::json!({"key": "bezel", "value": val});
@@ -1222,6 +1662,7 @@ fn DeviceViewer(
                                             on:change=move |ev| {
                                                 let val = event_target_value(&ev);
                                                 set_bezel_style.set(val.clone());
+                                                set_landscape.set(matches!(val.as_str(), "galaxy-tab" | "pixel-tablet" | "android-tablet"));
                                                 let dev_id = dev_id_for_bezel.clone();
                                                 leptos::task::spawn_local(async move {
                                                     let body = serde_json::json!({"key": "bezel", "value": val});
@@ -1313,8 +1754,25 @@ fn DeviceViewer(
                     </div>
                 </div>
 
-                <div class="card">
-                    <div class="card-header"><h2>"Interaction Guide"</h2></div>
+                <div
+                    class={move || if guide_dragging.get() { "card draggable-panel dragging" } else { "card draggable-panel" }}
+                    style=move || {
+                        let (x, y) = guide_pos.get();
+                        format!("transform: translate({x:.1}px, {y:.1}px);")
+                    }
+                >
+                    <div class="card-header">
+                        <h2>"Interaction Guide"</h2>
+                        <button class="btn btn-ghost btn-sm drag-icon-btn"
+                            title="Drag panel"
+                            on:pointerdown=on_guide_drag_start
+                            on:pointermove=on_guide_drag_move
+                            on:pointerup=on_guide_drag_end
+                            on:pointercancel=on_guide_drag_end
+                        >
+                            <svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><circle cx="7" cy="5" r="1.2" fill="currentColor"/><circle cx="13" cy="5" r="1.2" fill="currentColor"/><circle cx="7" cy="10" r="1.2" fill="currentColor"/><circle cx="13" cy="10" r="1.2" fill="currentColor"/><circle cx="7" cy="15" r="1.2" fill="currentColor"/><circle cx="13" cy="15" r="1.2" fill="currentColor"/></svg>
+                        </button>
+                    </div>
                     <div class="interaction-guide">
                         <div class="guide-item">
                             <span class="guide-icon">"👆"</span>
@@ -1341,12 +1799,27 @@ fn DeviceViewer(
                 </div>
 
                 // ── Inline Device Logs ──
-                <div class="card">
+                <div
+                    class={move || if logs_dragging.get() { "card draggable-panel dragging" } else { "card draggable-panel" }}
+                    style=move || {
+                        let (x, y) = logs_pos.get();
+                        format!("transform: translate({x:.1}px, {y:.1}px);")
+                    }
+                >
                     <div class="card-header" style="cursor: pointer; user-select: none;"
                         on:click=move |_| set_log_open.update(|v| *v = !*v)
                     >
                         <h2>{move || if log_open.get() { "▾ Device Logs" } else { "▸ Device Logs" }}</h2>
                         <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <button class="btn btn-ghost btn-sm drag-icon-btn"
+                                title="Drag panel"
+                                on:pointerdown=on_logs_drag_start
+                                on:pointermove=on_logs_drag_move
+                                on:pointerup=on_logs_drag_end
+                                on:pointercancel=on_logs_drag_end
+                            >
+                                <svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><circle cx="7" cy="5" r="1.2" fill="currentColor"/><circle cx="13" cy="5" r="1.2" fill="currentColor"/><circle cx="7" cy="10" r="1.2" fill="currentColor"/><circle cx="13" cy="10" r="1.2" fill="currentColor"/><circle cx="7" cy="15" r="1.2" fill="currentColor"/><circle cx="13" cy="15" r="1.2" fill="currentColor"/></svg>
+                            </button>
                             {move || if log_connected.get() {
                                 view! { <span class="badge active" style="font-size: 0.7rem">"● Live"</span> }.into_any()
                             } else if log_open.get() {

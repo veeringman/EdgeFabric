@@ -4,6 +4,64 @@ use leptos_router::components::A;
 use crate::SidebarOpen;
 
 #[component]
+fn NavIcon(name: String) -> impl IntoView {
+    match name.as_str() {
+        "overview" => view! {
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 3v18h18"/>
+                <path d="M7 14l3-3 3 2 4-5"/>
+            </svg>
+        }
+        .into_any(),
+        "devices" => view! {
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="7" y="2.5" width="10" height="19" rx="2"/>
+                <path d="M10 5.5h4M11 18.5h2"/>
+            </svg>
+        }
+        .into_any(),
+        "sessions" => view! {
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="7" cy="12" r="2"/>
+                <circle cx="17" cy="7" r="2"/>
+                <circle cx="17" cy="17" r="2"/>
+                <path d="M9 11 15 8M9 13 15 16"/>
+            </svg>
+        }
+        .into_any(),
+        "live" => view! {
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="5" width="14" height="14" rx="2"/>
+                <path d="m17 10 4-2v8l-4-2z"/>
+            </svg>
+        }
+        .into_any(),
+        "jobs" => view! {
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 2h6v4H9z"/>
+                <rect x="5" y="6" width="14" height="16" rx="2"/>
+                <path d="M8 11h8M8 15h8"/>
+            </svg>
+        }
+        .into_any(),
+        "logs" => view! {
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 4h16v16H4z"/>
+                <path d="M8 9h8M8 13h8M8 17h5"/>
+            </svg>
+        }
+        .into_any(),
+        _ => view! {
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a2 2 0 0 1-4 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a2 2 0 0 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a2 2 0 0 1 0-4h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2h.1a1 1 0 0 0 .6-.9V4a2 2 0 0 1 4 0v.2a1 1 0 0 0 .6.9h.1a1 1 0 0 0 1.1-.2l.1-.1a2 2 0 0 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1v.1a1 1 0 0 0 .9.6H20a2 2 0 0 1 0 4h-.2a1 1 0 0 0-.9.6z"/>
+            </svg>
+        }
+        .into_any(),
+    }
+}
+
+#[component]
 pub fn Sidebar() -> impl IntoView {
     // Close sidebar on nav click (mobile)
     let close = move |_: web_sys::MouseEvent| {
@@ -24,13 +82,13 @@ pub fn Sidebar() -> impl IntoView {
                 <img class="brand-logo" src="/logo.png" alt="EdgeFabric" />
             </div>
             <nav class="sidebar-nav" on:click=close>
-                <A href="/">"📊 Overview"</A>
-                <A href="/devices">"📱 Devices"</A>
-                <A href="/sessions">"🔗 Sessions"</A>
-                <A href="/sessions/live">"📺 Live Viewer"</A>
-                <A href="/jobs">"🧪 Test Jobs"</A>
-                <A href="/logs">"📜 Logs"</A>
-                <A href="/admin">"⚙️ Admin"</A>
+                <A href="/"><span class="nav-icon"><NavIcon name="overview".to_string()/></span><span>"Overview"</span></A>
+                <A href="/devices"><span class="nav-icon"><NavIcon name="devices".to_string()/></span><span>"Devices"</span></A>
+                <A href="/sessions"><span class="nav-icon"><NavIcon name="sessions".to_string()/></span><span>"Sessions"</span></A>
+                <A href="/sessions/live"><span class="nav-icon"><NavIcon name="live".to_string()/></span><span>"Live Viewer"</span></A>
+                <A href="/jobs"><span class="nav-icon"><NavIcon name="jobs".to_string()/></span><span>"Test Jobs"</span></A>
+                <A href="/logs"><span class="nav-icon"><NavIcon name="logs".to_string()/></span><span>"Logs"</span></A>
+                <A href="/admin"><span class="nav-icon"><NavIcon name="admin".to_string()/></span><span>"Admin"</span></A>
             </nav>
             <div class="sidebar-footer">
                 <span class="env-badge">"Development"</span>

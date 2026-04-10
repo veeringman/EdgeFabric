@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 
 use crate::api::{self, Device, DeviceListResponse};
+use crate::components::device_icon::DeviceOsIcon;
 use crate::components::status_badge::StatusBadge;
 
 /// Device browser — list, filter, and manage devices.
@@ -103,7 +104,7 @@ fn DeviceTable(devices: Vec<Device>) -> impl IntoView {
                             <tr>
                                 <td><strong>{d.name}</strong></td>
                                 <td class="mono truncate">{d.serial.unwrap_or_else(|| "—".into())}</td>
-                                <td>{os_icon(&d.os)} " " {d.os.clone()}</td>
+                                <td><DeviceOsIcon os=d.os.clone()/> " " {d.os.clone()}</td>
                                 <td>{d.os_version}</td>
                                 <td>{d.kind}</td>
                                 <td>{d.region}</td>
@@ -115,13 +116,5 @@ fn DeviceTable(devices: Vec<Device>) -> impl IntoView {
                 </tbody>
             </table>
         </div>
-    }
-}
-
-fn os_icon(os: &str) -> &'static str {
-    match os.to_lowercase().as_str() {
-        "android" => "🤖",
-        "ios" => "🍎",
-        _ => "📟",
     }
 }

@@ -173,8 +173,8 @@ impl DeviceRepo {
                    os_version = EXCLUDED.os_version,
                    region = EXCLUDED.region,
                    capabilities = EXCLUDED.capabilities || ARRAY(
-                       SELECT unnest(devices.capabilities)
-                       WHERE unnest LIKE 'bezel:%'
+                       SELECT cap FROM unnest(devices.capabilities) AS cap
+                       WHERE cap LIKE 'bezel:%'
                    ),
                    agent_id = EXCLUDED.agent_id,
                    ip_address = EXCLUDED.ip_address,
@@ -220,7 +220,7 @@ impl DeviceRepo {
         let result = sqlx::query(
             r#"UPDATE devices
                SET capabilities = array_append(
-                   ARRAY(SELECT unnest(capabilities) WHERE NOT unnest LIKE $2),
+                   ARRAY(SELECT cap FROM unnest(capabilities) AS cap WHERE NOT cap LIKE $2),
                    $3
                )
                WHERE id = $1"#,

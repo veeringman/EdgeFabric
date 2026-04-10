@@ -50,7 +50,7 @@ pub fn SessionsPage() -> impl IntoView {
         </Show>
 
         <div class="card">
-            <Suspense fallback=move || view! { <div class="loading">"Loading sessions…"</div> }>
+            <Transition fallback=move || view! { <div class="loading">"Loading sessions…"</div> }>
                 {move || sessions.get().as_deref().map(|data| {
                     if data.sessions.is_empty() {
                         return view! { <p class="empty-state">"No active sessions"</p> }.into_any();
@@ -59,7 +59,7 @@ pub fn SessionsPage() -> impl IntoView {
                     let set_refresh = set_refresh.clone();
                     view! { <SessionTable sessions=sess on_action=move || set_refresh.update(|n| *n += 1)/> }.into_any()
                 })}
-            </Suspense>
+            </Transition>
         </div>
     }
 }

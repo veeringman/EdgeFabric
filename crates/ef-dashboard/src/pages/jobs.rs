@@ -50,7 +50,7 @@ pub fn JobsPage() -> impl IntoView {
         </Show>
 
         <div class="card">
-            <Suspense fallback=move || view! { <div class="loading">"Loading jobs…"</div> }>
+            <Transition fallback=move || view! { <div class="loading">"Loading jobs…"</div> }>
                 {move || jobs.get().as_deref().map(|data| {
                     if data.jobs.is_empty() {
                         return view! { <p class="empty-state">"No test jobs submitted yet"</p> }.into_any();
@@ -58,7 +58,7 @@ pub fn JobsPage() -> impl IntoView {
                     let items = data.jobs.clone();
                     view! { <JobTable jobs=items on_select=move |id| set_selected_job.set(Some(id)) on_action=move || set_refresh.update(|n| *n += 1)/> }.into_any()
                 })}
-            </Suspense>
+            </Transition>
         </div>
     }
 }
@@ -231,7 +231,7 @@ fn JobDetailView(job_id: String, on_close: impl Fn() + Send + Sync + 'static) ->
             </div>
 
             // Progress bar
-            <Suspense fallback=move || view! { <div class="loading">"Loading…"</div> }>
+            <Transition fallback=move || view! { <div class="loading">"Loading…"</div> }>
                 {move || progress.get().as_deref().map(|p| {
                     let total = p.total.max(1);
                     let pass_pct = (p.passed * 100) / total;
@@ -251,10 +251,10 @@ fn JobDetailView(job_id: String, on_close: impl Fn() + Send + Sync + 'static) ->
                         </div>
                     }
                 })}
-            </Suspense>
+            </Transition>
 
             // Test cases table
-            <Suspense fallback=move || view! { <div class="loading">"Loading…"</div> }>
+            <Transition fallback=move || view! { <div class="loading">"Loading…"</div> }>
                 {move || detail.get().as_deref().map(|opt| {
                     match opt {
                         None => view! { <p class="empty-state">"Failed to load job details"</p> }.into_any(),
@@ -295,7 +295,7 @@ fn JobDetailView(job_id: String, on_close: impl Fn() + Send + Sync + 'static) ->
                         }
                     }
                 })}
-            </Suspense>
+            </Transition>
         </div>
     }
 }

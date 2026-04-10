@@ -80,7 +80,7 @@ fn DeviceManagement() -> impl IntoView {
                 } on_error=move |e| set_error.set(Some(e))/>
             </Show>
 
-            <Suspense fallback=move || view! { <div class="loading">"Loading…"</div> }>
+            <Transition fallback=move || view! { <div class="loading">"Loading…"</div> }>
                 {move || devices.get().as_deref().map(|data| {
                     if data.devices.is_empty() {
                         return view! { <p class="empty-state">"No devices"</p> }.into_any();
@@ -131,7 +131,7 @@ fn DeviceManagement() -> impl IntoView {
                         </div>
                     }.into_any()
                 })}
-            </Suspense>
+            </Transition>
         </div>
     }
 }

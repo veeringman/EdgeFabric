@@ -955,9 +955,15 @@ $port.Close()"#,
             .spawn()
     } else {
         // Linux / macOS: configure with stty then use socat for bidirectional I/O
+        // Resolve symlinks to avoid colons in /dev/serial/by-id/ paths
+        // being misinterpreted as socat address option separators.
+        let resolved = tokio::fs::canonicalize(serial_port)
+            .await
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| serial_port.to_string());
         let stty_flag = if cfg!(target_os = "macos") { "-f" } else { "-F" };
         let _ = tokio::process::Command::new("stty")
-            .args([stty_flag, serial_port, "115200", "raw", "-echo", "-echoe", "-echok"])
+            .args([stty_flag, &resolved, "115200", "raw", "-echo", "-echoe", "-echok"])
             .output()
             .await;
 
@@ -965,8 +971,8 @@ $port.Close()"#,
         if which_exists("socat").await {
             tokio::process::Command::new("socat")
                 .args([
-                    "-,rawer",
-                    &format!("file:{},b115200,raw,echo=0,crnl", serial_port),
+                    "STDIO",
+                    &format!("file:{},b115200,raw,echo=0,crnl", resolved),
                 ])
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())

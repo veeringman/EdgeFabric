@@ -61,7 +61,7 @@ pub fn OverviewPage() -> impl IntoView {
                 <div class="card-header">
                     <h2>"Recent Devices"</h2>
                 </div>
-                <Suspense fallback=move || view! { <div class="loading">"Loading…"</div> }>
+                <Transition fallback=move || view! { <div class="loading">"Loading…"</div> }>
                     {move || devices.get().as_deref().map(|data| {
                         if data.devices.is_empty() {
                             return view! { <p class="empty-state">"No devices registered"</p> }.into_any();
@@ -97,14 +97,14 @@ pub fn OverviewPage() -> impl IntoView {
                             </div>
                         }.into_any()
                     })}
-                </Suspense>
+                </Transition>
             </div>
 
             <div class="card">
                 <div class="card-header">
                     <h2>"Recent Jobs"</h2>
                 </div>
-                <Suspense fallback=move || view! { <div class="loading">"Loading…"</div> }>
+                <Transition fallback=move || view! { <div class="loading">"Loading…"</div> }>
                     {move || jobs.get().as_deref().map(|data| {
                         if data.jobs.is_empty() {
                             return view! { <p class="empty-state">"No test jobs yet"</p> }.into_any();
@@ -134,7 +134,7 @@ pub fn OverviewPage() -> impl IntoView {
                             </div>
                         }.into_any()
                     })}
-                </Suspense>
+                </Transition>
             </div>
         </div>
     }

@@ -148,7 +148,7 @@ pub fn LogsPage() -> impl IntoView {
         <div class="filters">
             <div class="form-group">
                 <label>"Device"</label>
-                <Suspense fallback=move || view! { <select><option>"Loading…"</option></select> }>
+                <Transition fallback=move || view! { <select><option>"Loading…"</option></select> }>
                     {move || devices.get().as_deref().map(|data| {
                         view! {
                             <select on:change=move |ev| set_device_id.set(event_target_value(&ev))>
@@ -163,7 +163,7 @@ pub fn LogsPage() -> impl IntoView {
                             </select>
                         }
                     })}
-                </Suspense>
+                </Transition>
             </div>
             <div class="form-group">
                 <label>"Min Level"</label>

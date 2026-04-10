@@ -8,3 +8,4 @@ pub mod device;
 pub mod error;
 pub mod session;
 pub mod telemetry;
+pub mod virtual_iot;

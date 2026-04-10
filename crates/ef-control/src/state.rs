@@ -64,6 +64,7 @@ pub fn spawn_stale_device_checker(
             let result = sqlx::query(
                 r#"UPDATE devices SET status = 'offline'::device_status
                    WHERE status IN ('available'::device_status, 'busy'::device_status)
+                                         AND os <> 'virtual_iot'::device_os
                      AND (last_heartbeat IS NULL OR last_heartbeat < $1)"#,
             )
             .bind(cutoff)

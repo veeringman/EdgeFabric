@@ -51,6 +51,15 @@ fn NavIcon(name: String) -> impl IntoView {
             </svg>
         }
         .into_any(),
+        "iot" => view! {
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="6" y="3" width="12" height="18" rx="2"/>
+                <circle cx="12" cy="8" r="1.5"/>
+                <path d="M8 13h8M8 16h8"/>
+                <path d="M9 3V1M15 3V1"/>
+            </svg>
+        }
+        .into_any(),
         _ => view! {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="12" cy="12" r="3"/>
@@ -87,6 +96,7 @@ pub fn Sidebar() -> impl IntoView {
                 <A href="/sessions"><span class="nav-icon"><NavIcon name="sessions".to_string()/></span><span>"Sessions"</span></A>
                 <A href="/sessions/live"><span class="nav-icon"><NavIcon name="live".to_string()/></span><span>"Live Viewer"</span></A>
                 <A href="/jobs"><span class="nav-icon"><NavIcon name="jobs".to_string()/></span><span>"Test Jobs"</span></A>
+                <A href="/virtual-iot/new"><span class="nav-icon"><NavIcon name="iot".to_string()/></span><span>"IoT Designer"</span></A>
                 <A href="/logs"><span class="nav-icon"><NavIcon name="logs".to_string()/></span><span>"Logs"</span></A>
                 <A href="/admin"><span class="nav-icon"><NavIcon name="admin".to_string()/></span><span>"Admin"</span></A>
             </nav>

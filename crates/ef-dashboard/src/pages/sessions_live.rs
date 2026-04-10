@@ -1,8 +1,13 @@
 use leptos::prelude::*;
+use leptos::task::spawn_local;
+use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use crate::api::{self, DeviceListResponse};
+use crate::api::VirtualIotConfigResponse;
+use crate::board_config;
+use crate::components::board_layout::render_catalog_board_layout;
 use crate::components::device_icon::DeviceOsIcon;
 use crate::components::status_badge::StatusBadge;
 
@@ -212,6 +217,7 @@ pub fn LiveSessionsPage() -> impl IntoView {
                                                 else if d.os == "ios" { "iOS".to_string() }
                                                 else if d.os == "iot" { "IoT".to_string() }
                                                 else if d.os == "ssh" { "SSH".to_string() }
+                                                else if d.os == "virtual_iot" { "Virtual IoT".to_string() }
                                                 else { d.os.clone() };
                                             let status = d.status.clone();
                                             view! {
@@ -334,6 +340,7 @@ fn DeviceViewer(
     let is_ios = device_os == "ios";
     let is_iot = device_os == "iot";
     let is_ssh = device_os == "ssh";
+    let is_virtual_iot = device_os == "virtual_iot";
     let is_terminal = is_iot || is_ssh;
 
     // Pre-clone for branches that need them
@@ -344,7 +351,7 @@ fn DeviceViewer(
     let phone_kind = device_kind.clone();
     let iot_name = device_name.clone();
     let phone_name = device_name.clone();
-    let phone_name2 = device_name;
+    let phone_name2 = device_name.clone();
     let bezel_dev_id = device_id.clone();
 
     // FPS counter
@@ -966,7 +973,18 @@ fn DeviceViewer(
     view! {
         <div class="viewer-layout">
             // ── Terminal (IoT / SSH) OR Phone simulator ──
-            {if is_terminal {
+            {if is_virtual_iot {
+                let viot_id = device_id.clone();
+                let viot_name = device_name.clone();
+                let close_cb = Callback::new(move |_| on_close());
+                view! {
+                    <VirtualIotViewer
+                        device_id=viot_id
+                        device_name=viot_name
+                        on_close=close_cb
+                    />
+                }.into_any()
+            } else if is_terminal {
                 view! {
                     <div class="card" style="flex: 1; min-width: 0;">
                         <div class="card-header">
@@ -1897,5 +1915,495 @@ fn DeviceViewer(
             }.into_any()
             }}
         </div>
+    }
+}
+
+fn virtual_iot_sensor_label(sensor: &str) -> &'static str {
+    board_config::sensor_label(sensor)
+}
+
+fn virtual_iot_sensor_preview(sensor: &str) -> &'static str {
+    board_config::sensor_profile(sensor).preview.as_str()
+}
+
+fn virtual_iot_sensor_realism(sensor: &str) -> (&'static str, &'static str) {
+    let profile = board_config::sensor_profile(sensor);
+    (profile.module_profile.as_str(), profile.expected_range.as_str())
+}
+
+fn virtual_iot_controller_name(controller_type: &str) -> &'static str {
+    board_config::controller_name(controller_type)
+}
+
+#[derive(Clone)]
+struct WiringMapEntry {
+    sensor_key: String,
+    sensor_label: String,
+    pin: String,
+    bus: String,
+    note: String,
+}
+
+fn wire_color_for_bus(pin: &str, bus: &str) -> &'static str {
+    board_config::bus_wire_color(pin, bus).unwrap_or("#94a3b8")
+}
+
+fn virtual_iot_default_wiring(controller_type: &str, enabled_sensors: &[String]) -> Vec<WiringMapEntry> {
+    board_config::default_wiring(controller_type, enabled_sensors)
+        .into_iter()
+        .map(|entry| WiringMapEntry {
+            sensor_key: entry.sensor_key,
+            sensor_label: entry.sensor_label,
+            pin: entry.pin,
+            bus: entry.bus,
+            note: entry.note,
+        })
+        .collect()
+}
+
+fn virtual_iot_primary_pin(pin: &str) -> String {
+    pin.split('/').next().unwrap_or(pin).trim().to_string()
+}
+
+fn virtual_iot_pin_anchor_y(controller_type: &str, pin: &str) -> f32 {
+    let wiring_family = board_config::find_controller(controller_type).wiring_family.as_str();
+    if let Some(y) = board_config::pin_anchor_for_family(wiring_family, pin) {
+        return y;
+    }
+    match pin {
+        "GPIO2" => 120.0,
+        "GPIO3" => 145.0,
+        "GPIO21" | "A4" | "GP4" | "PB9" | "PIN_1" => 120.0,
+        "GPIO22" | "A5" | "GP5" | "PB8" | "PIN_2" => 145.0,
+        "GPIO8" => 170.0,
+        "GPIO34" | "A0" | "GP26" | "PA0" | "PIN_5" => 170.0,
+        "GPIO14" => 195.0,
+        "GPIO16" | "D2" | "GP8" | "PA2" | "PIN_3" => 195.0,
+        "GPIO15" => 220.0,
+        "GPIO17" | "D3" | "GP9" | "PA3" | "PIN_4" => 220.0,
+        "GPIO27" => 245.0,
+        "GPIO35" | "A1" | "GP27" | "PA1" => 245.0,
+        "GPIO32" | "A2" | "GP28" | "PA4" => 270.0,
+        "GPIO22 (pin 15)" => 270.0,
+        "GPIO4" | "D4" | "GP10" | "PB0" | "PIN_6" => 295.0,
+        "GPIO5" | "D5" | "GP11" | "PB1" | "PIN_7" => 320.0,
+        "GPIO12" => 320.0,
+        "GPIO13" => 345.0,
+        "GPIO18" | "D6" | "GP12" | "PB2" => 345.0,
+        "GPIO36" | "A3" | "PA5" => 370.0,
+        "GPIO39" | "PA6" => 395.0,
+        _ => 255.0,
+    }
+}
+
+#[component]
+fn VirtualIotBoard(controller_type: String) -> impl IntoView {
+    let profile = board_config::find_controller(&controller_type);
+    let chip_label = profile.chip_label.as_str();
+    let has_wifi = profile.has_wifi;
+    let pin_count = profile.pin_count;
+    let board_color = profile.board_color.as_str();
+    let board_title = profile.name.as_str();
+
+    let inner = if let Some(layout_view) = render_catalog_board_layout(profile, chip_label) {
+        layout_view
+    } else {
+        view! {
+            <>
+                <rect x="22" y="24" width="216" height="312" rx="12" fill={board_color} stroke="#1f2937" stroke-width="2"/>
+                <rect x="70" y="90" width="120" height="82" rx="5" fill="#111827" stroke="#5f6872" stroke-width="1.2" filter="url(#chip-shadow)"/>
+                <text x="130" y="134" text-anchor="middle" fill="#d1dae2" font-size="9" font-family="monospace">{chip_label}</text>
+                {(0..pin_count).map(|i| {
+                    let y = 50 + i * 16;
+                    view! {
+                        <>
+                            <rect x="28" y={y} width="12" height="8" rx="1" fill="#d4af37"/>
+                            <rect x="220" y={y} width="12" height="8" rx="1" fill="#d4af37"/>
+                        </>
+                    }
+                }).collect::<Vec<_>>()}
+            </>
+        }.into_any()
+    };
+
+    view! {
+        <svg viewBox="0 0 260 360" class="virtual-iot-board-svg" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+                <linearGradient id="pcb-sheen" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stop-color="rgba(255,255,255,0.18)"/>
+                    <stop offset="28%" stop-color="rgba(255,255,255,0.02)"/>
+                    <stop offset="100%" stop-color="rgba(0,0,0,0.18)"/>
+                </linearGradient>
+                <pattern id="pcb-grid" width="18" height="18" patternUnits="userSpaceOnUse">
+                    <path d="M18 0H0V18" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="1"/>
+                </pattern>
+                <filter id="chip-shadow" x="-20%" y="-20%" width="140%" height="140%">
+                    <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="rgba(0,0,0,0.45)"/>
+                </filter>
+            </defs>
+
+            <rect x="10" y="10" width="240" height="340" rx="18" fill={board_color} stroke="#111826" stroke-width="2"/>
+            <rect x="10" y="10" width="240" height="340" rx="18" fill="url(#pcb-grid)"/>
+            <rect x="10" y="10" width="240" height="340" rx="18" fill="url(#pcb-sheen)"/>
+
+            <circle cx="28" cy="28" r="6" fill="#0c111a" stroke="#818c99" stroke-width="1.2"/>
+            <circle cx="232" cy="28" r="6" fill="#0c111a" stroke="#818c99" stroke-width="1.2"/>
+            <circle cx="28" cy="332" r="6" fill="#0c111a" stroke="#818c99" stroke-width="1.2"/>
+            <circle cx="232" cy="332" r="6" fill="#0c111a" stroke="#818c99" stroke-width="1.2"/>
+
+            <text x="130" y="30" text-anchor="middle" fill="rgba(255,255,255,0.85)" font-size="8" font-family="sans-serif">{board_title}</text>
+
+            {inner}
+
+            {if has_wifi {
+                view! {
+                    <g transform="translate(176, 44)">
+                        <rect x="0" y="0" width="54" height="18" rx="4" fill="#0b315a" stroke="#2b6cb0" stroke-width="0.8"/>
+                        <text x="27" y="12.5" text-anchor="middle" fill="#a5d8ff" font-size="7" font-family="sans-serif">"Wireless"</text>
+                    </g>
+                }.into_any()
+            } else {
+                view! { <g/> }.into_any()
+            }}
+        </svg>
+    }
+}
+
+#[component]
+fn VirtualIotViewer(
+    device_id: String,
+    device_name: String,
+    on_close: Callback<()>,
+) -> impl IntoView {
+    let (loading, set_loading) = signal(true);
+    let (error, set_error) = signal(Option::<String>::None);
+    let (controller_type, set_controller_type) = signal(String::from("esp32-devkit"));
+    let (sim_rate_ms, set_sim_rate_ms) = signal(500i32);
+    let (enabled_sensors, set_enabled_sensors) = signal(Vec::<String>::new());
+
+    let fetch_device_id = device_id.clone();
+    Effect::new(move || {
+        let device_id = fetch_device_id.clone();
+        spawn_local(async move {
+            match api::get::<VirtualIotConfigResponse>(&format!("/devices/{device_id}/virtual-iot/config")).await {
+                Ok(resp) => {
+                    set_controller_type.set(resp.config.controller_type);
+                    set_sim_rate_ms.set(resp.config.sim_rate_ms);
+                    if let Ok(sensors) = serde_json::from_value::<Vec<String>>(resp.config.enabled_sensors) {
+                        set_enabled_sensors.set(sensors);
+                    }
+                    set_loading.set(false);
+                }
+                Err(err) => {
+                    set_error.set(Some(err));
+                    set_loading.set(false);
+                }
+            }
+        });
+    });
+
+    let controller_name = move || virtual_iot_controller_name(&controller_type.get()).to_string();
+    let sensor_count = move || enabled_sensors.get().len();
+    let wiring_map = move || virtual_iot_default_wiring(&controller_type.get(), &enabled_sensors.get());
+
+    view! {
+        <div class="card virtual-iot-viewer">
+            <div class="card-header">
+                <h2>
+                    <DeviceOsIcon os="virtual_iot".to_string() class="os-icon-title"/>
+                    " "
+                    "Virtual IoT Detail"
+                </h2>
+                <button class="btn btn-ghost btn-sm" on:click=move |_| on_close.run(())>"✕ Close"</button>
+            </div>
+
+            <Show when=move || loading.get()>
+                <div class="loading">"Loading Virtual IoT configuration…"</div>
+            </Show>
+
+            <Show when=move || error.get().is_some()>
+                <div class="alert error" style="margin: 1rem;">
+                    {move || error.get().unwrap_or_default()}
+                </div>
+            </Show>
+
+            <Show when=move || !loading.get() && error.get().is_none()>
+                <div class="virtual-iot-layout">
+                    <div class="virtual-iot-preview">
+                        <div class="virtual-iot-board-wrap">
+                            {move || {
+                                let current = controller_type.get();
+                                view! { <VirtualIotBoard controller_type=current/> }
+                            }}
+                        </div>
+                        <div class="virtual-iot-meta">
+                            <div class="info-row">
+                                <span class="info-label">"Device"</span>
+                                <span>{device_name.clone()}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">"Controller"</span>
+                                <span>{controller_name}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">"Mode"</span>
+                                <span class="badge active">"● Simulated"</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">"Rate"</span>
+                                <span>{move || format!("{} ms", sim_rate_ms.get())}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">"Sensors"</span>
+                                <span>{sensor_count}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">"ID"</span>
+                                <span class="mono" style="font-size: 0.75rem;">{device_id.clone()}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="virtual-iot-details">
+                        <div class="card" style="height: 100%;">
+                            <div class="card-header"><h2>"Wiring + Sensors"</h2></div>
+                            <div class="virtual-iot-sensor-panel">
+                                <Show
+                                    when=move || !enabled_sensors.get().is_empty()
+                                    fallback=move || view! { <p class="empty-state">"No sensors enabled for this Virtual IoT device."</p> }
+                                >
+                                    <div class="virtual-iot-wiring-block">
+                                        <h3 class="virtual-iot-section-title">"Default Wiring Diagram"</h3>
+                                        <VirtualIotWiringDiagram
+                                            controller_type=controller_type.get()
+                                            wiring_map=wiring_map()
+                                        />
+                                        <div class="virtual-iot-wiring-note">
+                                            "Program firmware against this default wiring map. If you remap pins in firmware, keep the same bus semantics (I2C/UART/ADC/GPIO)."
+                                        </div>
+                                    </div>
+
+                                    <div class="virtual-iot-wiring-table-wrap">
+                                        <table class="virtual-iot-wiring-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>"Sensor"</th>
+                                                    <th>"Default Pin(s)"</th>
+                                                    <th>"Bus"</th>
+                                                    <th>"Firmware Hint"</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {move || wiring_map().into_iter().map(|entry| {
+                                                    view! {
+                                                        <tr>
+                                                            <td>{entry.sensor_label.clone()}</td>
+                                                            <td class="mono">{entry.pin.clone()}</td>
+                                                            <td>{entry.bus.clone()}</td>
+                                                            <td>{entry.note.clone()}</td>
+                                                        </tr>
+                                                    }
+                                                }).collect::<Vec<_>>()}
+                                            </tbody>
+                                        </table>
+                                    </div>
+
+                                    <h3 class="virtual-iot-section-title" style="margin-top: 1rem;">"Sensor Preview"</h3>
+                                    <div class="virtual-iot-sensor-grid">
+                                        {move || enabled_sensors.get().into_iter().map(|sensor| {
+                                            let label = virtual_iot_sensor_label(&sensor).to_string();
+                                            let preview = virtual_iot_sensor_preview(&sensor).to_string();
+                                            let (module_profile, expected_range) = virtual_iot_sensor_realism(&sensor);
+                                            view! {
+                                                <div class="virtual-iot-sensor-card">
+                                                    <div class="virtual-iot-sensor-title">{label}</div>
+                                                    <div class="virtual-iot-sensor-value">{preview}</div>
+                                                    <div class="virtual-iot-sensor-meta">{module_profile}</div>
+                                                    <div class="virtual-iot-sensor-meta">{expected_range}</div>
+                                                    <div class="virtual-iot-sensor-key mono">{sensor}</div>
+                                                </div>
+                                            }
+                                        }).collect::<Vec<_>>()}
+                                    </div>
+                                </Show>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </Show>
+        </div>
+    }
+}
+
+#[component]
+fn VirtualIotWiringDiagram(
+    controller_type: String,
+    wiring_map: Vec<WiringMapEntry>,
+) -> impl IntoView {
+    let height = (wiring_map.len().max(4) as f32 * 56.0 + 100.0).min(760.0);
+    let board_name = virtual_iot_controller_name(&controller_type).to_string();
+
+    let initial_positions = wiring_map
+        .iter()
+        .enumerate()
+        .map(|(idx, entry)| (entry.sensor_key.clone(), (640.0f32, 110.0f32 + idx as f32 * 56.0f32)))
+        .collect::<HashMap<_, _>>();
+
+    let (node_positions, set_node_positions) = signal(initial_positions);
+    let (dragging_key, set_dragging_key) = signal(Option::<String>::None);
+    let (drag_offset, set_drag_offset) = signal((0.0f32, 0.0f32));
+
+    let on_mouse_move = move |ev: web_sys::MouseEvent| {
+        if let Some(key) = dragging_key.get() {
+            let (dx, dy) = drag_offset.get();
+            let mut x = ev.offset_x() as f32 - dx;
+            let mut y = ev.offset_y() as f32 - dy;
+            x = x.clamp(500.0, 780.0);
+            y = y.clamp(60.0, height - 20.0);
+
+            set_node_positions.update(|map| {
+                map.insert(key, (x, y));
+            });
+        }
+    };
+
+    let stop_drag = move |_ev: web_sys::MouseEvent| {
+        set_dragging_key.set(None);
+    };
+
+    view! {
+        <svg
+            viewBox={format!("0 0 820 {:.0}", height)}
+            class="virtual-iot-wiring-svg"
+            xmlns="http://www.w3.org/2000/svg"
+            on:mousemove=on_mouse_move
+            on:mouseup=stop_drag
+            on:mouseleave=stop_drag
+        >
+            <defs>
+                <marker id="wire-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                    <path d="M0,0 L8,4 L0,8 z" fill="#7dd3fc"/>
+                </marker>
+                <linearGradient id="wiring-board-glow" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stop-color="rgba(255,255,255,0.12)"/>
+                    <stop offset="35%" stop-color="rgba(255,255,255,0.02)"/>
+                    <stop offset="100%" stop-color="rgba(0,0,0,0.20)"/>
+                </linearGradient>
+                <pattern id="wiring-pcb-grid" width="18" height="18" patternUnits="userSpaceOnUse">
+                    <path d="M18 0H0V18" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="1"/>
+                </pattern>
+                <filter id="wire-shadow" x="-20%" y="-20%" width="140%" height="140%">
+                    <feDropShadow dx="0" dy="1.5" stdDeviation="1.8" flood-color="rgba(0,0,0,0.4)"/>
+                </filter>
+            </defs>
+
+            <rect x="40" y="36" width="280" height={format!("{:.0}", height - 72.0)} rx="18" fill="#153220" stroke="#102012" stroke-width="1.5"/>
+            <rect x="40" y="36" width="280" height={format!("{:.0}", height - 72.0)} rx="18" fill="url(#wiring-pcb-grid)"/>
+            <rect x="40" y="36" width="280" height={format!("{:.0}", height - 72.0)} rx="18" fill="url(#wiring-board-glow)"/>
+            <rect x="78" y="92" width="168" height="76" rx="8" fill="#0f172a" stroke="#475569" stroke-width="1.2"/>
+            <text x="180" y="64" text-anchor="middle" fill="#e3f1ff" font-size="15" font-family="sans-serif">{board_name}</text>
+            <text x="180" y="84" text-anchor="middle" fill="#9cc2df" font-size="10.5" font-family="monospace">"Physical default jumper layout"</text>
+            <text x="162" y="128" text-anchor="middle" fill="#d7e1eb" font-size="11" font-family="monospace">"MCU / SoC"</text>
+            <text x="162" y="143" text-anchor="middle" fill="#7f93a8" font-size="8" font-family="monospace">"signal breakout area"</text>
+
+            {(0..7).map(|i| {
+                let y = 116 + i * 20;
+                view! {
+                    <path d={format!("M 52 {} C 82 {}, 82 {}, 98 {}", y, y, y, y)} stroke="rgba(210,180,88,0.22)" stroke-width="2" fill="none"/>
+                }
+            }).collect::<Vec<_>>()}
+
+            {wiring_map.iter().enumerate().map(|(idx, entry)| {
+                let default_sensor_y = 110.0 + idx as f32 * 56.0;
+                let pin_anchor = virtual_iot_primary_pin(&entry.pin);
+                let pin_y = virtual_iot_pin_anchor_y(&controller_type, &pin_anchor).min(height - 40.0);
+                let stroke = wire_color_for_bus(&entry.pin, &entry.bus);
+                let dash = if entry.pin == "INTERNAL" || entry.pin == "EXTERNAL" { "5 5" } else { "0" };
+                let key_for_path = entry.sensor_key.clone();
+                let key_for_transform = entry.sensor_key.clone();
+                let key_for_drag = entry.sensor_key.clone();
+                let icon = match entry.bus.as_str() {
+                    bus if bus.contains("I2C") => "I2C",
+                    bus if bus.contains("UART") => "UART",
+                    bus if bus.contains("SPI") => "SPI",
+                    bus if bus.contains("ADC") => "ADC",
+                    bus if bus.contains("GPIO") => "GPIO",
+                    bus if bus.contains("WiFi") => "RF",
+                    bus if bus.contains("BLE") => "BLE",
+                    _ => "SIG",
+                };
+
+                view! {
+                    <>
+                        <circle cx="320" cy={format!("{:.1}", pin_y)} r="7" fill="#111827" stroke="#9b7a25" stroke-width="1.3"/>
+                        <circle cx="320" cy={format!("{:.1}", pin_y)} r="3.5" fill="#d4af37"/>
+                        <text x="302" y={format!("{:.1}", pin_y - 11.0)} text-anchor="end" fill="#f6e7ae" font-size="9" font-family="monospace">{pin_anchor.clone()}</text>
+
+                        <path
+                            d={move || {
+                                let (sensor_x, sensor_y) = node_positions
+                                    .get()
+                                    .get(&key_for_path)
+                                    .copied()
+                                    .unwrap_or((640.0, default_sensor_y));
+                                format!(
+                                    "M 327 {:.1} C 390 {:.1}, 430 {:.1}, 500 {:.1} L {:.1} {:.1} C {:.1} {:.1}, {:.1} {:.1}, {:.1} {:.1}",
+                                    pin_y,
+                                    pin_y,
+                                    pin_y,
+                                    pin_y,
+                                    sensor_x - 70.0,
+                                    pin_y,
+                                    sensor_x - 30.0,
+                                    pin_y,
+                                    sensor_x - 20.0,
+                                    sensor_y,
+                                    sensor_x - 10.0,
+                                    sensor_y,
+                                )
+                            }}
+                            stroke={stroke}
+                            stroke-width="3"
+                            stroke-dasharray={dash}
+                            fill="none"
+                            marker-end="url(#wire-arrow)"
+                            filter="url(#wire-shadow)"
+                        />
+
+                        <g
+                            class="virtual-iot-draggable-node"
+                            transform={move || {
+                                let (sensor_x, sensor_y) = node_positions
+                                    .get()
+                                    .get(&key_for_transform)
+                                    .copied()
+                                    .unwrap_or((640.0, default_sensor_y));
+                                format!("translate({:.1} {:.1})", sensor_x, sensor_y)
+                            }}
+                            on:mousedown={
+                                let key = key_for_drag.clone();
+                                move |ev: web_sys::MouseEvent| {
+                                    let (sensor_x, sensor_y) = node_positions
+                                        .get()
+                                        .get(&key)
+                                        .copied()
+                                        .unwrap_or((640.0, default_sensor_y));
+                                    set_dragging_key.set(Some(key.clone()));
+                                    set_drag_offset.set((ev.offset_x() as f32 - sensor_x, ev.offset_y() as f32 - sensor_y));
+                                }
+                            }
+                        >
+                            <rect x="-148" y="-26" width="296" height="52" rx="12" fill="#111827" stroke="#334155" stroke-width="1.1"/>
+                            <rect x="-140" y="-18" width="28" height="28" rx="7" fill={stroke} opacity="0.18" stroke={stroke} stroke-width="1"/>
+                            <text x="-126" y="1.5" text-anchor="middle" fill="#e2e8f0" font-size="8.5" font-family="monospace">{icon}</text>
+                            <text x="-102" y="-6" fill="#edf6ff" font-size="12" font-family="sans-serif">{entry.sensor_label.clone()}</text>
+                            <text x="-102" y="11" fill="#97b3cf" font-size="9.6" font-family="monospace">{format!("{}  |  {}", entry.pin, entry.bus)}</text>
+                            <circle cx="126" cy="0" r="6" fill="#1f2937" stroke="#475569" stroke-width="0.8"/>
+                            <circle cx="126" cy="0" r="2.8" fill={stroke}/>
+                        </g>
+                    </>
+                }
+            }).collect::<Vec<_>>()}
+        </svg>
     }
 }

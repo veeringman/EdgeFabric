@@ -56,6 +56,9 @@ impl CommandEngine {
             Os::Ios => ios::IosDriver::install(serial, app_path).await,
             Os::Iot => iot::IotDriver::scp_push(serial, "root", app_path, "/tmp/app").await,
             Os::Ssh => iot::IotDriver::scp_push(serial, "root", app_path, "/tmp/app").await,
+            Os::VirtualIot => Err(EdgeFabricError::Internal(
+                "Virtual IoT devices do not support app installation".into(),
+            )),
         }
     }
 
@@ -73,6 +76,9 @@ impl CommandEngine {
                 }),
             Os::Iot => iot::IotDriver::ssh_exec(serial, "root", &["rm", "-f", package]).await,
             Os::Ssh => iot::IotDriver::ssh_exec(serial, "root", &["rm", "-f", package]).await,
+            Os::VirtualIot => Err(EdgeFabricError::Internal(
+                "Virtual IoT devices do not support app uninstallation".into(),
+            )),
         }
     }
 
@@ -93,6 +99,9 @@ impl CommandEngine {
             (Os::Ssh, _) => Err(EdgeFabricError::Internal(
                 "SSH servers do not support screenshots".into(),
             )),
+            (Os::VirtualIot, _) => Err(EdgeFabricError::Internal(
+                "Virtual IoT devices do not support screenshots".into(),
+            )),
         }
     }
 
@@ -112,6 +121,9 @@ impl CommandEngine {
             )),
             Os::Ssh => Err(EdgeFabricError::Internal(
                 "SSH servers do not support tap input".into(),
+            )),
+            Os::VirtualIot => Err(EdgeFabricError::Internal(
+                "Virtual IoT devices do not support tap input".into(),
             )),
         }
     }
@@ -148,6 +160,9 @@ impl CommandEngine {
             Os::Ssh => Err(EdgeFabricError::Internal(
                 "SSH servers do not support swipe input".into(),
             )),
+            Os::VirtualIot => Err(EdgeFabricError::Internal(
+                "Virtual IoT devices do not support swipe input".into(),
+            )),
         }
     }
 
@@ -168,6 +183,9 @@ impl CommandEngine {
             Os::Ssh => Err(EdgeFabricError::Internal(
                 "SSH servers do not support key input".into(),
             )),
+            Os::VirtualIot => Err(EdgeFabricError::Internal(
+                "Virtual IoT devices do not support key input".into(),
+            )),
         }
     }
 
@@ -185,6 +203,9 @@ impl CommandEngine {
             )),
             Os::Ssh => Err(EdgeFabricError::Internal(
                 "SSH servers do not support text input".into(),
+            )),
+            Os::VirtualIot => Err(EdgeFabricError::Internal(
+                "Virtual IoT devices do not support text input".into(),
             )),
         }
     }
@@ -212,6 +233,9 @@ impl CommandEngine {
                 let output = iot::IotDriver::journal_logs(serial, "root", lines).await?;
                 Ok(output.stdout)
             }
+            Os::VirtualIot => Err(EdgeFabricError::Internal(
+                "Virtual IoT devices stream simulated sensor data; use the sensor stream endpoint".into(),
+            )),
         }
     }
 
@@ -251,6 +275,9 @@ impl CommandEngine {
                 iot::IotDriver::reboot(serial, "root").await?;
                 Ok(())
             }
+            (Os::VirtualIot, _) => Err(EdgeFabricError::Internal(
+                "Virtual IoT devices are software-only and cannot be rebooted".into(),
+            )),
         }
     }
 }

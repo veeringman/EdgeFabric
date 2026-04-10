@@ -4,3 +4,4 @@ pub mod device;
 pub mod job;
 pub mod session;
 pub mod tenant;
+pub mod virtual_iot;

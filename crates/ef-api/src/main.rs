@@ -13,6 +13,7 @@ mod openapi;
 mod proto;
 mod routes;
 mod session_manager;
+mod virtual_iot_runtime;
 
 #[cfg(test)]
 mod api_tests;
@@ -58,6 +59,10 @@ async fn main() -> Result<()> {
     // Spawn heartbeat-based stale device checker — mark devices offline if no
     // heartbeat received within 60 s (checked every 15 s).
     ef_control::state::spawn_stale_device_checker(pool.clone(), 60, 15);
+
+    // Minimal Virtual IoT runtime — periodically heartbeats saved virtual devices
+    // so they behave like software-backed controllers instead of going stale.
+    virtual_iot_runtime::spawn_virtual_iot_runtime(pool.clone());
 
     let state = AppState {
         pool,

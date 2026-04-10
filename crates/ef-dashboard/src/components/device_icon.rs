@@ -41,6 +41,17 @@ pub fn DeviceOsIcon(
             </span>
         }
         .into_any(),
+        "virtual_iot" => view! {
+            <span class=classes aria-hidden="true">
+                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="6" y="3" width="12" height="18" rx="2"/>
+                    <circle cx="12" cy="8" r="1.5"/>
+                    <path d="M8 13h8M8 16h8"/>
+                    <path d="M9 3V1M15 3V1"/>
+                </svg>
+            </span>
+        }
+        .into_any(),
         "ssh" | "server" => view! {
             <span class=classes aria-hidden="true">
                 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">

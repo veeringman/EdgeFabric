@@ -1,3 +1,4 @@
+pub mod board_layout;
 pub mod device_icon;
 pub mod sidebar;
 pub mod stat_card;

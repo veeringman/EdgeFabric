@@ -10,6 +10,8 @@ pub enum Os {
     Ios,
     Iot,
     Ssh,
+    #[serde(rename = "virtual_iot")]
+    VirtualIot,
 }
 
 impl Os {
@@ -19,6 +21,7 @@ impl Os {
             Self::Ios => "ios",
             Self::Iot => "iot",
             Self::Ssh => "ssh",
+            Self::VirtualIot => "virtual_iot",
         }
     }
 }
@@ -87,6 +90,7 @@ mod tests {
             (Os::Ios, "ios"),
             (Os::Iot, "iot"),
             (Os::Ssh, "ssh"),
+            (Os::VirtualIot, "virtual_iot"),
         ] {
             assert_eq!(os.as_str(), expected);
         }

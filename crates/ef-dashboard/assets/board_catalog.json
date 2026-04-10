@@ -1,0 +1,1481 @@
+{
+  "sensor_categories": [
+    {
+      "name": "Environmental",
+      "sensors": [
+        { "id": "temperature", "label": "Temperature" },
+        { "id": "humidity", "label": "Humidity" },
+        { "id": "pressure", "label": "Pressure" },
+        { "id": "air_quality_co2", "label": "CO2" },
+        { "id": "air_quality_tvoc", "label": "TVOC" }
+      ]
+    },
+    {
+      "name": "Motion",
+      "sensors": [
+        { "id": "accel_xyz", "label": "Accelerometer XYZ" },
+        { "id": "gyro_xyz", "label": "Gyroscope XYZ" },
+        { "id": "magnetometer", "label": "Magnetometer" }
+      ]
+    },
+    {
+      "name": "Light & Proximity",
+      "sensors": [
+        { "id": "ambient_light", "label": "Ambient Light" },
+        { "id": "uv_index", "label": "UV Index" },
+        { "id": "proximity", "label": "Proximity" }
+      ]
+    },
+    {
+      "name": "Location",
+      "sensors": [
+        { "id": "gps", "label": "GPS" }
+      ]
+    },
+    {
+      "name": "Power & Electrical",
+      "sensors": [
+        { "id": "battery_voltage", "label": "Battery Voltage" },
+        { "id": "current", "label": "Current" },
+        { "id": "gpio_states", "label": "GPIO States" },
+        { "id": "adc_raw", "label": "ADC Raw" }
+      ]
+    },
+    {
+      "name": "Audio",
+      "sensors": [
+        { "id": "sound_level", "label": "Sound Level" }
+      ]
+    },
+    {
+      "name": "Connectivity",
+      "sensors": [
+        { "id": "wifi_rssi", "label": "WiFi RSSI" },
+        { "id": "ble_scan", "label": "BLE Scan" }
+      ]
+    }
+  ],
+  "sensor_profiles": {
+    "temperature": {
+      "preview": "24.6 C",
+      "module_profile": "BME280 profile",
+      "expected_range": "Typical: 18-34 C"
+    },
+    "humidity": {
+      "preview": "58 %",
+      "module_profile": "SHT31 profile",
+      "expected_range": "Typical: 35-85 %RH"
+    },
+    "pressure": {
+      "preview": "1012 hPa",
+      "module_profile": "BMP280 profile",
+      "expected_range": "Typical: 980-1035 hPa"
+    },
+    "air_quality_co2": {
+      "preview": "612 ppm",
+      "module_profile": "CCS811 profile",
+      "expected_range": "Typical: 420-1400 ppm"
+    },
+    "air_quality_tvoc": {
+      "preview": "0.41 ppm",
+      "module_profile": "CCS811 profile",
+      "expected_range": "Typical: 0.10-0.90 ppm"
+    },
+    "accel_xyz": {
+      "preview": "0.04, -0.02, 0.98 g",
+      "module_profile": "MPU6050 profile",
+      "expected_range": "+/-2g low-noise mode"
+    },
+    "gyro_xyz": {
+      "preview": "0.1, 0.0, -0.1 dps",
+      "module_profile": "MPU6050 profile",
+      "expected_range": "+/-250 dps low-noise mode"
+    },
+    "magnetometer": {
+      "preview": "12, -8, 31 uT",
+      "module_profile": "QMC5883L profile",
+      "expected_range": "Earth field approx."
+    },
+    "ambient_light": {
+      "preview": "326 lux",
+      "module_profile": "BH1750 profile",
+      "expected_range": "Typical: 20-1200 lux"
+    },
+    "uv_index": {
+      "preview": "2.1",
+      "module_profile": "VEML6075 profile",
+      "expected_range": "Typical: 0-8"
+    },
+    "proximity": {
+      "preview": "18 cm",
+      "module_profile": "VL53L0X profile",
+      "expected_range": "Typical: 5-120 cm"
+    },
+    "gps": {
+      "preview": "12.9716, 77.5946",
+      "module_profile": "NEO-6M profile",
+      "expected_range": "2D/3D lock simulation"
+    },
+    "battery_voltage": {
+      "preview": "3.92 V",
+      "module_profile": "Li-ion cell profile",
+      "expected_range": "Typical: 3.6-4.2 V"
+    },
+    "current": {
+      "preview": "118 mA",
+      "module_profile": "ACS712 profile",
+      "expected_range": "Typical: 50-500 mA"
+    },
+    "gpio_states": {
+      "preview": "GPIO4=1 GPIO5=0",
+      "module_profile": "Digital IO profile",
+      "expected_range": "3.3V logic levels"
+    },
+    "adc_raw": {
+      "preview": "1842",
+      "module_profile": "12-bit ADC profile",
+      "expected_range": "Range: 0-4095"
+    },
+    "sound_level": {
+      "preview": "43 dB",
+      "module_profile": "MAX4466 profile",
+      "expected_range": "Typical: 35-85 dB"
+    },
+    "wifi_rssi": {
+      "preview": "-61 dBm",
+      "module_profile": "ESP32 radio profile",
+      "expected_range": "Typical: -35 to -85 dBm"
+    },
+    "ble_scan": {
+      "preview": "4 devices",
+      "module_profile": "BLE central profile",
+      "expected_range": "0-12 adv beacons"
+    }
+  },
+  "accessory_profiles": {
+    "jetson-csi-camera": {
+      "label": "Jetson CSI Camera Kit",
+      "interface": "CSI",
+      "summary": "Ribbon camera accessory using Jetson MIPI CSI lanes",
+      "accent": "#67d96d"
+    },
+    "jetson-can-transceiver": {
+      "label": "Jetson CAN FD Transceiver",
+      "interface": "CAN",
+      "summary": "SPI or native CAN carrier add-on with transceiver stage",
+      "accent": "#f3c54d"
+    },
+    "jetson-uart-header": {
+      "label": "Jetson UART Console",
+      "interface": "UART",
+      "summary": "3.3V TTL debug or peripheral serial breakout header",
+      "accent": "#7fd7ff"
+    }
+  },
+  "bus_wire_colors": {
+    "INTERNAL": "#64748b",
+    "WiFi":     "#3b82f6",
+    "BLE":      "#8b5cf6",
+    "I2C":      "#38bdf8",
+    "I2S":      "#fb7185",
+    "UART":     "#22c55e",
+    "SPI":      "#f59e0b",
+    "ADC":      "#ef4444",
+    "GPIO":     "#facc15",
+    "USB":      "#fb7185",
+    "Module":   "#64748b"
+  },
+  "wiring_families": [
+    {
+      "id": "esp32-classic",
+      "pin_anchors": {
+        "GPIO21": 120.0, "GPIO22": 145.0, "GPIO34": 170.0,
+        "GPIO16": 195.0, "GPIO17": 220.0, "GPIO35": 245.0,
+        "GPIO32": 270.0, "GPIO4":  295.0, "GPIO5":  320.0,
+        "GPIO39": 345.0, "GPIO36": 370.0, "INTERNAL": 255.0
+      },
+      "rules": {
+        "temperature": { "pin": "GPIO21 / GPIO22", "bus": "I2C", "note": "SDA=GPIO21, SCL=GPIO22" },
+        "humidity": { "pin": "GPIO21 / GPIO22", "bus": "I2C", "note": "SDA=GPIO21, SCL=GPIO22" },
+        "pressure": { "pin": "GPIO21 / GPIO22", "bus": "I2C", "note": "SDA=GPIO21, SCL=GPIO22" },
+        "air_quality_co2": { "pin": "GPIO21 / GPIO22", "bus": "I2C", "note": "SDA=GPIO21, SCL=GPIO22" },
+        "air_quality_tvoc": { "pin": "GPIO21 / GPIO22", "bus": "I2C", "note": "SDA=GPIO21, SCL=GPIO22" },
+        "accel_xyz": { "pin": "GPIO21 / GPIO22", "bus": "I2C", "note": "SDA=GPIO21, SCL=GPIO22" },
+        "gyro_xyz": { "pin": "GPIO21 / GPIO22", "bus": "I2C", "note": "SDA=GPIO21, SCL=GPIO22" },
+        "magnetometer": { "pin": "GPIO21 / GPIO22", "bus": "I2C", "note": "SDA=GPIO21, SCL=GPIO22" },
+        "uv_index": { "pin": "GPIO21 / GPIO22", "bus": "I2C", "note": "SDA=GPIO21, SCL=GPIO22" },
+        "proximity": { "pin": "GPIO21 / GPIO22", "bus": "I2C", "note": "SDA=GPIO21, SCL=GPIO22" },
+        "ambient_light": { "pin": "GPIO34", "bus": "ADC", "note": "Analog in" },
+        "gps": { "pin": "GPIO16 / GPIO17", "bus": "UART2", "note": "RX2=GPIO16, TX2=GPIO17" },
+        "battery_voltage": { "pin": "GPIO35", "bus": "ADC", "note": "Voltage divider input" },
+        "current": { "pin": "GPIO32", "bus": "ADC", "note": "Current sensor analog out" },
+        "gpio_states": { "pin": "GPIO4 / GPIO5 / GPIO18", "bus": "Digital GPIO", "note": "DOUT control/monitor" },
+        "adc_raw": { "pin": "GPIO36", "bus": "ADC", "note": "Raw ADC capture" },
+        "sound_level": { "pin": "GPIO39", "bus": "ADC", "note": "Mic module analog out" },
+        "wifi_rssi": { "pin": "INTERNAL", "bus": "WiFi", "note": "No external wiring" },
+        "ble_scan": { "pin": "INTERNAL", "bus": "BLE", "note": "No external wiring" }
+      }
+    },
+    {
+      "id": "esp32-s2",
+      "pin_anchors": {
+        "GPIO8": 120.0, "GPIO9": 145.0, "GPIO1": 170.0,
+        "GPIO17": 195.0, "GPIO18": 220.0, "GPIO2": 245.0,
+        "GPIO3": 270.0, "GPIO11": 295.0, "GPIO12": 320.0,
+        "GPIO5": 345.0, "GPIO4": 370.0, "INTERNAL": 255.0
+      },
+      "rules": {
+        "temperature": { "pin": "GPIO8 / GPIO9", "bus": "I2C", "note": "SDA=GPIO8, SCL=GPIO9" },
+        "humidity": { "pin": "GPIO8 / GPIO9", "bus": "I2C", "note": "SDA=GPIO8, SCL=GPIO9" },
+        "pressure": { "pin": "GPIO8 / GPIO9", "bus": "I2C", "note": "SDA=GPIO8, SCL=GPIO9" },
+        "air_quality_co2": { "pin": "GPIO8 / GPIO9", "bus": "I2C", "note": "SDA=GPIO8, SCL=GPIO9" },
+        "air_quality_tvoc": { "pin": "GPIO8 / GPIO9", "bus": "I2C", "note": "SDA=GPIO8, SCL=GPIO9" },
+        "accel_xyz": { "pin": "GPIO8 / GPIO9", "bus": "I2C", "note": "SDA=GPIO8, SCL=GPIO9" },
+        "gyro_xyz": { "pin": "GPIO8 / GPIO9", "bus": "I2C", "note": "SDA=GPIO8, SCL=GPIO9" },
+        "magnetometer": { "pin": "GPIO8 / GPIO9", "bus": "I2C", "note": "SDA=GPIO8, SCL=GPIO9" },
+        "uv_index": { "pin": "GPIO8 / GPIO9", "bus": "I2C", "note": "SDA=GPIO8, SCL=GPIO9" },
+        "proximity": { "pin": "GPIO8 / GPIO9", "bus": "I2C", "note": "SDA=GPIO8, SCL=GPIO9" },
+        "ambient_light": { "pin": "GPIO1", "bus": "ADC1_CH0", "note": "Analog in" },
+        "gps": { "pin": "GPIO17 / GPIO18", "bus": "UART1", "note": "TX=GPIO17, RX=GPIO18" },
+        "battery_voltage": { "pin": "GPIO2", "bus": "ADC1_CH1", "note": "Voltage divider input" },
+        "current": { "pin": "GPIO3", "bus": "ADC1_CH2", "note": "Current sensor analog out" },
+        "gpio_states": { "pin": "GPIO11 / GPIO12 / GPIO13", "bus": "Digital GPIO", "note": "DOUT control/monitor" },
+        "adc_raw": { "pin": "GPIO4", "bus": "ADC1_CH3", "note": "Raw ADC capture" },
+        "sound_level": { "pin": "GPIO5", "bus": "ADC1_CH4", "note": "Mic module analog out" },
+        "wifi_rssi": { "pin": "INTERNAL", "bus": "WiFi", "note": "No external wiring" },
+        "ble_scan": { "pin": "N/A", "bus": "N/A", "note": "ESP32-S2 has no BLE" }
+      }
+    },
+    {
+      "id": "esp32-s3",
+      "pin_anchors": {
+        "GPIO8": 120.0, "GPIO9": 145.0, "GPIO1": 170.0,
+        "GPIO17": 195.0, "GPIO18": 220.0, "GPIO2": 245.0,
+        "GPIO3": 270.0, "GPIO11": 295.0, "GPIO12": 320.0,
+        "GPIO5": 345.0, "GPIO4": 370.0, "INTERNAL": 255.0
+      },
+      "rules": {
+        "temperature": { "pin": "GPIO8 / GPIO9", "bus": "I2C", "note": "SDA=GPIO8, SCL=GPIO9" },
+        "humidity": { "pin": "GPIO8 / GPIO9", "bus": "I2C", "note": "SDA=GPIO8, SCL=GPIO9" },
+        "pressure": { "pin": "GPIO8 / GPIO9", "bus": "I2C", "note": "SDA=GPIO8, SCL=GPIO9" },
+        "air_quality_co2": { "pin": "GPIO8 / GPIO9", "bus": "I2C", "note": "SDA=GPIO8, SCL=GPIO9" },
+        "air_quality_tvoc": { "pin": "GPIO8 / GPIO9", "bus": "I2C", "note": "SDA=GPIO8, SCL=GPIO9" },
+        "accel_xyz": { "pin": "GPIO8 / GPIO9", "bus": "I2C", "note": "SDA=GPIO8, SCL=GPIO9" },
+        "gyro_xyz": { "pin": "GPIO8 / GPIO9", "bus": "I2C", "note": "SDA=GPIO8, SCL=GPIO9" },
+        "magnetometer": { "pin": "GPIO8 / GPIO9", "bus": "I2C", "note": "SDA=GPIO8, SCL=GPIO9" },
+        "uv_index": { "pin": "GPIO8 / GPIO9", "bus": "I2C", "note": "SDA=GPIO8, SCL=GPIO9" },
+        "proximity": { "pin": "GPIO8 / GPIO9", "bus": "I2C", "note": "SDA=GPIO8, SCL=GPIO9" },
+        "ambient_light": { "pin": "GPIO1", "bus": "ADC1_CH0", "note": "Analog in" },
+        "gps": { "pin": "GPIO17 / GPIO18", "bus": "UART1", "note": "TX=GPIO17, RX=GPIO18" },
+        "battery_voltage": { "pin": "GPIO2", "bus": "ADC1_CH1", "note": "Voltage divider input" },
+        "current": { "pin": "GPIO3", "bus": "ADC1_CH2", "note": "Current sensor analog out" },
+        "gpio_states": { "pin": "GPIO11 / GPIO12 / GPIO13", "bus": "Digital GPIO", "note": "DOUT control/monitor" },
+        "adc_raw": { "pin": "GPIO4", "bus": "ADC1_CH3", "note": "Raw ADC capture" },
+        "sound_level": { "pin": "GPIO5", "bus": "ADC1_CH4", "note": "Mic module analog out" },
+        "wifi_rssi": { "pin": "INTERNAL", "bus": "WiFi", "note": "No external wiring" },
+        "ble_scan": { "pin": "INTERNAL", "bus": "BLE 5.0", "note": "No external wiring" }
+      }
+    },
+    {
+      "id": "esp32-c3",
+      "pin_anchors": {
+        "GPIO6": 120.0, "GPIO7": 145.0, "GPIO0": 170.0,
+        "GPIO20": 195.0, "GPIO21": 220.0, "GPIO1": 245.0,
+        "GPIO2": 270.0, "GPIO8": 295.0,  "GPIO9": 320.0,
+        "GPIO4": 345.0, "GPIO3": 370.0, "INTERNAL": 255.0
+      },
+      "rules": {
+        "temperature": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "humidity": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "pressure": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "air_quality_co2": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "air_quality_tvoc": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "accel_xyz": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "gyro_xyz": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "magnetometer": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "uv_index": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "proximity": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "ambient_light": { "pin": "GPIO0", "bus": "ADC1_CH0", "note": "Analog in" },
+        "gps": { "pin": "GPIO20 / GPIO21", "bus": "UART1", "note": "TX=GPIO20, RX=GPIO21" },
+        "battery_voltage": { "pin": "GPIO1", "bus": "ADC1_CH1", "note": "Voltage divider input" },
+        "current": { "pin": "GPIO2", "bus": "ADC1_CH2", "note": "Current sensor analog out" },
+        "gpio_states": { "pin": "GPIO8 / GPIO9 / GPIO10", "bus": "Digital GPIO", "note": "DOUT control/monitor" },
+        "adc_raw": { "pin": "GPIO3", "bus": "ADC1_CH3", "note": "Raw ADC capture" },
+        "sound_level": { "pin": "GPIO4", "bus": "ADC1_CH4", "note": "Mic module analog out" },
+        "wifi_rssi": { "pin": "INTERNAL", "bus": "WiFi", "note": "No external wiring" },
+        "ble_scan": { "pin": "INTERNAL", "bus": "BLE 5.0", "note": "No external wiring" }
+      }
+    },
+    {
+      "id": "esp32-c6",
+      "pin_anchors": {
+        "GPIO6": 120.0, "GPIO7": 145.0, "GPIO0": 170.0,
+        "GPIO16": 195.0, "GPIO17": 220.0, "GPIO1": 245.0,
+        "GPIO2": 270.0, "GPIO8": 295.0,  "GPIO9": 320.0,
+        "GPIO4": 345.0, "GPIO3": 370.0, "INTERNAL": 255.0
+      },
+      "rules": {
+        "temperature": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "humidity": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "pressure": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "air_quality_co2": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "air_quality_tvoc": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "accel_xyz": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "gyro_xyz": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "magnetometer": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "uv_index": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "proximity": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "ambient_light": { "pin": "GPIO0", "bus": "ADC1_CH0", "note": "Analog in" },
+        "gps": { "pin": "GPIO16 / GPIO17", "bus": "UART1", "note": "TX=GPIO16, RX=GPIO17" },
+        "battery_voltage": { "pin": "GPIO1", "bus": "ADC1_CH1", "note": "Voltage divider input" },
+        "current": { "pin": "GPIO2", "bus": "ADC1_CH2", "note": "Current sensor analog out" },
+        "gpio_states": { "pin": "GPIO8 / GPIO9 / GPIO10", "bus": "Digital GPIO", "note": "DOUT control/monitor" },
+        "adc_raw": { "pin": "GPIO3", "bus": "ADC1_CH3", "note": "Raw ADC capture" },
+        "sound_level": { "pin": "GPIO4", "bus": "ADC1_CH4", "note": "Mic module analog out" },
+        "wifi_rssi": { "pin": "INTERNAL", "bus": "WiFi 6", "note": "No external wiring" },
+        "ble_scan": { "pin": "INTERNAL", "bus": "BLE 5.3", "note": "No external wiring" }
+      }
+    },
+    {
+      "id": "esp32-h2",
+      "pin_anchors": {
+        "GPIO6": 120.0, "GPIO7": 145.0, "GPIO0": 170.0,
+        "GPIO16": 195.0, "GPIO17": 220.0, "GPIO1": 245.0,
+        "GPIO2": 270.0, "GPIO8": 295.0,  "GPIO9": 320.0,
+        "GPIO4": 345.0, "GPIO3": 370.0, "INTERNAL": 255.0
+      },
+      "rules": {
+        "temperature": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "humidity": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "pressure": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "air_quality_co2": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "air_quality_tvoc": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "accel_xyz": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "gyro_xyz": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "magnetometer": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "uv_index": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "proximity": { "pin": "GPIO6 / GPIO7", "bus": "I2C", "note": "SDA=GPIO6, SCL=GPIO7" },
+        "ambient_light": { "pin": "GPIO0", "bus": "ADC1_CH0", "note": "Analog in" },
+        "gps": { "pin": "GPIO16 / GPIO17", "bus": "UART1", "note": "TX=GPIO16, RX=GPIO17" },
+        "battery_voltage": { "pin": "GPIO1", "bus": "ADC1_CH1", "note": "Voltage divider input" },
+        "current": { "pin": "GPIO2", "bus": "ADC1_CH2", "note": "Current sensor analog out" },
+        "gpio_states": { "pin": "GPIO8 / GPIO9 / GPIO10", "bus": "Digital GPIO", "note": "DOUT control/monitor" },
+        "adc_raw": { "pin": "GPIO3", "bus": "ADC1_CH3", "note": "Raw ADC capture" },
+        "sound_level": { "pin": "GPIO4", "bus": "ADC1_CH4", "note": "Mic module analog out" },
+        "wifi_rssi": { "pin": "N/A", "bus": "N/A", "note": "ESP32-H2 has no WiFi" },
+        "ble_scan": { "pin": "INTERNAL", "bus": "BLE 5.3", "note": "No external wiring" }
+      }
+    },
+    {
+      "id": "arduino-uno",
+      "pin_anchors": {
+        "A4": 120.0, "A5": 145.0, "A0": 170.0,
+        "D2": 195.0, "D3": 220.0, "A1": 245.0,
+        "A2": 270.0, "D4": 295.0, "D5": 320.0,
+        "D6": 345.0, "A3": 370.0, "D10": 395.0, "EXTERNAL": 255.0
+      },
+      "rules": {
+        "temperature": { "pin": "A4 / A5", "bus": "I2C", "note": "SDA=A4, SCL=A5" },
+        "humidity": { "pin": "A4 / A5", "bus": "I2C", "note": "SDA=A4, SCL=A5" },
+        "pressure": { "pin": "A4 / A5", "bus": "I2C", "note": "SDA=A4, SCL=A5" },
+        "air_quality_co2": { "pin": "A4 / A5", "bus": "I2C", "note": "SDA=A4, SCL=A5" },
+        "air_quality_tvoc": { "pin": "A4 / A5", "bus": "I2C", "note": "SDA=A4, SCL=A5" },
+        "accel_xyz": { "pin": "A4 / A5", "bus": "I2C", "note": "SDA=A4, SCL=A5" },
+        "gyro_xyz": { "pin": "A4 / A5", "bus": "I2C", "note": "SDA=A4, SCL=A5" },
+        "magnetometer": { "pin": "A4 / A5", "bus": "I2C", "note": "SDA=A4, SCL=A5" },
+        "uv_index": { "pin": "A4 / A5", "bus": "I2C", "note": "SDA=A4, SCL=A5" },
+        "proximity": { "pin": "A4 / A5", "bus": "I2C", "note": "SDA=A4, SCL=A5" },
+        "ambient_light": { "pin": "A0", "bus": "ADC", "note": "Analog in" },
+        "gps": { "pin": "D2 / D3", "bus": "SoftwareSerial", "note": "RX=D2, TX=D3" },
+        "battery_voltage": { "pin": "A1", "bus": "ADC", "note": "Voltage divider input" },
+        "current": { "pin": "A2", "bus": "ADC", "note": "Current sensor analog out" },
+        "gpio_states": { "pin": "D4 / D5 / D6", "bus": "Digital GPIO", "note": "DOUT control/monitor" },
+        "adc_raw": { "pin": "A3", "bus": "ADC", "note": "Raw ADC capture" },
+        "sound_level": { "pin": "A0", "bus": "ADC", "note": "Mic module analog out" },
+        "wifi_rssi": { "pin": "D10 / D11 / D12 / D13", "bus": "SPI", "note": "External WiFi/BLE module" },
+        "ble_scan": { "pin": "D10 / D11 / D12 / D13", "bus": "SPI", "note": "External WiFi/BLE module" }
+      }
+    },
+    {
+      "id": "rpi-pico",
+      "pin_anchors": {
+        "GP4": 120.0, "GP5": 145.0, "GP26": 170.0,
+        "GP8": 195.0, "GP9": 220.0, "GP27": 245.0,
+        "GP28": 270.0, "GP10": 295.0, "GP11": 320.0,
+        "GP12": 345.0, "EXTERNAL": 255.0, "INTERNAL": 255.0
+      },
+      "rules": {
+        "temperature": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "humidity": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "pressure": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "air_quality_co2": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "air_quality_tvoc": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "accel_xyz": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "gyro_xyz": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "magnetometer": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "uv_index": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "proximity": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "ambient_light": { "pin": "GP26", "bus": "ADC0", "note": "Analog in" },
+        "gps": { "pin": "GP8 / GP9", "bus": "UART1", "note": "TX=GP8, RX=GP9" },
+        "battery_voltage": { "pin": "GP27", "bus": "ADC1", "note": "Voltage divider input" },
+        "current": { "pin": "GP28", "bus": "ADC2", "note": "Current sensor analog out" },
+        "gpio_states": { "pin": "GP10 / GP11 / GP12", "bus": "Digital GPIO", "note": "DOUT control/monitor" },
+        "adc_raw": { "pin": "GP26", "bus": "ADC0", "note": "Raw ADC capture" },
+        "sound_level": { "pin": "GP27", "bus": "ADC1", "note": "Mic module analog out" },
+        "wifi_rssi": { "pin": "EXTERNAL", "bus": "Module", "note": "External radio module" },
+        "ble_scan": { "pin": "EXTERNAL", "bus": "Module", "note": "External radio module" }
+      }
+    },
+    {
+      "id": "rpi-pico-w",
+      "pin_anchors": {
+        "GP4": 120.0, "GP5": 145.0, "GP26": 170.0,
+        "GP8": 195.0, "GP9": 220.0, "GP27": 245.0,
+        "GP28": 270.0, "GP10": 295.0, "GP11": 320.0,
+        "GP12": 345.0, "EXTERNAL": 255.0, "INTERNAL": 255.0
+      },
+      "rules": {
+        "temperature": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "humidity": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "pressure": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "air_quality_co2": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "air_quality_tvoc": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "accel_xyz": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "gyro_xyz": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "magnetometer": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "uv_index": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "proximity": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "ambient_light": { "pin": "GP26", "bus": "ADC0", "note": "Analog in" },
+        "gps": { "pin": "GP8 / GP9", "bus": "UART1", "note": "TX=GP8, RX=GP9" },
+        "battery_voltage": { "pin": "GP27", "bus": "ADC1", "note": "Voltage divider input" },
+        "current": { "pin": "GP28", "bus": "ADC2", "note": "Current sensor analog out" },
+        "gpio_states": { "pin": "GP10 / GP11 / GP12", "bus": "Digital GPIO", "note": "DOUT control/monitor" },
+        "adc_raw": { "pin": "GP26", "bus": "ADC0", "note": "Raw ADC capture" },
+        "sound_level": { "pin": "GP27", "bus": "ADC1", "note": "Mic module analog out" },
+        "wifi_rssi": { "pin": "INTERNAL", "bus": "WiFi", "note": "CYW43439 onboard" },
+        "ble_scan": { "pin": "INTERNAL", "bus": "BLE", "note": "CYW43439 onboard" }
+      }
+    },
+    {
+      "id": "rpi-pico2",
+      "pin_anchors": {
+        "GP4": 120.0, "GP5": 145.0, "GP26": 170.0,
+        "GP8": 195.0, "GP9": 220.0, "GP27": 245.0,
+        "GP28": 270.0, "GP10": 295.0, "GP11": 320.0,
+        "GP12": 345.0, "EXTERNAL": 255.0, "INTERNAL": 255.0
+      },
+      "rules": {
+        "temperature": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "humidity": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "pressure": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "air_quality_co2": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "air_quality_tvoc": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "accel_xyz": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "gyro_xyz": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "magnetometer": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "uv_index": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "proximity": { "pin": "GP4 / GP5", "bus": "I2C0", "note": "SDA=GP4, SCL=GP5" },
+        "ambient_light": { "pin": "GP26", "bus": "ADC0", "note": "Analog in" },
+        "gps": { "pin": "GP8 / GP9", "bus": "UART1", "note": "TX=GP8, RX=GP9" },
+        "battery_voltage": { "pin": "GP27", "bus": "ADC1", "note": "Voltage divider input" },
+        "current": { "pin": "GP28", "bus": "ADC2", "note": "Current sensor analog out" },
+        "gpio_states": { "pin": "GP10 / GP11 / GP12", "bus": "Digital GPIO", "note": "DOUT control/monitor" },
+        "adc_raw": { "pin": "GP26", "bus": "ADC0", "note": "Raw ADC capture" },
+        "sound_level": { "pin": "GP27", "bus": "ADC1", "note": "Mic module analog out" },
+        "wifi_rssi": { "pin": "INTERNAL", "bus": "WiFi", "note": "CYW43439 onboard (W variant)" },
+        "ble_scan": { "pin": "INTERNAL", "bus": "BLE", "note": "CYW43439 onboard (W variant)" }
+      }
+    },
+    {
+      "id": "rpi-sbc",
+      "pin_anchors": {
+        "GPIO2": 120.0, "GPIO3": 145.0, "GPIO8": 170.0,
+        "GPIO14": 195.0, "GPIO15": 220.0, "GPIO17": 245.0,
+        "GPIO27": 270.0, "GPIO12": 320.0, "GPIO13": 345.0,
+        "INTERNAL": 255.0
+      },
+      "rules": {
+        "temperature": { "pin": "GPIO2 / GPIO3 (pins 3/5)", "bus": "I2C1", "note": "SDA=GPIO2, SCL=GPIO3" },
+        "humidity": { "pin": "GPIO2 / GPIO3 (pins 3/5)", "bus": "I2C1", "note": "SDA=GPIO2, SCL=GPIO3" },
+        "pressure": { "pin": "GPIO2 / GPIO3 (pins 3/5)", "bus": "I2C1", "note": "SDA=GPIO2, SCL=GPIO3" },
+        "air_quality_co2": { "pin": "GPIO2 / GPIO3 (pins 3/5)", "bus": "I2C1", "note": "SDA=GPIO2, SCL=GPIO3" },
+        "air_quality_tvoc": { "pin": "GPIO2 / GPIO3 (pins 3/5)", "bus": "I2C1", "note": "SDA=GPIO2, SCL=GPIO3" },
+        "accel_xyz": { "pin": "GPIO2 / GPIO3 (pins 3/5)", "bus": "I2C1", "note": "SDA=GPIO2, SCL=GPIO3" },
+        "gyro_xyz": { "pin": "GPIO2 / GPIO3 (pins 3/5)", "bus": "I2C1", "note": "SDA=GPIO2, SCL=GPIO3" },
+        "magnetometer": { "pin": "GPIO2 / GPIO3 (pins 3/5)", "bus": "I2C1", "note": "SDA=GPIO2, SCL=GPIO3" },
+        "uv_index": { "pin": "GPIO2 / GPIO3 (pins 3/5)", "bus": "I2C1", "note": "SDA=GPIO2, SCL=GPIO3" },
+        "proximity": { "pin": "GPIO2 / GPIO3 (pins 3/5)", "bus": "I2C1", "note": "SDA=GPIO2, SCL=GPIO3" },
+        "ambient_light": { "pin": "via MCP3008 GPIO8", "bus": "SPI0 + ADC", "note": "External ADC chip required" },
+        "gps": { "pin": "GPIO14 / GPIO15 (pins 8/10)", "bus": "UART0", "note": "TX=GPIO14, RX=GPIO15" },
+        "battery_voltage": { "pin": "via MCP3008 CH0", "bus": "SPI0 + ADC", "note": "External ADC chip required" },
+        "current": { "pin": "via MCP3008 CH1", "bus": "SPI0 + ADC", "note": "INA219 on I2C also works" },
+        "gpio_states": { "pin": "GPIO17 / GPIO27 / GPIO22", "bus": "Digital GPIO", "note": "DOUT control/monitor" },
+        "adc_raw": { "pin": "via MCP3008 CH2", "bus": "SPI0 + ADC", "note": "External ADC chip required" },
+        "sound_level": { "pin": "via USB mic / I2S", "bus": "I2S / USB", "note": "INMP441 I2S or USB mic" },
+        "wifi_rssi": { "pin": "INTERNAL", "bus": "WiFi", "note": "Onboard radio" },
+        "ble_scan": { "pin": "INTERNAL", "bus": "BLE", "note": "Onboard radio" }
+      }
+    },
+    {
+      "id": "jetson-40pin",
+      "pin_anchors": {
+        "GPIO2": 120.0,
+        "GPIO3": 145.0,
+        "GPIO8": 170.0,
+        "GPIO14": 195.0,
+        "GPIO15": 220.0,
+        "GPIO17": 220.0,
+        "GPIO27": 245.0,
+        "GPIO12": 320.0,
+        "GPIO13": 345.0,
+        "INTERNAL": 255.0
+      },
+      "rules": {
+        "temperature": { "pin": "GPIO2 / GPIO3", "bus": "I2C1", "note": "Pins 3/5, 3.3V header" },
+        "humidity": { "pin": "GPIO2 / GPIO3", "bus": "I2C1", "note": "Pins 3/5, 3.3V header" },
+        "pressure": { "pin": "GPIO2 / GPIO3", "bus": "I2C1", "note": "Pins 3/5, 3.3V header" },
+        "air_quality_co2": { "pin": "GPIO2 / GPIO3", "bus": "I2C1", "note": "Pins 3/5, 3.3V header" },
+        "air_quality_tvoc": { "pin": "GPIO2 / GPIO3", "bus": "I2C1", "note": "Pins 3/5, 3.3V header" },
+        "accel_xyz": { "pin": "GPIO2 / GPIO3", "bus": "I2C1", "note": "Pins 3/5, 3.3V header" },
+        "gyro_xyz": { "pin": "GPIO2 / GPIO3", "bus": "I2C1", "note": "Pins 3/5, 3.3V header" },
+        "magnetometer": { "pin": "GPIO2 / GPIO3", "bus": "I2C1", "note": "Pins 3/5, 3.3V header" },
+        "uv_index": { "pin": "GPIO2 / GPIO3", "bus": "I2C1", "note": "Pins 3/5, 3.3V header" },
+        "proximity": { "pin": "GPIO2 / GPIO3", "bus": "I2C1", "note": "Pins 3/5, 3.3V header" },
+        "ambient_light": { "pin": "GPIO8", "bus": "SPI0 + ADC", "note": "MCP3008/ADS1115 breakout required" },
+        "gps": { "pin": "GPIO14 / GPIO15", "bus": "UART0", "note": "Pins 8/10 serial console/UART" },
+        "battery_voltage": { "pin": "GPIO8", "bus": "SPI0 + ADC", "note": "External ADC divider input" },
+        "current": { "pin": "GPIO17", "bus": "I2C1", "note": "INA219/INA226 on header" },
+        "gpio_states": { "pin": "GPIO17 / GPIO27 / GPIO22", "bus": "Digital GPIO", "note": "Header GPIO 3.3V logic" },
+        "adc_raw": { "pin": "GPIO8", "bus": "SPI0 + ADC", "note": "External ADC breakout required" },
+        "sound_level": { "pin": "GPIO12 / GPIO13", "bus": "I2S / DMIC", "note": "I2S microphone breakout" },
+        "wifi_rssi": { "pin": "INTERNAL", "bus": "WiFi", "note": "Onboard/attached radio" },
+        "ble_scan": { "pin": "INTERNAL", "bus": "BLE", "note": "Onboard/attached radio" }
+      }
+    },
+    {
+      "id": "stm32-nucleo",
+      "rules": {
+        "temperature": { "pin": "PB9 / PB8", "bus": "I2C1", "note": "SDA=PB9, SCL=PB8" },
+        "humidity": { "pin": "PB9 / PB8", "bus": "I2C1", "note": "SDA=PB9, SCL=PB8" },
+        "pressure": { "pin": "PB9 / PB8", "bus": "I2C1", "note": "SDA=PB9, SCL=PB8" },
+        "air_quality_co2": { "pin": "PB9 / PB8", "bus": "I2C1", "note": "SDA=PB9, SCL=PB8" },
+        "air_quality_tvoc": { "pin": "PB9 / PB8", "bus": "I2C1", "note": "SDA=PB9, SCL=PB8" },
+        "accel_xyz": { "pin": "PB9 / PB8", "bus": "I2C1", "note": "SDA=PB9, SCL=PB8" },
+        "gyro_xyz": { "pin": "PB9 / PB8", "bus": "I2C1", "note": "SDA=PB9, SCL=PB8" },
+        "magnetometer": { "pin": "PB9 / PB8", "bus": "I2C1", "note": "SDA=PB9, SCL=PB8" },
+        "uv_index": { "pin": "PB9 / PB8", "bus": "I2C1", "note": "SDA=PB9, SCL=PB8" },
+        "proximity": { "pin": "PB9 / PB8", "bus": "I2C1", "note": "SDA=PB9, SCL=PB8" },
+        "ambient_light": { "pin": "PA0", "bus": "ADC1", "note": "Analog in" },
+        "gps": { "pin": "PA2 / PA3", "bus": "USART2", "note": "TX=PA2, RX=PA3" },
+        "battery_voltage": { "pin": "PA1", "bus": "ADC1", "note": "Voltage divider input" },
+        "current": { "pin": "PA4", "bus": "ADC1", "note": "Current sensor analog out" },
+        "gpio_states": { "pin": "PB0 / PB1 / PB2", "bus": "Digital GPIO", "note": "DOUT control/monitor" },
+        "adc_raw": { "pin": "PA5", "bus": "ADC1", "note": "Raw ADC capture" },
+        "sound_level": { "pin": "PA6", "bus": "ADC1", "note": "Mic module analog out" },
+        "wifi_rssi": { "pin": "PA7 / PB3 / PB4 / PB5", "bus": "SPI1", "note": "External radio module" },
+        "ble_scan": { "pin": "PA7 / PB3 / PB4 / PB5", "bus": "SPI1", "note": "External radio module" }
+      }
+    },
+    {
+      "id": "generic",
+      "rules": {
+        "temperature": { "pin": "PIN_1 / PIN_2", "bus": "I2C", "note": "SDA/SCL default" },
+        "humidity": { "pin": "PIN_1 / PIN_2", "bus": "I2C", "note": "SDA/SCL default" },
+        "pressure": { "pin": "PIN_1 / PIN_2", "bus": "I2C", "note": "SDA/SCL default" },
+        "air_quality_co2": { "pin": "PIN_1 / PIN_2", "bus": "I2C", "note": "SDA/SCL default" },
+        "air_quality_tvoc": { "pin": "PIN_1 / PIN_2", "bus": "I2C", "note": "SDA/SCL default" },
+        "accel_xyz": { "pin": "PIN_1 / PIN_2", "bus": "I2C", "note": "SDA/SCL default" },
+        "gyro_xyz": { "pin": "PIN_1 / PIN_2", "bus": "I2C", "note": "SDA/SCL default" },
+        "magnetometer": { "pin": "PIN_1 / PIN_2", "bus": "I2C", "note": "SDA/SCL default" },
+        "uv_index": { "pin": "PIN_1 / PIN_2", "bus": "I2C", "note": "SDA/SCL default" },
+        "proximity": { "pin": "PIN_1 / PIN_2", "bus": "I2C", "note": "SDA/SCL default" },
+        "ambient_light": { "pin": "PIN_5", "bus": "ADC", "note": "Analog input" },
+        "gps": { "pin": "PIN_3 / PIN_4", "bus": "UART", "note": "TX/RX default" },
+        "battery_voltage": { "pin": "PIN_5", "bus": "ADC", "note": "Analog input" },
+        "current": { "pin": "PIN_5", "bus": "ADC", "note": "Analog input" },
+        "gpio_states": { "pin": "PIN_6 / PIN_7", "bus": "GPIO", "note": "Digital I/O" },
+        "adc_raw": { "pin": "PIN_5", "bus": "ADC", "note": "Analog input" },
+        "sound_level": { "pin": "PIN_5", "bus": "ADC", "note": "Analog input" },
+        "wifi_rssi": { "pin": "INTERNAL", "bus": "Radio", "note": "No external wiring" },
+        "ble_scan": { "pin": "INTERNAL", "bus": "Radio", "note": "No external wiring" }
+      }
+    }
+  ],
+  "controllers": [
+    {
+      "id": "esp32-devkit",
+      "name": "ESP32 DevKit V1",
+      "flash": "4 MB",
+      "ram": "520 KB",
+      "connectivity": "WiFi + BLE 4.2",
+      "visual_family": "esp32",
+      "chip_label": "ESP32-WROOM",
+      "has_wifi": true,
+      "pin_count": 15,
+      "board_color": "#214d2c",
+      "wiring_family": "esp32-classic",
+      "visual_layout": {
+        "module": { "label": "MCU", "x": 94, "y": 164, "width": 72, "height": 48, "radius": 4, "fill": "#0f172a", "stroke": "#4b5563", "text_fill": "#c7d2da", "font_size": 7.5 },
+        "headers": [
+          { "label": "L-GPIO", "x": 31, "y": 56, "columns": 1, "rows": 15, "pitch_x": 0, "pitch_y": 14, "pin_width": 18, "pin_height": 7, "base_fill": "#111827", "base_stroke": "#2a3647", "pin_fill": "#d4af37", "text_fill": "#d5f5d2", "label_x": 40, "label_y": 50 },
+          { "label": "R-GPIO", "x": 211, "y": 56, "columns": 1, "rows": 15, "pitch_x": 0, "pitch_y": 14, "pin_width": 18, "pin_height": 7, "base_fill": "#111827", "base_stroke": "#2a3647", "pin_fill": "#d4af37", "text_fill": "#d5f5d2", "label_x": 220, "label_y": 50 }
+        ],
+        "ports": [
+          { "label": "", "x": 88, "y": 68, "width": 84, "height": 78, "radius": 3, "fill": "#c9cfd6", "stroke": "#66707a", "text_fill": "#c9cfd6", "font_size": 4 },
+          { "label": "USB-UART", "x": 101, "y": 308, "width": 58, "height": 24, "radius": 4, "fill": "#b5bcc3", "stroke": "#6b7280", "text_fill": "#374151", "font_size": 6.0 }
+        ],
+        "power": [],
+        "indicators": [
+          { "x": 86, "y": 258, "radius": 5, "fill": "#2a2a2a", "stroke": "#777777", "label": "RST", "text_fill": "#d0d6dc" },
+          { "x": 174, "y": 258, "radius": 5, "fill": "#113b22", "stroke": "#2bd46e", "label": "PWR", "text_fill": "#d4ffe3" }
+        ],
+        "accessories": [],
+        "footer_label": "ESP32 DevKit · dual-row 15-pin rails · USB-UART"
+      }
+    },
+    {
+      "id": "esp32-wrover",
+      "name": "ESP32-WROVER-IE",
+      "flash": "4 MB + 8 MB PSRAM",
+      "ram": "520 KB",
+      "connectivity": "WiFi + BLE 4.2",
+      "visual_family": "esp32",
+      "chip_label": "ESP32-WROOM",
+      "has_wifi": true,
+      "pin_count": 15,
+      "board_color": "#214d2c",
+      "wiring_family": "esp32-classic",
+      "visual_layout": {
+        "module": { "label": "MCU", "x": 94, "y": 164, "width": 72, "height": 48, "radius": 4, "fill": "#0f172a", "stroke": "#4b5563", "text_fill": "#c7d2da", "font_size": 7.5 },
+        "headers": [
+          { "label": "L-GPIO", "x": 31, "y": 56, "columns": 1, "rows": 15, "pitch_x": 0, "pitch_y": 14, "pin_width": 18, "pin_height": 7, "base_fill": "#111827", "base_stroke": "#2a3647", "pin_fill": "#d4af37", "text_fill": "#d5f5d2", "label_x": 40, "label_y": 50 },
+          { "label": "R-GPIO", "x": 211, "y": 56, "columns": 1, "rows": 15, "pitch_x": 0, "pitch_y": 14, "pin_width": 18, "pin_height": 7, "base_fill": "#111827", "base_stroke": "#2a3647", "pin_fill": "#d4af37", "text_fill": "#d5f5d2", "label_x": 220, "label_y": 50 }
+        ],
+        "ports": [
+          { "label": "", "x": 88, "y": 68, "width": 84, "height": 78, "radius": 3, "fill": "#c9cfd6", "stroke": "#66707a", "text_fill": "#c9cfd6", "font_size": 4 },
+          { "label": "USB-UART", "x": 101, "y": 308, "width": 58, "height": 24, "radius": 4, "fill": "#b5bcc3", "stroke": "#6b7280", "text_fill": "#374151", "font_size": 6.0 }
+        ],
+        "power": [],
+        "indicators": [
+          { "x": 86, "y": 258, "radius": 5, "fill": "#2a2a2a", "stroke": "#777777", "label": "RST", "text_fill": "#d0d6dc" },
+          { "x": 174, "y": 258, "radius": 5, "fill": "#113b22", "stroke": "#2bd46e", "label": "PWR", "text_fill": "#d4ffe3" }
+        ],
+        "accessories": [],
+        "footer_label": "ESP32-WROVER · PSRAM + camera capable · 15-pin rails"
+      }
+    },
+    {
+      "id": "esp32-s2",
+      "name": "ESP32-S2 Module",
+      "flash": "4 MB",
+      "ram": "320 KB",
+      "connectivity": "WiFi (single-core)",
+      "visual_family": "esp32",
+      "chip_label": "ESP32-S2",
+      "has_wifi": true,
+      "pin_count": 20,
+      "board_color": "#1e5a33",
+      "wiring_family": "esp32-s2",
+      "visual_layout": {
+        "module": { "label": "MCU", "x": 94, "y": 148, "width": 72, "height": 46, "radius": 4, "fill": "#0e1f35", "stroke": "#4b5563", "text_fill": "#c7d2da", "font_size": 7.5 },
+        "headers": [
+          { "label": "L-GPIO", "x": 31, "y": 44, "columns": 1, "rows": 20, "pitch_x": 0, "pitch_y": 13, "pin_width": 18, "pin_height": 7, "base_fill": "#111827", "base_stroke": "#2a3647", "pin_fill": "#d4af37", "text_fill": "#d5f5d2", "label_x": 40, "label_y": 38 },
+          { "label": "R-GPIO", "x": 211, "y": 44, "columns": 1, "rows": 20, "pitch_x": 0, "pitch_y": 13, "pin_width": 18, "pin_height": 7, "base_fill": "#111827", "base_stroke": "#2a3647", "pin_fill": "#d4af37", "text_fill": "#d5f5d2", "label_x": 220, "label_y": 38 }
+        ],
+        "ports": [
+          { "label": "", "x": 88, "y": 58, "width": 84, "height": 68, "radius": 3, "fill": "#c9cfd6", "stroke": "#66707a", "text_fill": "#c9cfd6", "font_size": 4 },
+          { "label": "USB-C", "x": 101, "y": 308, "width": 58, "height": 24, "radius": 4, "fill": "#b5bcc3", "stroke": "#6b7280", "text_fill": "#374151", "font_size": 6.0 }
+        ],
+        "power": [],
+        "indicators": [
+          { "x": 86, "y": 268, "radius": 5, "fill": "#2a2a2a", "stroke": "#777777", "label": "RST", "text_fill": "#d0d6dc" },
+          { "x": 174, "y": 268, "radius": 5, "fill": "#113b22", "stroke": "#2bd46e", "label": "PWR", "text_fill": "#d4ffe3" }
+        ],
+        "accessories": [],
+        "footer_label": "ESP32-S2 · WiFi-only (no BLE) · 20-pin rails · USB-C OTG"
+      }
+    },
+    {
+      "id": "esp32-s3",
+      "name": "ESP32-S3 DevKitC",
+      "flash": "8 MB",
+      "ram": "512 KB",
+      "connectivity": "WiFi + BLE 5.0",
+      "visual_family": "esp32",
+      "chip_label": "ESP32-S3",
+      "has_wifi": true,
+      "pin_count": 20,
+      "board_color": "#205e36",
+      "wiring_family": "esp32-s3",
+      "visual_layout": {
+        "module": { "label": "MCU", "x": 94, "y": 148, "width": 72, "height": 46, "radius": 4, "fill": "#0f1f36", "stroke": "#4b5563", "text_fill": "#c7d2da", "font_size": 7.5 },
+        "headers": [
+          { "label": "L-GPIO", "x": 31, "y": 44, "columns": 1, "rows": 20, "pitch_x": 0, "pitch_y": 13, "pin_width": 18, "pin_height": 7, "base_fill": "#111827", "base_stroke": "#2a3647", "pin_fill": "#d4af37", "text_fill": "#d5f5d2", "label_x": 40, "label_y": 38 },
+          { "label": "R-GPIO", "x": 211, "y": 44, "columns": 1, "rows": 20, "pitch_x": 0, "pitch_y": 13, "pin_width": 18, "pin_height": 7, "base_fill": "#111827", "base_stroke": "#2a3647", "pin_fill": "#d4af37", "text_fill": "#d5f5d2", "label_x": 220, "label_y": 38 }
+        ],
+        "ports": [
+          { "label": "", "x": 88, "y": 58, "width": 84, "height": 68, "radius": 3, "fill": "#c9cfd6", "stroke": "#66707a", "text_fill": "#c9cfd6", "font_size": 4 },
+          { "label": "USB-C", "x": 101, "y": 308, "width": 58, "height": 24, "radius": 4, "fill": "#b5bcc3", "stroke": "#6b7280", "text_fill": "#374151", "font_size": 6.0 }
+        ],
+        "power": [],
+        "indicators": [
+          { "x": 86, "y": 268, "radius": 5, "fill": "#2a2a2a", "stroke": "#777777", "label": "RST", "text_fill": "#d0d6dc" },
+          { "x": 174, "y": 268, "radius": 5, "fill": "#113b22", "stroke": "#2bd46e", "label": "PWR", "text_fill": "#d4ffe3" }
+        ],
+        "accessories": [],
+        "footer_label": "ESP32-S3 · WiFi + BLE 5 · USB OTG · AI accelerator · 20-pin"
+      }
+    },
+    {
+      "id": "esp32-c3",
+      "name": "ESP32-C3 SuperMini",
+      "flash": "4 MB",
+      "ram": "400 KB",
+      "connectivity": "WiFi + BLE 5.0 (RISC-V)",
+      "visual_family": "esp32",
+      "chip_label": "ESP32-C3",
+      "has_wifi": true,
+      "pin_count": 12,
+      "board_color": "#3b5e1e",
+      "wiring_family": "esp32-c3",
+      "visual_layout": {
+        "module": { "label": "MCU", "x": 94, "y": 160, "width": 72, "height": 46, "radius": 4, "fill": "#141e0d", "stroke": "#4b5563", "text_fill": "#c7d2da", "font_size": 7.5 },
+        "headers": [
+          { "label": "L-GPIO", "x": 31, "y": 66, "columns": 1, "rows": 12, "pitch_x": 0, "pitch_y": 16, "pin_width": 18, "pin_height": 7, "base_fill": "#111827", "base_stroke": "#2a3647", "pin_fill": "#d4af37", "text_fill": "#d5f5d2", "label_x": 40, "label_y": 60 },
+          { "label": "R-GPIO", "x": 211, "y": 66, "columns": 1, "rows": 12, "pitch_x": 0, "pitch_y": 16, "pin_width": 18, "pin_height": 7, "base_fill": "#111827", "base_stroke": "#2a3647", "pin_fill": "#d4af37", "text_fill": "#d5f5d2", "label_x": 220, "label_y": 60 }
+        ],
+        "ports": [
+          { "label": "", "x": 88, "y": 72, "width": 84, "height": 66, "radius": 3, "fill": "#c9cfd6", "stroke": "#66707a", "text_fill": "#c9cfd6", "font_size": 4 },
+          { "label": "USB-C", "x": 101, "y": 308, "width": 58, "height": 24, "radius": 4, "fill": "#b5bcc3", "stroke": "#6b7280", "text_fill": "#374151", "font_size": 6.0 }
+        ],
+        "power": [],
+        "indicators": [
+          { "x": 86, "y": 260, "radius": 5, "fill": "#2a2a2a", "stroke": "#777777", "label": "RST", "text_fill": "#d0d6dc" },
+          { "x": 174, "y": 260, "radius": 5, "fill": "#113b22", "stroke": "#2bd46e", "label": "PWR", "text_fill": "#d4ffe3" }
+        ],
+        "accessories": [],
+        "footer_label": "ESP32-C3 SuperMini · RISC-V · 12-pin · WiFi + BLE 5"
+      }
+    },
+    {
+      "id": "esp32-c6",
+      "name": "ESP32-C6 DevKit",
+      "flash": "8 MB",
+      "ram": "512 KB",
+      "connectivity": "WiFi 6 + BLE 5.3 + Thread",
+      "visual_family": "esp32",
+      "chip_label": "ESP32-C6",
+      "has_wifi": true,
+      "pin_count": 12,
+      "board_color": "#556622",
+      "wiring_family": "esp32-c6",
+      "visual_layout": {
+        "module": { "label": "MCU", "x": 94, "y": 160, "width": 72, "height": 46, "radius": 4, "fill": "#1a2209", "stroke": "#4b5563", "text_fill": "#c7d2da", "font_size": 7.5 },
+        "headers": [
+          { "label": "L-GPIO", "x": 31, "y": 66, "columns": 1, "rows": 12, "pitch_x": 0, "pitch_y": 16, "pin_width": 18, "pin_height": 7, "base_fill": "#111827", "base_stroke": "#2a3647", "pin_fill": "#d4af37", "text_fill": "#d5f5d2", "label_x": 40, "label_y": 60 },
+          { "label": "R-GPIO", "x": 211, "y": 66, "columns": 1, "rows": 12, "pitch_x": 0, "pitch_y": 16, "pin_width": 18, "pin_height": 7, "base_fill": "#111827", "base_stroke": "#2a3647", "pin_fill": "#d4af37", "text_fill": "#d5f5d2", "label_x": 220, "label_y": 60 }
+        ],
+        "ports": [
+          { "label": "", "x": 88, "y": 72, "width": 84, "height": 66, "radius": 3, "fill": "#c9cfd6", "stroke": "#66707a", "text_fill": "#c9cfd6", "font_size": 4 },
+          { "label": "USB-C", "x": 101, "y": 308, "width": 58, "height": 24, "radius": 4, "fill": "#b5bcc3", "stroke": "#6b7280", "text_fill": "#374151", "font_size": 6.0 }
+        ],
+        "power": [],
+        "indicators": [
+          { "x": 86, "y": 260, "radius": 5, "fill": "#2a2a2a", "stroke": "#777777", "label": "RST", "text_fill": "#d0d6dc" },
+          { "x": 174, "y": 260, "radius": 5, "fill": "#113b22", "stroke": "#2bd46e", "label": "PWR", "text_fill": "#d4ffe3" }
+        ],
+        "accessories": [],
+        "footer_label": "ESP32-C6 · WiFi 6 + BLE 5.3 + Thread/Zigbee · 12-pin"
+      }
+    },
+    {
+      "id": "esp32-h2",
+      "name": "ESP32-H2 DevKit",
+      "flash": "4 MB",
+      "ram": "320 KB",
+      "connectivity": "BLE 5.3 + 802.15.4 (Thread)",
+      "visual_family": "esp32",
+      "chip_label": "ESP32-H2",
+      "has_wifi": false,
+      "pin_count": 10,
+      "board_color": "#6a5a1f",
+      "wiring_family": "esp32-h2",
+      "visual_layout": {
+        "module": { "label": "MCU", "x": 94, "y": 160, "width": 72, "height": 46, "radius": 4, "fill": "#24190a", "stroke": "#4b5563", "text_fill": "#c7d2da", "font_size": 7.5 },
+        "headers": [
+          { "label": "L-GPIO", "x": 31, "y": 76, "columns": 1, "rows": 10, "pitch_x": 0, "pitch_y": 16, "pin_width": 18, "pin_height": 7, "base_fill": "#111827", "base_stroke": "#2a3647", "pin_fill": "#d4af37", "text_fill": "#d5f5d2", "label_x": 40, "label_y": 70 },
+          { "label": "R-GPIO", "x": 211, "y": 76, "columns": 1, "rows": 10, "pitch_x": 0, "pitch_y": 16, "pin_width": 18, "pin_height": 7, "base_fill": "#111827", "base_stroke": "#2a3647", "pin_fill": "#d4af37", "text_fill": "#d5f5d2", "label_x": 220, "label_y": 70 }
+        ],
+        "ports": [
+          { "label": "", "x": 88, "y": 78, "width": 84, "height": 60, "radius": 3, "fill": "#c9cfd6", "stroke": "#66707a", "text_fill": "#c9cfd6", "font_size": 4 },
+          { "label": "USB-C", "x": 101, "y": 308, "width": 58, "height": 24, "radius": 4, "fill": "#b5bcc3", "stroke": "#6b7280", "text_fill": "#374151", "font_size": 6.0 }
+        ],
+        "power": [],
+        "indicators": [
+          { "x": 86, "y": 258, "radius": 5, "fill": "#2a2a2a", "stroke": "#777777", "label": "RST", "text_fill": "#d0d6dc" },
+          { "x": 174, "y": 258, "radius": 5, "fill": "#40381d", "stroke": "#f8b72a", "label": "ACT", "text_fill": "#fef3c7" }
+        ],
+        "accessories": [],
+        "footer_label": "ESP32-H2 · BLE 5.3 + 802.15.4 Thread/Zigbee · no WiFi · 10-pin"
+      }
+    },
+    {
+      "id": "arduino-uno",
+      "name": "Arduino Uno R3",
+      "flash": "32 KB",
+      "ram": "2 KB",
+      "connectivity": "UART",
+      "visual_family": "arduino-uno",
+      "chip_label": "ATmega328P",
+      "has_wifi": false,
+      "pin_count": 14,
+      "board_color": "#0b7f8c",
+      "wiring_family": "arduino-uno",
+      "visual_layout": {
+        "module": { "label": "328P", "x": 88, "y": 82, "width": 76, "height": 60, "radius": 5, "fill": "#0b1220", "stroke": "#66707a", "text_fill": "#b8c7d5", "font_size": 8.0 },
+        "headers": [
+          { "label": "D0-D13", "x": 40, "y": 52, "columns": 14, "rows": 1, "pitch_x": 12, "pitch_y": 0, "pin_width": 8, "pin_height": 10, "base_fill": "#0b1f31", "base_stroke": "#58697a", "pin_fill": "#d4af37", "text_fill": "#cce8f0", "label_x": 124, "label_y": 45 },
+          { "label": "A0-A5 / PWR", "x": 108, "y": 278, "columns": 10, "rows": 1, "pitch_x": 10, "pitch_y": 0, "pin_width": 7, "pin_height": 10, "base_fill": "#0b1f31", "base_stroke": "#58697a", "pin_fill": "#d4af37", "text_fill": "#cce8f0", "label_x": 163, "label_y": 273 }
+        ],
+        "ports": [
+          { "label": "USB-B", "x": 176, "y": 68, "width": 26, "height": 38, "radius": 3, "fill": "#cfd5db", "stroke": "#7b8792", "text_fill": "#374151", "font_size": 5.2 },
+          { "label": "ICSP", "x": 154, "y": 184, "width": 22, "height": 38, "radius": 2, "fill": "#242a31", "stroke": "#5b6671", "text_fill": "#d1d7dd", "font_size": 5.0 }
+        ],
+        "power": [
+          { "label": "DC IN", "x": 62, "y": 214, "width": 36, "height": 20, "radius": 3, "fill": "#1c1f24", "stroke": "#676f77", "text_fill": "#d1d7dd", "font_size": 5.6 }
+        ],
+        "indicators": [
+          { "x": 185, "y": 253, "radius": 6, "fill": "#2f3f17", "stroke": "#79c255", "label": "L", "text_fill": "#d4ffe3" },
+          { "x": 166, "y": 253, "radius": 6, "fill": "#40371a", "stroke": "#fbbf24", "label": "TX", "text_fill": "#fef3c7" }
+        ],
+        "accessories": [],
+        "footer_label": "Arduino Uno R3 · ATmega328P · 5V · shield-compatible"
+      }
+    },
+    {
+      "id": "rpi-pico",
+      "name": "Raspberry Pi Pico",
+      "flash": "2 MB",
+      "ram": "264 KB",
+      "connectivity": "UART + SPI + I2C",
+      "visual_family": "pico",
+      "chip_label": "RP2040",
+      "has_wifi": false,
+      "pin_count": 20,
+      "board_color": "#29503b",
+      "wiring_family": "rpi-pico",
+      "visual_layout": {
+        "module": { "label": "RP2040", "x": 102, "y": 84, "width": 56, "height": 52, "radius": 4, "fill": "#0f172a", "stroke": "#5f6872", "text_fill": "#d5dde5", "font_size": 7.5 },
+        "headers": [
+          { "label": "GP-L", "x": 64, "y": 48, "columns": 1, "rows": 20, "pitch_x": 0, "pitch_y": 13, "pin_width": 7, "pin_height": 7, "base_fill": "#1c2c1e", "base_stroke": "#2a4030", "pin_fill": "#d4af37", "pin_corner_radius": 3.5, "text_fill": "#d2f0dd", "label_x": 68, "label_y": 42 },
+          { "label": "GP-R", "x": 189, "y": 48, "columns": 1, "rows": 20, "pitch_x": 0, "pitch_y": 13, "pin_width": 7, "pin_height": 7, "base_fill": "#1c2c1e", "base_stroke": "#2a4030", "pin_fill": "#d4af37", "pin_corner_radius": 3.5, "text_fill": "#d2f0dd", "label_x": 193, "label_y": 42 }
+        ],
+        "ports": [
+          { "label": "micro USB", "x": 96, "y": 40, "width": 68, "height": 20, "radius": 5, "fill": "#c2cad2", "stroke": "#6b7280", "text_fill": "#333b46", "font_size": 5.8 }
+        ],
+        "power": [],
+        "indicators": [
+          { "x": 130, "y": 154, "radius": 6, "fill": "#22301a", "stroke": "#5ee47d", "label": "LED", "text_fill": "#d4ffe3" },
+          { "x": 130, "y": 174, "radius": 6, "fill": "#404751", "stroke": "#6a7280", "label": "BTN", "text_fill": "#d0d6dc" }
+        ],
+        "accessories": [],
+        "footer_label": "Raspberry Pi Pico · RP2040 · 20 castellated GPIO pads"
+      }
+    },
+    {
+      "id": "rpi-pico-w",
+      "name": "Raspberry Pi Pico W",
+      "flash": "2 MB",
+      "ram": "264 KB",
+      "connectivity": "WiFi + BLE + UART + SPI",
+      "visual_family": "pico",
+      "chip_label": "RP2040-W",
+      "has_wifi": true,
+      "pin_count": 20,
+      "board_color": "#2b563d",
+      "wiring_family": "rpi-pico-w",
+      "visual_layout": {
+        "module": { "label": "RP2040", "x": 102, "y": 84, "width": 56, "height": 52, "radius": 4, "fill": "#0f172a", "stroke": "#5f6872", "text_fill": "#d5dde5", "font_size": 7.5 },
+        "headers": [
+          { "label": "GP-L", "x": 64, "y": 48, "columns": 1, "rows": 20, "pitch_x": 0, "pitch_y": 13, "pin_width": 7, "pin_height": 7, "base_fill": "#1c2c22", "base_stroke": "#2a4032", "pin_fill": "#d4af37", "pin_corner_radius": 3.5, "text_fill": "#d2f0dd", "label_x": 68, "label_y": 42 },
+          { "label": "GP-R", "x": 189, "y": 48, "columns": 1, "rows": 20, "pitch_x": 0, "pitch_y": 13, "pin_width": 7, "pin_height": 7, "base_fill": "#1c2c22", "base_stroke": "#2a4032", "pin_fill": "#d4af37", "pin_corner_radius": 3.5, "text_fill": "#d2f0dd", "label_x": 193, "label_y": 42 }
+        ],
+        "ports": [
+          { "label": "micro USB", "x": 96, "y": 40, "width": 68, "height": 20, "radius": 5, "fill": "#c2cad2", "stroke": "#6b7280", "text_fill": "#333b46", "font_size": 5.8 }
+        ],
+        "power": [],
+        "indicators": [
+          { "x": 130, "y": 154, "radius": 6, "fill": "#22301a", "stroke": "#5ee47d", "label": "LED", "text_fill": "#d4ffe3" },
+          { "x": 130, "y": 174, "radius": 6, "fill": "#404751", "stroke": "#6a7280", "label": "BTN", "text_fill": "#d0d6dc" }
+        ],
+        "accessories": [],
+        "footer_label": "Raspberry Pi Pico W · RP2040 + CYW43439 WiFi/BLE · 20 pads"
+      }
+    },
+    {
+      "id": "rpi-pico2",
+      "name": "Raspberry Pi Pico 2",
+      "flash": "4 MB",
+      "ram": "520 KB",
+      "connectivity": "WiFi + BLE + UART + SPI (RP2350)",
+      "visual_family": "pico",
+      "chip_label": "RP2350",
+      "has_wifi": true,
+      "pin_count": 26,
+      "board_color": "#243b63",
+      "wiring_family": "rpi-pico2",
+      "visual_layout": {
+        "module": { "label": "RP2350", "x": 102, "y": 84, "width": 56, "height": 56, "radius": 4, "fill": "#0c1830", "stroke": "#5f6872", "text_fill": "#d5dde5", "font_size": 7.5 },
+        "headers": [
+          { "label": "GP-L", "x": 64, "y": 44, "columns": 1, "rows": 26, "pitch_x": 0, "pitch_y": 10, "pin_width": 7, "pin_height": 7, "base_fill": "#15233a", "base_stroke": "#1e304e", "pin_fill": "#b8c8d8", "pin_corner_radius": 3.5, "text_fill": "#d5dde5", "label_x": 68, "label_y": 38 },
+          { "label": "GP-R", "x": 189, "y": 44, "columns": 1, "rows": 26, "pitch_x": 0, "pitch_y": 10, "pin_width": 7, "pin_height": 7, "base_fill": "#15233a", "base_stroke": "#1e304e", "pin_fill": "#b8c8d8", "pin_corner_radius": 3.5, "text_fill": "#d5dde5", "label_x": 193, "label_y": 38 }
+        ],
+        "ports": [
+          { "label": "USB-C", "x": 96, "y": 40, "width": 68, "height": 18, "radius": 5, "fill": "#c2cad2", "stroke": "#6b7280", "text_fill": "#333b46", "font_size": 5.8 }
+        ],
+        "power": [],
+        "indicators": [
+          { "x": 130, "y": 160, "radius": 6, "fill": "#1a2d48", "stroke": "#6ab4f5", "label": "LED", "text_fill": "#d5dde5" },
+          { "x": 130, "y": 180, "radius": 6, "fill": "#404751", "stroke": "#6a7280", "label": "BTN", "text_fill": "#d0d6dc" }
+        ],
+        "accessories": [],
+        "footer_label": "Raspberry Pi Pico 2 · RP2350 (ARM+RISC-V) · 26-pad GPIO"
+      }
+    },
+    {
+      "id": "rpi-zero2w",
+      "name": "Raspberry Pi Zero 2W",
+      "flash": "SD Card",
+      "ram": "512 MB",
+      "connectivity": "WiFi + BLE + USB + Linux",
+      "visual_family": "pi-sbc",
+      "chip_label": "BCM27xx/2712",
+      "has_wifi": true,
+      "pin_count": 40,
+      "board_color": "#b11824",
+      "wiring_family": "rpi-sbc",
+      "visual_layout": {
+        "module": { "label": "BCM2710", "x": 64, "y": 108, "width": 78, "height": 56, "radius": 5, "fill": "#111827", "stroke": "#616d7a", "text_fill": "#dde5ed", "font_size": 7.5 },
+        "headers": [
+          { "label": "40-pin GPIO", "x": 44, "y": 60, "columns": 20, "rows": 2, "pitch_x": 5, "pitch_y": 8, "pin_width": 3.6, "pin_height": 6, "base_fill": "#111827", "base_stroke": "#475569", "pin_fill": "#d4af37", "text_fill": "#fee2e2", "label_x": 99, "label_y": 53 }
+        ],
+        "ports": [
+          { "label": "mini HDMI", "x": 34, "y": 212, "width": 46, "height": 22, "radius": 3, "fill": "#b0b8be", "stroke": "#6b7480", "text_fill": "#374151", "font_size": 4.8 },
+          { "label": "USB-A", "x": 84, "y": 212, "width": 34, "height": 22, "radius": 3, "fill": "#b0b8be", "stroke": "#6b7480", "text_fill": "#374151", "font_size": 5.0 }
+        ],
+        "power": [
+          { "label": "micro-USB", "x": 38, "y": 178, "width": 50, "height": 22, "radius": 3, "fill": "#c5ccd2", "stroke": "#69727a", "text_fill": "#374151", "font_size": 4.9 }
+        ],
+        "indicators": [
+          { "x": 188, "y": 162, "radius": 7, "fill": "#172b1b", "stroke": "#4fe36f", "label": "PWR", "text_fill": "#d6f7d0" },
+          { "x": 205, "y": 162, "radius": 7, "fill": "#2c3217", "stroke": "#f8b72a", "label": "ACT", "text_fill": "#fef3c7" }
+        ],
+        "accessories": [],
+        "footer_label": "Raspberry Pi Zero 2W · BCM2710 · WiFi/BLE · mini-HDMI"
+      }
+    },
+    {
+      "id": "rpi-3b",
+      "name": "Raspberry Pi 3B+",
+      "flash": "SD Card",
+      "ram": "1 GB",
+      "connectivity": "WiFi + BLE + GbE + USB2 + Linux",
+      "visual_family": "pi-sbc",
+      "chip_label": "BCM27xx/2712",
+      "has_wifi": true,
+      "pin_count": 40,
+      "board_color": "#b11824",
+      "wiring_family": "rpi-sbc",
+      "visual_layout": {
+        "module": { "label": "BCM2837", "x": 74, "y": 108, "width": 86, "height": 62, "radius": 5, "fill": "#111827", "stroke": "#616d7a", "text_fill": "#dde5ed", "font_size": 7.5 },
+        "headers": [
+          { "label": "40-pin GPIO", "x": 44, "y": 60, "columns": 20, "rows": 2, "pitch_x": 5, "pitch_y": 8, "pin_width": 3.6, "pin_height": 6, "base_fill": "#111827", "base_stroke": "#475569", "pin_fill": "#d4af37", "text_fill": "#fee2e2", "label_x": 99, "label_y": 53 }
+        ],
+        "ports": [
+          { "label": "USB x4", "x": 178, "y": 96, "width": 34, "height": 58, "radius": 3, "fill": "#cfd6dc", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 5.2 },
+          { "label": "HDMI", "x": 34, "y": 222, "width": 46, "height": 22, "radius": 3, "fill": "#b0b8be", "stroke": "#6b7480", "text_fill": "#374151", "font_size": 5.0 },
+          { "label": "RJ45", "x": 178, "y": 164, "width": 36, "height": 24, "radius": 3, "fill": "#bbc4cb", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 5.0 }
+        ],
+        "power": [
+          { "label": "micro-USB", "x": 82, "y": 244, "width": 50, "height": 22, "radius": 3, "fill": "#c5ccd2", "stroke": "#69727a", "text_fill": "#374151", "font_size": 4.9 }
+        ],
+        "indicators": [
+          { "x": 188, "y": 267, "radius": 7, "fill": "#172b1b", "stroke": "#4fe36f", "label": "PWR", "text_fill": "#d6f7d0" },
+          { "x": 205, "y": 267, "radius": 7, "fill": "#2c3217", "stroke": "#f8b72a", "label": "ACT", "text_fill": "#fef3c7" }
+        ],
+        "accessories": [],
+        "footer_label": "Raspberry Pi 3B+ · BCM2837 · WiFi/BLE/GbE · 4x USB2"
+      }
+    },
+    {
+      "id": "rpi-4b",
+      "name": "Raspberry Pi 4B",
+      "flash": "SD / USB",
+      "ram": "8 GB",
+      "connectivity": "WiFi + BLE + GbE + USB3 + Linux",
+      "visual_family": "pi-sbc",
+      "chip_label": "BCM27xx/2712",
+      "has_wifi": true,
+      "pin_count": 40,
+      "board_color": "#b11824",
+      "wiring_family": "rpi-sbc",
+      "visual_layout": {
+        "module": { "label": "BCM2711", "x": 74, "y": 108, "width": 86, "height": 62, "radius": 5, "fill": "#111827", "stroke": "#616d7a", "text_fill": "#dde5ed", "font_size": 7.5 },
+        "headers": [
+          { "label": "40-pin GPIO", "x": 44, "y": 60, "columns": 20, "rows": 2, "pitch_x": 5, "pitch_y": 8, "pin_width": 3.6, "pin_height": 6, "base_fill": "#111827", "base_stroke": "#475569", "pin_fill": "#d4af37", "text_fill": "#fee2e2", "label_x": 99, "label_y": 53 }
+        ],
+        "ports": [
+          { "label": "2x USB3", "x": 178, "y": 96, "width": 34, "height": 28, "radius": 3, "fill": "#4a8bc4", "stroke": "#2260a0", "text_fill": "#e8f4ff", "font_size": 4.9 },
+          { "label": "2x USB2", "x": 178, "y": 130, "width": 34, "height": 28, "radius": 3, "fill": "#cfd6dc", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 4.9 },
+          { "label": "HDMI x2", "x": 34, "y": 222, "width": 62, "height": 22, "radius": 3, "fill": "#b0b8be", "stroke": "#6b7480", "text_fill": "#374151", "font_size": 5.0 },
+          { "label": "RJ45", "x": 178, "y": 164, "width": 36, "height": 24, "radius": 3, "fill": "#bbc4cb", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 5.0 }
+        ],
+        "power": [
+          { "label": "USB-C", "x": 34, "y": 178, "width": 46, "height": 22, "radius": 3, "fill": "#c5ccd2", "stroke": "#69727a", "text_fill": "#374151", "font_size": 5.0 }
+        ],
+        "indicators": [
+          { "x": 188, "y": 267, "radius": 7, "fill": "#172b1b", "stroke": "#4fe36f", "label": "PWR", "text_fill": "#d6f7d0" },
+          { "x": 205, "y": 267, "radius": 7, "fill": "#2c3217", "stroke": "#f8b72a", "label": "ACT", "text_fill": "#fef3c7" }
+        ],
+        "accessories": [],
+        "footer_label": "Raspberry Pi 4B · BCM2711 · USB3 · GbE · dual HDMI · USB-C pwr"
+      }
+    },
+    {
+      "id": "rpi-5",
+      "name": "Raspberry Pi 5",
+      "flash": "SD / NVMe",
+      "ram": "8 GB",
+      "connectivity": "WiFi + BLE + GbE + USB3 + PCIe + Linux",
+      "visual_family": "pi-sbc",
+      "chip_label": "BCM27xx/2712",
+      "has_wifi": true,
+      "pin_count": 40,
+      "board_color": "#b11824",
+      "wiring_family": "rpi-sbc",
+      "visual_layout": {
+        "module": { "label": "BCM2712", "x": 74, "y": 108, "width": 86, "height": 62, "radius": 5, "fill": "#111827", "stroke": "#616d7a", "text_fill": "#dde5ed", "font_size": 7.5 },
+        "headers": [
+          { "label": "40-pin GPIO", "x": 44, "y": 60, "columns": 20, "rows": 2, "pitch_x": 5, "pitch_y": 8, "pin_width": 3.6, "pin_height": 6, "base_fill": "#111827", "base_stroke": "#475569", "pin_fill": "#d4af37", "text_fill": "#fee2e2", "label_x": 99, "label_y": 53 }
+        ],
+        "ports": [
+          { "label": "2x USB3", "x": 178, "y": 96, "width": 34, "height": 28, "radius": 3, "fill": "#4a8bc4", "stroke": "#2260a0", "text_fill": "#e8f4ff", "font_size": 4.9 },
+          { "label": "2x USB2", "x": 178, "y": 130, "width": 34, "height": 28, "radius": 3, "fill": "#cfd6dc", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 4.9 },
+          { "label": "HDMI x2", "x": 34, "y": 222, "width": 62, "height": 22, "radius": 3, "fill": "#b0b8be", "stroke": "#6b7480", "text_fill": "#374151", "font_size": 5.0 },
+          { "label": "RJ45", "x": 178, "y": 164, "width": 36, "height": 24, "radius": 3, "fill": "#bbc4cb", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 5.0 },
+          { "label": "PCIe FFC", "x": 34, "y": 248, "width": 60, "height": 14, "radius": 2, "fill": "#8f969d", "stroke": "#646c73", "text_fill": "#eff4f8", "font_size": 4.8 }
+        ],
+        "power": [
+          { "label": "USB-C", "x": 34, "y": 178, "width": 46, "height": 22, "radius": 3, "fill": "#c5ccd2", "stroke": "#69727a", "text_fill": "#374151", "font_size": 5.0 }
+        ],
+        "indicators": [
+          { "x": 188, "y": 267, "radius": 7, "fill": "#172b1b", "stroke": "#4fe36f", "label": "PWR", "text_fill": "#d6f7d0" },
+          { "x": 205, "y": 267, "radius": 7, "fill": "#2c3217", "stroke": "#f8b72a", "label": "ACT", "text_fill": "#fef3c7" }
+        ],
+        "accessories": [],
+        "footer_label": "Raspberry Pi 5 · BCM2712 · PCIe · USB3 · GbE · HDMI4K"
+      }
+    },
+    {
+      "id": "rpi-cm4",
+      "name": "Raspberry Pi CM4",
+      "flash": "32 GB eMMC",
+      "ram": "8 GB",
+      "connectivity": "WiFi + BLE + GbE + PCIe + Linux",
+      "visual_family": "pi-sbc",
+      "chip_label": "BCM27xx/2712",
+      "has_wifi": true,
+      "pin_count": 40,
+      "board_color": "#b11824",
+      "wiring_family": "rpi-sbc",
+      "visual_layout": {
+        "module": { "label": "BCM2711 CM4", "x": 62, "y": 96, "width": 96, "height": 76, "radius": 5, "fill": "#111827", "stroke": "#616d7a", "text_fill": "#dde5ed", "font_size": 7.0 },
+        "headers": [
+          { "label": "40-pin GPIO", "x": 44, "y": 54, "columns": 20, "rows": 2, "pitch_x": 5, "pitch_y": 8, "pin_width": 3.6, "pin_height": 6, "base_fill": "#111827", "base_stroke": "#475569", "pin_fill": "#d4af37", "text_fill": "#fee2e2", "label_x": 99, "label_y": 47 }
+        ],
+        "ports": [
+          { "label": "CM4 FFC A", "x": 34, "y": 204, "width": 64, "height": 14, "radius": 2, "fill": "#7a848d", "stroke": "#4e575f", "text_fill": "#eff4f8", "font_size": 4.8 },
+          { "label": "CM4 FFC B", "x": 34, "y": 224, "width": 64, "height": 14, "radius": 2, "fill": "#7a848d", "stroke": "#4e575f", "text_fill": "#eff4f8", "font_size": 4.8 },
+          { "label": "PCIe", "x": 164, "y": 204, "width": 48, "height": 14, "radius": 2, "fill": "#8f969d", "stroke": "#646c73", "text_fill": "#eff4f8", "font_size": 4.8 }
+        ],
+        "power": [
+          { "label": "eMMC 32GB", "x": 34, "y": 250, "width": 72, "height": 20, "radius": 3, "fill": "#1c1f24", "stroke": "#676f77", "text_fill": "#d1d7dd", "font_size": 5.4 }
+        ],
+        "indicators": [
+          { "x": 188, "y": 267, "radius": 7, "fill": "#172b1b", "stroke": "#4fe36f", "label": "PWR", "text_fill": "#d6f7d0" },
+          { "x": 205, "y": 267, "radius": 7, "fill": "#2c3217", "stroke": "#f8b72a", "label": "ACT", "text_fill": "#fef3c7" }
+        ],
+        "accessories": [],
+        "footer_label": "Raspberry Pi CM4 · BCM2711 · eMMC + WiFi + PCIe · no video out"
+      }
+    },
+    {
+      "id": "jetson-nano",
+      "name": "NVIDIA Jetson Nano Dev Kit",
+      "flash": "microSD",
+      "ram": "4 GB",
+      "connectivity": "GbE + USB3 + CSI + Linux",
+      "visual_family": "jetson-sbc",
+      "chip_label": "Tegra X1",
+      "has_wifi": false,
+      "pin_count": 40,
+      "board_color": "#1f3a24",
+      "wiring_family": "jetson-40pin",
+      "accessory_profiles": ["jetson-csi-camera", "jetson-can-transceiver", "jetson-uart-header"],
+      "visual_layout": {
+        "module": {
+          "label": "Compute module",
+          "x": 76,
+          "y": 104,
+          "width": 86,
+          "height": 60,
+          "radius": 5,
+          "fill": "#111827",
+          "stroke": "#5f6872",
+          "text_fill": "#e7f5df",
+          "font_size": 7.5
+        },
+        "headers": [
+          {
+            "label": "40-pin GPIO",
+            "x": 48,
+            "y": 60,
+            "columns": 20,
+            "rows": 2,
+            "pitch_x": 5,
+            "pitch_y": 8,
+            "pin_width": 3.6,
+            "pin_height": 6,
+            "base_fill": "#111827",
+            "base_stroke": "#475569",
+            "pin_fill": "#d4af37",
+            "text_fill": "#d5f5d2",
+            "label_x": 100,
+            "label_y": 52
+          }
+        ],
+        "ports": [
+          { "label": "RJ45", "x": 176, "y": 92, "width": 34, "height": 20, "radius": 3, "fill": "#b9c0c7", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 5.2 },
+          { "label": "USB3", "x": 176, "y": 118, "width": 34, "height": 20, "radius": 3, "fill": "#b9c0c7", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 5.2 },
+          { "label": "HDMI", "x": 176, "y": 144, "width": 34, "height": 20, "radius": 3, "fill": "#b9c0c7", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 5.2 },
+          { "label": "M.2 E", "x": 164, "y": 184, "width": 46, "height": 16, "radius": 3, "fill": "#8f969d", "stroke": "#646c73", "text_fill": "#eff4f8", "font_size": 5.0 }
+        ],
+        "power": [
+          { "label": "DC JACK", "x": 30, "y": 246, "width": 44, "height": 22, "radius": 3, "fill": "#c5ccd2", "stroke": "#69727a", "text_fill": "#374151", "font_size": 5.0 },
+          { "label": "micro-USB", "x": 78, "y": 246, "width": 52, "height": 22, "radius": 3, "fill": "#c5ccd2", "stroke": "#69727a", "text_fill": "#374151", "font_size": 4.9 }
+        ],
+        "indicators": [
+          { "x": 191, "y": 267, "radius": 7, "fill": "#172b1b", "stroke": "#4fe36f", "label": "PWR", "text_fill": "#d6f7d0" },
+          { "x": 208, "y": 267, "radius": 7, "fill": "#2c3217", "stroke": "#f8b72a", "label": "ACT", "text_fill": "#fef3c7" }
+        ],
+        "accessories": [
+          { "accessory_id": "jetson-csi-camera", "label": "CSI-0", "x": 160, "y": 208, "width": 48, "height": 14, "radius": 3 },
+          { "accessory_id": "jetson-can-transceiver", "label": "J26", "x": 160, "y": 226, "width": 48, "height": 14, "radius": 3 },
+          { "accessory_id": "jetson-uart-header", "label": "UART", "x": 160, "y": 244, "width": 48, "height": 14, "radius": 3 }
+        ],
+        "footer_label": "Nano carrier: barrel + micro-USB power, CSI and UART breakout",
+        "footer_text_fill": "#ddf7d8"
+      }
+    },
+    {
+      "id": "jetson-xavier-nx",
+      "name": "NVIDIA Jetson Xavier NX",
+      "flash": "microSD / eMMC",
+      "ram": "8 GB",
+      "connectivity": "GbE + USB3 + CSI + Linux",
+      "visual_family": "jetson-sbc",
+      "chip_label": "Xavier NX",
+      "has_wifi": false,
+      "pin_count": 40,
+      "board_color": "#243f28",
+      "wiring_family": "jetson-40pin",
+      "accessory_profiles": ["jetson-csi-camera", "jetson-can-transceiver", "jetson-uart-header"],
+      "visual_layout": {
+        "module": {
+          "label": "Compute module",
+          "x": 82,
+          "y": 96,
+          "width": 92,
+          "height": 64,
+          "radius": 5,
+          "fill": "#101922",
+          "stroke": "#5f6872",
+          "text_fill": "#e7f5df",
+          "font_size": 7.4
+        },
+        "headers": [
+          {
+            "label": "40-pin header",
+            "x": 46,
+            "y": 56,
+            "columns": 20,
+            "rows": 2,
+            "pitch_x": 5,
+            "pitch_y": 8,
+            "pin_width": 3.5,
+            "pin_height": 6,
+            "base_fill": "#111827",
+            "base_stroke": "#475569",
+            "pin_fill": "#d4af37",
+            "text_fill": "#d5f5d2",
+            "label_x": 98,
+            "label_y": 50
+          }
+        ],
+        "ports": [
+          { "label": "2x USB3", "x": 176, "y": 92, "width": 34, "height": 22, "radius": 3, "fill": "#bbc4cb", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 4.9 },
+          { "label": "RJ45", "x": 176, "y": 120, "width": 34, "height": 22, "radius": 3, "fill": "#bbc4cb", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 5.0 },
+          { "label": "HDMI", "x": 176, "y": 148, "width": 34, "height": 18, "radius": 3, "fill": "#bbc4cb", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 5.0 },
+          { "label": "M.2 KEY M", "x": 148, "y": 186, "width": 62, "height": 16, "radius": 3, "fill": "#8f969d", "stroke": "#646c73", "text_fill": "#eff4f8", "font_size": 4.7 }
+        ],
+        "power": [
+          { "label": "19V IN", "x": 30, "y": 246, "width": 40, "height": 22, "radius": 3, "fill": "#c5ccd2", "stroke": "#69727a", "text_fill": "#374151", "font_size": 5.1 },
+          { "label": "USB-C", "x": 76, "y": 246, "width": 42, "height": 22, "radius": 3, "fill": "#c5ccd2", "stroke": "#69727a", "text_fill": "#374151", "font_size": 5.1 }
+        ],
+        "indicators": [
+          { "x": 188, "y": 266, "radius": 7, "fill": "#17311d", "stroke": "#4fe36f", "label": "PWR", "text_fill": "#d6f7d0" },
+          { "x": 206, "y": 266, "radius": 7, "fill": "#2c3217", "stroke": "#f8b72a", "label": "SYS", "text_fill": "#fef3c7" }
+        ],
+        "accessories": [
+          { "accessory_id": "jetson-csi-camera", "label": "CSI-A", "x": 152, "y": 208, "width": 56, "height": 14, "radius": 3 },
+          { "accessory_id": "jetson-can-transceiver", "label": "CAN FD", "x": 152, "y": 226, "width": 56, "height": 14, "radius": 3 },
+          { "accessory_id": "jetson-uart-header", "label": "DBG", "x": 152, "y": 244, "width": 56, "height": 14, "radius": 3 }
+        ],
+        "footer_label": "Xavier NX carrier: 19V in, M.2 storage, CSI and debug console",
+        "footer_text_fill": "#ddf7d8"
+      }
+    },
+    {
+      "id": "jetson-orin-nano",
+      "name": "NVIDIA Jetson Orin Nano",
+      "flash": "NVMe / microSD",
+      "ram": "8 GB",
+      "connectivity": "GbE + USB3 + CSI + Linux",
+      "visual_family": "jetson-sbc",
+      "chip_label": "Orin Nano",
+      "has_wifi": false,
+      "pin_count": 40,
+      "board_color": "#29452b",
+      "wiring_family": "jetson-40pin",
+      "accessory_profiles": ["jetson-csi-camera", "jetson-can-transceiver", "jetson-uart-header"],
+      "visual_layout": {
+        "module": {
+          "label": "Compute module",
+          "x": 72,
+          "y": 92,
+          "width": 98,
+          "height": 70,
+          "radius": 5,
+          "fill": "#101922",
+          "stroke": "#5f6872",
+          "text_fill": "#e7f5df",
+          "font_size": 7.2
+        },
+        "headers": [
+          {
+            "label": "40-pin GPIO",
+            "x": 44,
+            "y": 58,
+            "columns": 20,
+            "rows": 2,
+            "pitch_x": 5,
+            "pitch_y": 8,
+            "pin_width": 3.5,
+            "pin_height": 6,
+            "base_fill": "#111827",
+            "base_stroke": "#475569",
+            "pin_fill": "#d4af37",
+            "text_fill": "#d5f5d2",
+            "label_x": 96,
+            "label_y": 51
+          }
+        ],
+        "ports": [
+          { "label": "USB-C", "x": 176, "y": 88, "width": 34, "height": 18, "radius": 3, "fill": "#bbc4cb", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 5.1 },
+          { "label": "2x USB3", "x": 176, "y": 112, "width": 34, "height": 22, "radius": 3, "fill": "#bbc4cb", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 4.9 },
+          { "label": "DP", "x": 176, "y": 140, "width": 34, "height": 18, "radius": 3, "fill": "#bbc4cb", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 5.2 },
+          { "label": "RJ45", "x": 176, "y": 164, "width": 34, "height": 22, "radius": 3, "fill": "#bbc4cb", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 5.0 }
+        ],
+        "power": [
+          { "label": "DC IN", "x": 30, "y": 246, "width": 40, "height": 22, "radius": 3, "fill": "#c5ccd2", "stroke": "#69727a", "text_fill": "#374151", "font_size": 5.1 },
+          { "label": "PWR BTN", "x": 76, "y": 246, "width": 44, "height": 22, "radius": 3, "fill": "#243b22", "stroke": "#4b7b46", "text_fill": "#d8f6d2", "font_size": 4.9 }
+        ],
+        "indicators": [
+          { "x": 188, "y": 266, "radius": 7, "fill": "#17311d", "stroke": "#4fe36f", "label": "PWR", "text_fill": "#d6f7d0" },
+          { "x": 206, "y": 266, "radius": 7, "fill": "#2c3217", "stroke": "#f8b72a", "label": "AI", "text_fill": "#fef3c7" }
+        ],
+        "accessories": [
+          { "accessory_id": "jetson-csi-camera", "label": "CSI-0/1", "x": 146, "y": 206, "width": 62, "height": 14, "radius": 3 },
+          { "accessory_id": "jetson-can-transceiver", "label": "CAN", "x": 146, "y": 224, "width": 62, "height": 14, "radius": 3 },
+          { "accessory_id": "jetson-uart-header", "label": "UART DBG", "x": 146, "y": 242, "width": 62, "height": 14, "radius": 3 }
+        ],
+        "footer_label": "Orin Nano carrier: USB-C, DP, GbE and dual-camera CSI lanes",
+        "footer_text_fill": "#ddf7d8"
+      }
+    },
+    {
+      "id": "jetson-orin-nx",
+      "name": "NVIDIA Jetson Orin NX",
+      "flash": "NVMe / eMMC",
+      "ram": "16 GB",
+      "connectivity": "GbE + USB3 + CSI + Linux",
+      "visual_family": "jetson-sbc",
+      "chip_label": "Orin NX",
+      "has_wifi": false,
+      "pin_count": 40,
+      "board_color": "#325232",
+      "wiring_family": "jetson-40pin",
+      "accessory_profiles": ["jetson-csi-camera", "jetson-can-transceiver", "jetson-uart-header"],
+      "visual_layout": {
+        "module": {
+          "label": "Compute module",
+          "x": 70,
+          "y": 88,
+          "width": 102,
+          "height": 74,
+          "radius": 5,
+          "fill": "#101922",
+          "stroke": "#5f6872",
+          "text_fill": "#e7f5df",
+          "font_size": 7.2
+        },
+        "headers": [
+          {
+            "label": "40-pin expansion",
+            "x": 44,
+            "y": 58,
+            "columns": 20,
+            "rows": 2,
+            "pitch_x": 5,
+            "pitch_y": 8,
+            "pin_width": 3.5,
+            "pin_height": 6,
+            "base_fill": "#111827",
+            "base_stroke": "#475569",
+            "pin_fill": "#d4af37",
+            "text_fill": "#d5f5d2",
+            "label_x": 97,
+            "label_y": 51
+          }
+        ],
+        "ports": [
+          { "label": "USB-C", "x": 176, "y": 88, "width": 34, "height": 18, "radius": 3, "fill": "#bbc4cb", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 5.1 },
+          { "label": "USB3", "x": 176, "y": 112, "width": 34, "height": 18, "radius": 3, "fill": "#bbc4cb", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 5.2 },
+          { "label": "DP", "x": 176, "y": 136, "width": 34, "height": 18, "radius": 3, "fill": "#bbc4cb", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 5.2 },
+          { "label": "RJ45", "x": 176, "y": 160, "width": 34, "height": 22, "radius": 3, "fill": "#bbc4cb", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 5.0 },
+          { "label": "M.2", "x": 162, "y": 188, "width": 48, "height": 16, "radius": 3, "fill": "#8f969d", "stroke": "#646c73", "text_fill": "#eff4f8", "font_size": 5.0 }
+        ],
+        "power": [
+          { "label": "19V IN", "x": 30, "y": 246, "width": 42, "height": 22, "radius": 3, "fill": "#c5ccd2", "stroke": "#69727a", "text_fill": "#374151", "font_size": 5.1 },
+          { "label": "FAN HDR", "x": 78, "y": 246, "width": 44, "height": 22, "radius": 3, "fill": "#243b22", "stroke": "#4b7b46", "text_fill": "#d8f6d2", "font_size": 4.9 }
+        ],
+        "indicators": [
+          { "x": 188, "y": 266, "radius": 7, "fill": "#17311d", "stroke": "#4fe36f", "label": "PWR", "text_fill": "#d6f7d0" },
+          { "x": 206, "y": 266, "radius": 7, "fill": "#2c3217", "stroke": "#f8b72a", "label": "SOC", "text_fill": "#fef3c7" }
+        ],
+        "accessories": [
+          { "accessory_id": "jetson-csi-camera", "label": "CSI-A/B", "x": 144, "y": 208, "width": 64, "height": 14, "radius": 3 },
+          { "accessory_id": "jetson-can-transceiver", "label": "CAN FD", "x": 144, "y": 226, "width": 64, "height": 14, "radius": 3 },
+          { "accessory_id": "jetson-uart-header", "label": "UART", "x": 144, "y": 244, "width": 64, "height": 14, "radius": 3 }
+        ],
+        "footer_label": "Orin NX carrier: NVMe-ready, dual CSI and CAN/UART expansion",
+        "footer_text_fill": "#ddf7d8"
+      }
+    },
+    {
+      "id": "jetson-agx-orin",
+      "name": "NVIDIA Jetson AGX Orin",
+      "flash": "eMMC / NVMe",
+      "ram": "32 GB",
+      "connectivity": "10GbE + USB-C + CSI + Linux",
+      "visual_family": "jetson-sbc",
+      "chip_label": "AGX Orin",
+      "has_wifi": false,
+      "pin_count": 40,
+      "board_color": "#3b5d39",
+      "wiring_family": "jetson-40pin",
+      "accessory_profiles": ["jetson-csi-camera", "jetson-can-transceiver", "jetson-uart-header"],
+      "visual_layout": {
+        "module": {
+          "label": "Compute module",
+          "x": 62,
+          "y": 84,
+          "width": 114,
+          "height": 82,
+          "radius": 5,
+          "fill": "#101922",
+          "stroke": "#5f6872",
+          "text_fill": "#e7f5df",
+          "font_size": 7.4
+        },
+        "headers": [
+          {
+            "label": "40-pin control header",
+            "x": 44,
+            "y": 58,
+            "columns": 20,
+            "rows": 2,
+            "pitch_x": 5,
+            "pitch_y": 8,
+            "pin_width": 3.5,
+            "pin_height": 6,
+            "base_fill": "#111827",
+            "base_stroke": "#475569",
+            "pin_fill": "#d4af37",
+            "text_fill": "#d5f5d2",
+            "label_x": 100,
+            "label_y": 51
+          }
+        ],
+        "ports": [
+          { "label": "USB-C", "x": 176, "y": 84, "width": 34, "height": 18, "radius": 3, "fill": "#bbc4cb", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 5.1 },
+          { "label": "10GbE", "x": 176, "y": 108, "width": 34, "height": 20, "radius": 3, "fill": "#bbc4cb", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 5.0 },
+          { "label": "DP", "x": 176, "y": 134, "width": 34, "height": 18, "radius": 3, "fill": "#bbc4cb", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 5.2 },
+          { "label": "USB3", "x": 176, "y": 158, "width": 34, "height": 18, "radius": 3, "fill": "#bbc4cb", "stroke": "#7a8793", "text_fill": "#374151", "font_size": 5.2 },
+          { "label": "M.2 NVMe", "x": 150, "y": 186, "width": 60, "height": 16, "radius": 3, "fill": "#8f969d", "stroke": "#646c73", "text_fill": "#eff4f8", "font_size": 4.8 }
+        ],
+        "power": [
+          { "label": "DC LOCK", "x": 30, "y": 246, "width": 42, "height": 22, "radius": 3, "fill": "#c5ccd2", "stroke": "#69727a", "text_fill": "#374151", "font_size": 5.0 },
+          { "label": "PWR BTN", "x": 78, "y": 246, "width": 44, "height": 22, "radius": 3, "fill": "#243b22", "stroke": "#4b7b46", "text_fill": "#d8f6d2", "font_size": 4.9 }
+        ],
+        "indicators": [
+          { "x": 188, "y": 266, "radius": 7, "fill": "#17311d", "stroke": "#4fe36f", "label": "PWR", "text_fill": "#d6f7d0" },
+          { "x": 206, "y": 266, "radius": 7, "fill": "#2c3217", "stroke": "#f8b72a", "label": "NET", "text_fill": "#fef3c7" }
+        ],
+        "accessories": [
+          { "accessory_id": "jetson-csi-camera", "label": "CSI x4", "x": 140, "y": 208, "width": 68, "height": 14, "radius": 3 },
+          { "accessory_id": "jetson-can-transceiver", "label": "CAN FD", "x": 140, "y": 226, "width": 68, "height": 14, "radius": 3 },
+          { "accessory_id": "jetson-uart-header", "label": "UART DBG", "x": 140, "y": 244, "width": 68, "height": 14, "radius": 3 }
+        ],
+        "footer_label": "AGX Orin carrier: 10GbE, USB-C, NVMe and high-lane CSI expansion",
+        "footer_text_fill": "#ddf7d8"
+      }
+    },
+    {
+      "id": "stm32-nucleo",
+      "name": "STM32 Nucleo-F4",
+      "flash": "1 MB",
+      "ram": "192 KB",
+      "connectivity": "UART + SPI + I2C",
+      "visual_family": "stm32",
+      "chip_label": "STM32F4xx",
+      "has_wifi": false,
+      "pin_count": 16,
+      "board_color": "#1a2c4e",
+      "wiring_family": "stm32-nucleo"
+    },
+    {
+      "id": "generic-mcu",
+      "name": "Generic MCU",
+      "flash": "512 KB",
+      "ram": "64 KB",
+      "connectivity": "UART",
+      "visual_family": "generic",
+      "chip_label": "MCU",
+      "has_wifi": false,
+      "pin_count": 10,
+      "board_color": "#2d2d2d",
+      "wiring_family": "generic"
+    }
+  ]
+}

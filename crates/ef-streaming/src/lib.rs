@@ -122,6 +122,9 @@ impl StreamManager {
             Os::Ssh => {
                 anyhow::bail!("Streaming is not supported for SSH servers");
             }
+            Os::VirtualIot => {
+                anyhow::bail!("Streaming is not supported for Virtual IoT devices");
+            }
         };
 
         // 2. Create WebRTC peer

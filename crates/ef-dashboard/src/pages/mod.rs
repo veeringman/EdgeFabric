@@ -6,3 +6,4 @@ pub mod logs;
 pub mod overview;
 pub mod sessions;
 pub mod sessions_live;
+pub mod virtual_iot_designer;

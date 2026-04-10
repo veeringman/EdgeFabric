@@ -121,6 +121,31 @@ pub async fn delete(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Generic JSON PATCH
+pub async fn patch<B: Serialize, T: DeserializeOwned>(path: &str, body: &B) -> Result<T, String> {
+    let resp = Request::patch(&format!("{}{path}", base_url()))
+        .header("Authorization", &auth_header())
+        .header("Content-Type", "application/json")
+        .body(serde_json::to_string(body).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if resp.status() == 401 {
+        handle_unauthorized();
+        return Err("Session expired".into());
+    }
+
+    if !resp.ok() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("HTTP {status}: {body}"));
+    }
+
+    resp.json::<T>().await.map_err(|e| e.to_string())
+}
+
 /// Login — exchange API key for JWT (unauthed endpoint)
 pub async fn login(api_key: &str) -> Result<LoginResponse, String> {
     let resp = Request::post(&format!("{}/auth/login", base_url()))
@@ -197,6 +222,40 @@ pub struct Device {
     pub capabilities: serde_json::Value,
     pub last_heartbeat: Option<String>,
     pub created_at: Option<String>,
+}
+
+// -- Virtual IoT types --
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct VirtualIotConfigResponse {
+    pub config: VirtualIotConfig,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct VirtualIotConfig {
+    pub device_id: String,
+    pub controller_type: String,
+    pub enabled_sensors: serde_json::Value,
+    pub sim_rate_ms: i32,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct CreateVirtualIotRequest {
+    pub name: String,
+    pub controller_type: String,
+    pub region: String,
+    pub sim_rate_ms: i32,
+    pub enabled_sensors: Vec<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct UpdateVirtualIotConfigRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub controller_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled_sensors: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sim_rate_ms: Option<i32>,
 }
 
 #[derive(Deserialize, Clone, Debug, Default)]

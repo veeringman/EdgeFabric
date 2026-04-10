@@ -1,4 +1,5 @@
 mod api;
+mod board_config;
 mod components;
 mod pages;
 
@@ -14,6 +15,7 @@ use components::sidebar::Sidebar;
 use pages::{
     admin::AdminPage, devices::DevicesPage, jobs::JobsPage, login::LoginPage, logs::LogsPage,
     overview::OverviewPage, sessions::SessionsPage, sessions_live::LiveSessionsPage,
+    virtual_iot_designer::VirtualIotDesignerPage,
 };
 
 /// Global signal for mobile sidebar open/close.
@@ -49,6 +51,8 @@ fn App() -> impl IntoView {
                 <Route path=path!("/jobs") view=move || view! { <AuthGuard><Shell><JobsPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/logs") view=move || view! { <AuthGuard><Shell><LogsPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/admin") view=move || view! { <AuthGuard><Shell><AdminPage/></Shell></AuthGuard> }/>
+                <Route path=path!("/virtual-iot/new") view=move || view! { <AuthGuard><Shell><VirtualIotDesignerPage/></Shell></AuthGuard> }/>
+                <Route path=path!("/virtual-iot/edit") view=move || view! { <AuthGuard><Shell><VirtualIotDesignerPage/></Shell></AuthGuard> }/>
             </Routes>
         </Router>
     }

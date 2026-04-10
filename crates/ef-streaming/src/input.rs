@@ -58,6 +58,10 @@ async fn dispatch_input(
             tracing::debug!("Input relay not supported for SSH servers");
             Ok(())
         }
+        Os::VirtualIot => {
+            tracing::debug!("Input relay not supported for Virtual IoT devices");
+            Ok(())
+        }
     }
 }
 

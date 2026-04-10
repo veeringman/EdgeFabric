@@ -3,6 +3,7 @@ pub mod jobs;
 pub mod sessions;
 pub mod streaming;
 pub mod agent;
+pub mod virtual_iot;
 
 use axum::{Json, Router, extract::State, http::StatusCode, routing::{get, post, put}};
 use serde::Deserialize;
@@ -43,6 +44,9 @@ pub fn api_router() -> Router<AppState> {
         .route("/agent/devices", post(agent::register_device))
         .route("/agent/devices/{id}", axum::routing::delete(agent::deregister_device))
         .route("/agent/{agent_id}/commands", get(agent::poll_commands))
+        // Virtual IoT endpoints
+        .route("/devices/virtual-iot", post(virtual_iot::create_virtual_iot))
+        .route("/devices/{id}/virtual-iot/config", get(virtual_iot::get_virtual_iot_config).patch(virtual_iot::update_virtual_iot_config))
 }
 
 #[utoipa::path(get, path = "/health", tag = "health",

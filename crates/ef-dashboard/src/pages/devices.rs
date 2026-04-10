@@ -52,6 +52,7 @@ pub fn DevicesPage() -> impl IntoView {
                     <option value="android">"Android"</option>
                     <option value="ios">"iOS"</option>
                     <option value="iot">"IoT"</option>
+                    <option value="virtual_iot">"Virtual IoT"</option>
                 </select>
             </div>
             <div class="form-group">
@@ -65,6 +66,7 @@ pub fn DevicesPage() -> impl IntoView {
                 </select>
             </div>
             <button class="btn btn-ghost btn-sm" style="align-self: flex-end" on:click=do_refresh>"↻ Refresh"</button>
+            <a href="/virtual-iot/new" class="btn btn-primary btn-sm" style="align-self: flex-end">"+ New Virtual IoT"</a>
         </div>
 
         <div class="card">
@@ -100,9 +102,11 @@ fn DeviceTable(devices: Vec<Device>) -> impl IntoView {
                 <tbody>
                     {devices.into_iter().map(|d| {
                         let status = d.status.clone();
+                        let is_virtual_iot = d.os == "virtual_iot";
+                        let edit_link = format!("/virtual-iot/edit?edit={}", d.id);
                         view! {
                             <tr>
-                                <td><strong>{d.name}</strong></td>
+                                <td><strong>{if is_virtual_iot { view! { <a href={edit_link.clone()} title="Edit Virtual IoT config">{d.name.clone()}</a> }.into_any() } else { view! { {d.name.clone()} }.into_any() }}</strong></td>
                                 <td class="mono truncate">{d.serial.unwrap_or_else(|| "—".into())}</td>
                                 <td><DeviceOsIcon os=d.os.clone()/> " " {d.os.clone()}</td>
                                 <td>{d.os_version}</td>

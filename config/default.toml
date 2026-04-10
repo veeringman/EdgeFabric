@@ -35,7 +35,7 @@ recording_dir = "/var/lib/edgefabric/recordings"
 latency_target_ms = 200
 
 [agent]
-control_plane_url = "https://localhost:50051"
+control_plane_url = "http://192.168.29.78:6060"
 heartbeat_interval_seconds = 10
 device_scan_interval_seconds = 30
 agent_id = "agent-01"

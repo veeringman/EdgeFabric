@@ -18,7 +18,7 @@ use futures::{SinkExt, StreamExt};
 use serde_json::json;
 use std::process::Stdio;
 use std::sync::OnceLock;
-use tokio::io::AsyncBufReadExt;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 /// Resolve the ffmpeg binary path once (handles non-login shells missing /usr/local/bin).
 fn ffmpeg_path() -> &'static str {
@@ -36,6 +36,7 @@ pub async fn start_streaming_server(port: u16) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/ws/stream/{*serial}", get(ws_stream_handler))
         .route("/ws/logs/{*serial}", get(ws_logs_handler))
+        .route("/ws/ssh", get(ws_ssh_handler))
         .route("/health", get(health));
 
     let addr = format!("0.0.0.0:{port}");
@@ -759,9 +760,18 @@ fn shell_escape(s: &str) -> String {
 
 // ── IoT serial helpers ────────────────────────────────────────────
 
-/// Stream IoT serial console as text WebSocket frames.
+/// Stream IoT serial console as raw bytes over WebSocket, enabling full
+/// terminal emulation (vi, top, etc.) via xterm.js on the client side.
 /// Cross-platform: Linux (`stty -F` + `cat`), macOS (`stty -f` + `cat`),
 /// Windows (PowerShell `[System.IO.Ports.SerialPort]`).
+///
+/// Protocol:
+///   Server → Client: binary frames (raw terminal output bytes)
+///   Client → Server:
+///     - `{"type":"terminal_input","data":"..."}` — raw keystrokes from xterm.js
+///     - `{"type":"terminal_resize","cols":N,"rows":M}` — terminal resize
+///     - `{"type":"send_text","data":"..."}` — emergency command (fallback input)
+///     - `{"type":"stop_stream"}` or `{"type":"stop"}` — disconnect
 async fn run_iot_serial_stream(
     mut ws_tx: futures::stream::SplitSink<WebSocket, Message>,
     mut ws_rx: futures::stream::SplitStream<WebSocket>,
@@ -772,22 +782,48 @@ async fn run_iot_serial_stream(
     let port_for_input = serial_port.to_string();
     let is_windows = cfg!(target_os = "windows");
 
+    // Channel for sending data to the serial port from the WS input handler
+    let (serial_input_tx, mut serial_input_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(256);
+
+    // Input handler task — reads WS messages and forwards to serial
+    let input_tx = serial_input_tx.clone();
     tokio::spawn(async move {
         while let Some(Ok(msg)) = ws_rx.next().await {
             match msg {
                 Message::Text(t) => {
                     let text = t.to_string();
-                    if text.contains("stop_stream") || text.contains("stop") {
+                    if text.contains("stop_stream") || text.contains("\"stop\"") {
                         let _ = stop_tx2.send(true);
                         break;
                     }
                     if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if v.get("type").and_then(|t| t.as_str()) == Some("send_text") {
-                            if let Some(data) = v.get("data").and_then(|d| d.as_str()) {
-                                serial_write(&port_for_input, data, is_windows).await;
+                        match v.get("type").and_then(|t| t.as_str()) {
+                            Some("terminal_input") => {
+                                // Raw keystrokes from xterm.js
+                                if let Some(data) = v.get("data").and_then(|d| d.as_str()) {
+                                    let _ = input_tx.send(data.as_bytes().to_vec()).await;
+                                }
                             }
+                            Some("send_text") => {
+                                // Emergency command input (fallback)
+                                if let Some(data) = v.get("data").and_then(|d| d.as_str()) {
+                                    let _ = input_tx.send(data.as_bytes().to_vec()).await;
+                                }
+                            }
+                            Some("terminal_resize") => {
+                                // Terminal resize — send stty command to IoT device
+                                let cols = v.get("cols").and_then(|c| c.as_u64()).unwrap_or(80);
+                                let rows = v.get("rows").and_then(|r| r.as_u64()).unwrap_or(24);
+                                let resize_cmd = format!("stty cols {} rows {}\r\n", cols, rows);
+                                let _ = input_tx.send(resize_cmd.into_bytes()).await;
+                            }
+                            _ => {}
                         }
                     }
+                }
+                Message::Binary(data) => {
+                    // Raw binary input from client
+                    let _ = input_tx.send(data.to_vec()).await;
                 }
                 Message::Close(_) => { let _ = stop_tx2.send(true); break; }
                 _ => {}
@@ -797,8 +833,8 @@ async fn run_iot_serial_stream(
 
     let mut stop_rx = stop_tx.subscribe();
 
-    // Spawn platform-appropriate serial reader
-    let mut child = match spawn_serial_reader(serial_port).await {
+    // Spawn platform-appropriate serial reader/writer
+    let mut child = match spawn_serial_rw(serial_port).await {
         Ok(c) => c,
         Err(e) => {
             let _ = ws_tx.send(Message::Text(
@@ -809,26 +845,65 @@ async fn run_iot_serial_stream(
     };
 
     let stdout = child.stdout.take().unwrap();
-    let reader = tokio::io::BufReader::new(stdout);
-    let mut lines = reader.lines();
-    let mut line_count: u64 = 0;
+    let stdin = child.stdin.take();
+    let mut byte_count: u64 = 0;
+
+    // Writer task: forward serial_input_rx → child stdin (serial port)
+    let write_stop = stop_tx.clone();
+    if let Some(mut stdin) = stdin {
+        tokio::spawn(async move {
+            let mut write_stop_rx = write_stop.subscribe();
+            loop {
+                tokio::select! {
+                    data = serial_input_rx.recv() => {
+                        match data {
+                            Some(bytes) => {
+                                if stdin.write_all(&bytes).await.is_err() { break; }
+                                let _ = stdin.flush().await;
+                            }
+                            None => break,
+                        }
+                    }
+                    _ = write_stop_rx.changed() => break,
+                }
+            }
+        });
+    } else {
+        // Fallback for platforms where stdin isn't piped: use direct serial write
+        tokio::spawn(async move {
+            let mut write_stop_rx = write_stop.subscribe();
+            loop {
+                tokio::select! {
+                    data = serial_input_rx.recv() => {
+                        match data {
+                            Some(bytes) => {
+                                let data_str = String::from_utf8_lossy(&bytes).to_string();
+                                serial_write(&port_for_input, &data_str, is_windows).await;
+                            }
+                            None => break,
+                        }
+                    }
+                    _ = write_stop_rx.changed() => break,
+                }
+            }
+        });
+    }
+
+    // Reader task: read raw bytes from serial stdout → WS binary frames
+    let mut reader = tokio::io::BufReader::with_capacity(4096, stdout);
+    let mut buf = [0u8; 4096];
 
     loop {
         tokio::select! {
-            line = lines.next_line() => {
-                match line {
-                    Ok(Some(text)) => {
-                        line_count += 1;
-                        let msg = json!({
-                            "type": "serial_data",
-                            "line": line_count,
-                            "data": text,
-                        });
-                        if ws_tx.send(Message::Text(msg.to_string().into())).await.is_err() {
+            n = reader.read(&mut buf) => {
+                match n {
+                    Ok(0) => break, // EOF
+                    Ok(n) => {
+                        byte_count += n as u64;
+                        if ws_tx.send(Message::Binary(buf[..n].to_vec().into())).await.is_err() {
                             break;
                         }
                     }
-                    Ok(None) => break,
                     Err(_) => break,
                 }
             }
@@ -837,45 +912,90 @@ async fn run_iot_serial_stream(
     }
 
     let _ = child.kill().await;
-    tracing::info!(serial_port, line_count, "IoT serial stream ended");
+    tracing::info!(serial_port, byte_count, "IoT terminal stream ended");
 }
 
-/// Spawn a platform-appropriate process to read from a serial port.
-/// Linux: `stty -F <port> 115200 raw -echo` then `cat <port>`
-/// macOS: `stty -f <port> 115200 raw -echo` then `cat <port>`
-/// Windows: PowerShell script using `[System.IO.Ports.SerialPort]`
-async fn spawn_serial_reader(serial_port: &str) -> Result<tokio::process::Child, std::io::Error> {
+/// Spawn a platform-appropriate process to read/write a serial port.
+/// Returns a child with both stdout (read) and stdin (write) piped.
+/// Linux: `stty -F <port> 115200 raw -echo` then `socat` for bidirectional I/O.
+/// macOS: `stty -f <port> 115200 raw -echo` then `socat`.
+/// Windows: PowerShell `[System.IO.Ports.SerialPort]` with bidirectional streaming.
+async fn spawn_serial_rw(serial_port: &str) -> Result<tokio::process::Child, std::io::Error> {
     if cfg!(target_os = "windows") {
-        // Windows: use PowerShell to read serial output line by line
+        // Windows: PowerShell bidirectional serial streaming (raw bytes via stdin/stdout)
         let ps_script = format!(
             r#"$port = New-Object System.IO.Ports.SerialPort '{port}', 115200, 'None', 8, 'One'
-$port.ReadTimeout = -1
+$port.ReadTimeout = 100
 $port.Open()
-try {{ while ($true) {{ $line = $port.ReadLine(); Write-Output $line }} }}
-finally {{ $port.Close() }}"#,
+$buf = New-Object byte[] 4096
+# Reader thread: serial → stdout
+$reader = [System.Threading.Thread]::new({{ while ($true) {{
+    try {{ $n = $port.Read($buf, 0, $buf.Length); if ($n -gt 0) {{ [Console]::OpenStandardOutput().Write($buf, 0, $n); [Console]::OpenStandardOutput().Flush() }} }}
+    catch {{ Start-Sleep -Milliseconds 10 }}
+}} }})
+$reader.IsBackground = $true
+$reader.Start()
+# Writer: stdin → serial
+$stdinBuf = New-Object byte[] 4096
+$stdin = [Console]::OpenStandardInput()
+while ($true) {{
+    $n = $stdin.Read($stdinBuf, 0, $stdinBuf.Length)
+    if ($n -le 0) {{ break }}
+    $port.Write($stdinBuf, 0, $n)
+}}
+$port.Close()"#,
             port = serial_port,
         );
         tokio::process::Command::new("powershell")
             .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .kill_on_drop(true)
             .spawn()
     } else {
-        // Linux / macOS: configure with stty then `cat`
+        // Linux / macOS: configure with stty then use socat for bidirectional I/O
         let stty_flag = if cfg!(target_os = "macos") { "-f" } else { "-F" };
         let _ = tokio::process::Command::new("stty")
-            .args([stty_flag, serial_port, "115200", "raw", "-echo"])
+            .args([stty_flag, serial_port, "115200", "raw", "-echo", "-echoe", "-echok"])
             .output()
             .await;
 
-        tokio::process::Command::new("cat")
-            .arg(serial_port)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .spawn()
+        // Try socat first (proper bidirectional serial)
+        if which_exists("socat").await {
+            tokio::process::Command::new("socat")
+                .args([
+                    "-,rawer",
+                    &format!("file:{},b115200,raw,echo=0,crnl", serial_port),
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .kill_on_drop(true)
+                .spawn()
+        } else {
+            // Fallback: cat for reading (write via direct file write)
+            tokio::process::Command::new("cat")
+                .arg(serial_port)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .kill_on_drop(true)
+                .spawn()
+        }
     }
+}
+
+/// Check if a command exists on PATH.
+async fn which_exists(cmd: &str) -> bool {
+    tokio::process::Command::new("which")
+        .arg(cmd)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 /// Write data to a serial port (cross-platform).
@@ -925,4 +1045,252 @@ fn parse_iot_log_line(line: &str) -> serde_json::Value {
         else { "info" };
 
     json!({ "type": "log", "timestamp": "", "level": level, "tag": "serial", "message": trimmed })
+}
+
+// ── SSH terminal streaming ────────────────────────────────────────
+
+/// WebSocket upgrade handler for SSH terminal sessions.
+/// Query parameters: `?host=IP&port=22`
+/// The actual SSH credentials are sent from the client after the WebSocket is
+/// established (never in the URL), keeping passwords out of logs and URLs.
+///
+/// Protocol:
+///   Client → Server:
+///     `{"type":"ssh_auth","username":"...","password":"..."}` — start SSH session
+///     `{"type":"ssh_auth","username":"...","key":"..."}` — SSH key auth
+///     `{"type":"terminal_input","data":"..."}` — raw keystrokes from xterm.js
+///     `{"type":"terminal_resize","cols":N,"rows":M}` — terminal resize (SIGWINCH)
+///     `{"type":"send_text","data":"..."}` — emergency command
+///   Server → Client:
+///     binary frames — raw terminal output (PTY bytes)
+///     `{"type":"ssh_ready"}` — shell session established
+///     `{"type":"ssh_auth_required","host":"...","port":N}` — prompt for credentials
+///     `{"type":"error","message":"..."}` — error
+async fn ws_ssh_handler(
+    ws: WebSocketUpgrade,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let host = params.get("host").cloned().unwrap_or_default();
+    let port: u16 = params.get("port").and_then(|p| p.parse().ok()).unwrap_or(22);
+    tracing::info!(%host, %port, "SSH terminal WebSocket upgrade");
+    ws.on_upgrade(move |socket| handle_ssh_session(socket, host, port))
+}
+
+async fn handle_ssh_session(socket: WebSocket, host: String, port: u16) {
+    let (mut ws_tx, mut ws_rx) = socket.split();
+
+    if host.is_empty() {
+        let _ = ws_tx.send(Message::Text(
+            json!({"type":"error","message":"Missing host parameter"}).to_string().into()
+        )).await;
+        return;
+    }
+
+    // Ask client for credentials
+    let _ = ws_tx.send(Message::Text(
+        json!({"type":"ssh_auth_required","host":&host,"port":port}).to_string().into()
+    )).await;
+
+    // Wait for auth message from client
+    let (username, auth_method) = loop {
+        match ws_rx.next().await {
+            Some(Ok(Message::Text(t))) => {
+                let text = t.to_string();
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if v.get("type").and_then(|t| t.as_str()) == Some("ssh_auth") {
+                        let user = v.get("username").and_then(|u| u.as_str()).unwrap_or("root").to_string();
+                        if let Some(pw) = v.get("password").and_then(|p| p.as_str()) {
+                            break (user, SshAuth::Password(pw.to_string()));
+                        } else if let Some(key) = v.get("key").and_then(|k| k.as_str()) {
+                            break (user, SshAuth::Key(key.to_string()));
+                        } else {
+                            let _ = ws_tx.send(Message::Text(
+                                json!({"type":"error","message":"Missing password or key"}).to_string().into()
+                            )).await;
+                            return;
+                        }
+                    }
+                }
+            }
+            Some(Ok(Message::Close(_))) | None => return,
+            _ => continue,
+        }
+    };
+
+    tracing::info!(%host, %port, %username, "SSH auth received, spawning ssh process");
+
+    // Spawn ssh subprocess using system ssh client (universally available)
+    // -tt forces PTY allocation, -o options prevent host key prompts in automation
+    let mut cmd = tokio::process::Command::new("ssh");
+    cmd.args([
+        "-tt",
+        "-o", "StrictHostKeyChecking=accept-new",
+        "-o", "ServerAliveInterval=15",
+        "-o", "ServerAliveCountMax=3",
+        "-o", "ConnectTimeout=10",
+        "-p", &port.to_string(),
+        &format!("{username}@{host}"),
+    ]);
+
+    match &auth_method {
+        SshAuth::Password(pw) => {
+            // Use sshpass for password auth (requires sshpass on the agent)
+            cmd = tokio::process::Command::new("sshpass");
+            cmd.args(["-p", pw, "ssh",
+                "-tt",
+                "-o", "StrictHostKeyChecking=accept-new",
+                "-o", "ServerAliveInterval=15",
+                "-o", "ServerAliveCountMax=3",
+                "-o", "ConnectTimeout=10",
+                "-p", &port.to_string(),
+                &format!("{username}@{host}"),
+            ]);
+        }
+        SshAuth::Key(key_data) => {
+            // Write key to a temporary file
+            let key_path = format!("/tmp/ef-ssh-key-{}", uuid::Uuid::new_v4().simple());
+            if let Err(e) = tokio::fs::write(&key_path, key_data.as_bytes()).await {
+                let _ = ws_tx.send(Message::Text(
+                    json!({"type":"error","message":format!("Failed to write key: {e}")}).to_string().into()
+                )).await;
+                return;
+            }
+            let _ = tokio::process::Command::new("chmod")
+                .args(["600", &key_path])
+                .status()
+                .await;
+            cmd.args(["-i", &key_path]);
+        }
+    }
+
+    let mut child = match cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = ws_tx.send(Message::Text(
+                json!({"type":"error","message":format!("Failed to spawn ssh: {e}")}).to_string().into()
+            )).await;
+            return;
+        }
+    };
+
+    let _ = ws_tx.send(Message::Text(
+        json!({"type":"ssh_ready"}).to_string().into()
+    )).await;
+
+    let (stop_tx, _) = tokio::sync::watch::channel(false);
+    let stop_tx2 = stop_tx.clone();
+
+    // Channel for feeding data to ssh stdin
+    let (input_tx, mut input_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(256);
+
+    // WS → ssh stdin handler
+    let input_tx_clone = input_tx.clone();
+    tokio::spawn(async move {
+        while let Some(Ok(msg)) = ws_rx.next().await {
+            match msg {
+                Message::Text(t) => {
+                    let text = t.to_string();
+                    if text.contains("stop_stream") || text.contains("\"stop\"") {
+                        let _ = stop_tx2.send(true);
+                        break;
+                    }
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                        match v.get("type").and_then(|t| t.as_str()) {
+                            Some("terminal_input") | Some("send_text") => {
+                                if let Some(data) = v.get("data").and_then(|d| d.as_str()) {
+                                    let _ = input_tx_clone.send(data.as_bytes().to_vec()).await;
+                                }
+                            }
+                            Some("terminal_resize") => {
+                                // Resize is handled by the PTY automatically for SSH
+                                // (ssh protocol WINDOW_CHANGE). We can't easily inject it
+                                // when using the ssh command-line client, but the remote
+                                // side will adapt on next output.
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Message::Binary(data) => {
+                    let _ = input_tx_clone.send(data.to_vec()).await;
+                }
+                Message::Close(_) => { let _ = stop_tx2.send(true); break; }
+                _ => {}
+            }
+        }
+    });
+
+    // stdin writer task
+    let stop_for_writer = stop_tx.clone();
+    if let Some(mut stdin) = child.stdin.take() {
+        tokio::spawn(async move {
+            let mut stop_rx = stop_for_writer.subscribe();
+            loop {
+                tokio::select! {
+                    data = input_rx.recv() => {
+                        match data {
+                            Some(bytes) => {
+                                if stdin.write_all(&bytes).await.is_err() { break; }
+                                let _ = stdin.flush().await;
+                            }
+                            None => break,
+                        }
+                    }
+                    _ = stop_rx.changed() => break,
+                }
+            }
+        });
+    }
+
+    // stdout reader → WS binary frames
+    let mut stop_rx = stop_tx.subscribe();
+    if let Some(stdout) = child.stdout.take() {
+        let mut reader = tokio::io::BufReader::with_capacity(4096, stdout);
+        let mut buf = [0u8; 4096];
+        let mut byte_count: u64 = 0;
+
+        loop {
+            tokio::select! {
+                n = reader.read(&mut buf) => {
+                    match n {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            byte_count += n as u64;
+                            if ws_tx.send(Message::Binary(buf[..n].to_vec().into())).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+                _ = stop_rx.changed() => break,
+            }
+        }
+
+        tracing::info!(%host, byte_count, "SSH session ended");
+    }
+
+    let _ = child.kill().await;
+
+    // Clean up temporary key file if used
+    if let SshAuth::Key(_) = &auth_method {
+        // The key file path was generated with a UUID; try to clean up
+        // (best effort — file may already be gone)
+        let pattern = "/tmp/ef-ssh-key-*";
+        let _ = tokio::process::Command::new("sh")
+            .args(["-c", &format!("rm -f {pattern}")])
+            .output()
+            .await;
+    }
+}
+
+enum SshAuth {
+    Password(String),
+    Key(String),
 }

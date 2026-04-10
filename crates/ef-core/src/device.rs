@@ -9,6 +9,7 @@ pub enum Os {
     Android,
     Ios,
     Iot,
+    Ssh,
 }
 
 impl Os {
@@ -17,6 +18,7 @@ impl Os {
             Self::Android => "android",
             Self::Ios => "ios",
             Self::Iot => "iot",
+            Self::Ssh => "ssh",
         }
     }
 }
@@ -84,6 +86,7 @@ mod tests {
             (Os::Android, "android"),
             (Os::Ios, "ios"),
             (Os::Iot, "iot"),
+            (Os::Ssh, "ssh"),
         ] {
             assert_eq!(os.as_str(), expected);
         }

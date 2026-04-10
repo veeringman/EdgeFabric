@@ -1,6 +1,7 @@
 use chrono::Utc;
 use ef_core::device::{Device, DeviceKind, DeviceStatus, Os};
 use ef_core::error::Result;
+use std::time::Duration;
 use tokio::process::Command;
 use tracing::info;
 use uuid::Uuid;
@@ -184,19 +185,64 @@ impl DeviceDiscovery {
         Ok(devices)
     }
 
+    /// Scan the local network for SSH servers (port 22) and register them
+    /// as connectable terminal devices.
+    ///
+    /// Discovery methods (in order):
+    ///   1. mDNS `_ssh._tcp` service browse (Avahi / dns-sd / Bonjour)
+    ///   2. ARP table scan + TCP port-22 probe for nearby hosts
+    ///
+    /// Each discovered host becomes an `Os::Ssh` device whose `serial` field
+    /// holds `user@host:port` (default user `root`, port `22`).
+    pub async fn scan_ssh() -> Result<Vec<Device>> {
+        info!("Scanning for SSH servers on the network...");
+
+        let mut all = Vec::new();
+
+        // ── mDNS discovery ────────────────────────────────────────
+        all.extend(scan_ssh_mdns().await);
+
+        // ── ARP + port probe (dedup against mDNS results) ────────
+        let arp_hosts = scan_ssh_arp_probe().await;
+        let known_ips: std::collections::HashSet<String> = all
+            .iter()
+            .filter_map(|d| {
+                d.serial
+                    .as_ref()
+                    .and_then(|s| s.split('@').nth(1))
+                    .map(|hp| hp.split(':').next().unwrap_or("").to_string())
+            })
+            .collect();
+
+        for dev in arp_hosts {
+            let ip = dev.serial.as_ref()
+                .and_then(|s| s.split('@').nth(1))
+                .map(|hp| hp.split(':').next().unwrap_or("").to_string())
+                .unwrap_or_default();
+            if !known_ips.contains(&ip) {
+                all.push(dev);
+            }
+        }
+
+        info!(count = all.len(), "SSH scan complete");
+        Ok(all)
+    }
+
     /// Run all platform scanners and return combined results.
     pub async fn scan_all() -> Result<Vec<Device>> {
-        let (adb, ios, iot, sims) = tokio::join!(
+        let (adb, ios, iot, sims, ssh) = tokio::join!(
             Self::scan_adb(),
             Self::scan_ios(),
             Self::scan_iot(),
             Self::scan_simulators(),
+            Self::scan_ssh(),
         );
 
         let mut all = adb.unwrap_or_default();
         all.extend(ios.unwrap_or_default());
         all.extend(iot.unwrap_or_default());
         all.extend(sims.unwrap_or_default());
+        all.extend(ssh.unwrap_or_default());
 
         info!(total = all.len(), "Full device scan complete");
         Ok(all)
@@ -836,4 +882,248 @@ fn parse_simctl_output(stdout: &str) -> Vec<Device> {
         }
     }
     devices
+}
+
+// ── SSH server discovery ──────────────────────────────────────────
+
+/// Discover SSH servers via mDNS (`_ssh._tcp`).
+/// Uses `avahi-browse` on Linux, `dns-sd` on macOS, Bonjour `dns-sd` on Windows.
+async fn scan_ssh_mdns() -> Vec<Device> {
+    let mut devices = Vec::new();
+
+    // Try avahi-browse (Linux)
+    if let Ok(Ok(out)) = tokio::time::timeout(
+        Duration::from_secs(5),
+        Command::new("avahi-browse")
+            .args(["-t", "-r", "-p", "_ssh._tcp"])
+            .output(),
+    ).await {
+        if out.status.success() {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            devices.extend(parse_ssh_avahi_output(&stdout));
+            if !devices.is_empty() {
+                return devices;
+            }
+        }
+    }
+
+    // Fallback: dns-sd (macOS / Windows with Bonjour)
+    if let Ok(Ok(out)) = tokio::time::timeout(
+        Duration::from_secs(3),
+        Command::new("dns-sd")
+            .args(["-Z", "_ssh._tcp", "local."])
+            .kill_on_drop(true)
+            .output(),
+    ).await {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        devices.extend(parse_ssh_dns_sd_output(&stdout));
+    }
+
+    devices
+}
+
+/// Parse `avahi-browse -t -r -p _ssh._tcp` output for SSH servers.
+/// Resolved lines: `=;eth0;IPv4;hostname;_ssh._tcp;local;hostname.local;192.168.1.100;22;`
+fn parse_ssh_avahi_output(stdout: &str) -> Vec<Device> {
+    let mut devices = Vec::new();
+    for line in stdout.lines() {
+        let fields: Vec<&str> = line.split(';').collect();
+        if fields.len() >= 9 && fields[0] == "=" {
+            let hostname = fields[3];
+            let ip = fields[7];
+            let port: u16 = fields[8].parse().unwrap_or(22);
+
+            // Skip localhost
+            if ip == "127.0.0.1" || ip == "::1" { continue; }
+
+            // serial = "root@ip:port" — user will be prompted at connection time
+            let serial = format!("root@{ip}:{port}");
+            let name = if hostname.is_empty() || hostname == ip {
+                format!("SSH Server ({ip})")
+            } else {
+                format!("{hostname} ({ip})")
+            };
+
+            devices.push(Device {
+                id: Uuid::new_v4(),
+                name,
+                serial: Some(serial),
+                os: Os::Ssh,
+                os_version: String::new(),
+                kind: DeviceKind::Real,
+                status: DeviceStatus::Available,
+                region: "local".into(),
+                capabilities: vec!["ssh".into(), "terminal".into()],
+                registered_at: Utc::now(),
+                last_heartbeat: Some(Utc::now()),
+            });
+        }
+    }
+    devices
+}
+
+/// Parse `dns-sd -Z _ssh._tcp local.` output for SSH servers.
+fn parse_ssh_dns_sd_output(stdout: &str) -> Vec<Device> {
+    let mut devices = Vec::new();
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.contains("SRV") || line.contains("_ssh") {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if let Some(host) = parts.last() {
+                let host = host.trim_end_matches('.');
+                if host.is_empty() || host == "." { continue; }
+
+                let port: u16 = parts.iter().rev().nth(1)
+                    .and_then(|p| p.parse().ok())
+                    .unwrap_or(22);
+
+                let serial = format!("root@{host}:{port}");
+                devices.push(Device {
+                    id: Uuid::new_v4(),
+                    name: format!("{host} (SSH)"),
+                    serial: Some(serial),
+                    os: Os::Ssh,
+                    os_version: String::new(),
+                    kind: DeviceKind::Real,
+                    status: DeviceStatus::Available,
+                    region: "local".into(),
+                    capabilities: vec!["ssh".into(), "terminal".into()],
+                    registered_at: Utc::now(),
+                    last_heartbeat: Some(Utc::now()),
+                });
+            }
+        }
+    }
+    devices
+}
+
+/// Discover SSH servers by reading the ARP table and probing port 22.
+/// This catches hosts that don't advertise via mDNS.
+async fn scan_ssh_arp_probe() -> Vec<Device> {
+    let arp_hosts = read_arp_table().await;
+    if arp_hosts.is_empty() {
+        return vec![];
+    }
+
+    info!(candidates = arp_hosts.len(), "Probing ARP hosts for SSH (port 22)");
+
+    // Probe hosts concurrently with a reasonable concurrency limit
+    let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(32));
+    let mut handles = Vec::new();
+
+    for (ip, hostname) in arp_hosts {
+        let permit = sem.clone();
+        handles.push(tokio::spawn(async move {
+            let _permit = permit.acquire().await;
+            if probe_tcp_port(&ip, 22, Duration::from_millis(500)).await {
+                // Try to read SSH banner for version info
+                let version = read_ssh_banner(&ip, 22).await.unwrap_or_default();
+                let name = if hostname.is_empty() || hostname == "?" {
+                    format!("SSH Server ({ip})")
+                } else {
+                    format!("{hostname} ({ip})")
+                };
+                let serial = format!("root@{ip}:22");
+                Some(Device {
+                    id: Uuid::new_v4(),
+                    name,
+                    serial: Some(serial),
+                    os: Os::Ssh,
+                    os_version: version,
+                    kind: DeviceKind::Real,
+                    status: DeviceStatus::Available,
+                    region: "local".into(),
+                    capabilities: vec!["ssh".into(), "terminal".into()],
+                    registered_at: Utc::now(),
+                    last_heartbeat: Some(Utc::now()),
+                })
+            } else {
+                None
+            }
+        }));
+    }
+
+    let mut devices = Vec::new();
+    for handle in handles {
+        if let Ok(Some(dev)) = handle.await {
+            devices.push(dev);
+        }
+    }
+
+    info!(count = devices.len(), "ARP SSH probe complete");
+    devices
+}
+
+/// Read the ARP table and return (ip, hostname) pairs.
+/// Cross-platform: `arp -a` works on Linux, macOS, and Windows.
+async fn read_arp_table() -> Vec<(String, String)> {
+    let output = match Command::new("arp").arg("-a").output().await {
+        Ok(o) if o.status.success() => o,
+        _ => return vec![],
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut hosts = Vec::new();
+
+    for line in stdout.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 2 { continue; }
+
+        // Linux/macOS: "hostname (192.168.1.x) at aa:bb:cc:dd:ee:ff ..."
+        // Windows:     "  192.168.1.x  aa-bb-cc-dd-ee-ff  dynamic"
+        let (hostname, ip) = if let Some(paren_ip) = parts.iter().find(|p| p.starts_with('(') && p.ends_with(')')) {
+            let ip = paren_ip.trim_start_matches('(').trim_end_matches(')').to_string();
+            let name = if parts[0].starts_with('(') { String::new() } else { parts[0].to_string() };
+            (name, ip)
+        } else if !parts.is_empty() && parts[0].contains('.') {
+            (String::new(), parts[0].to_string())
+        } else {
+            continue;
+        };
+
+        // Skip broadcast / multicast / localhost
+        if ip.starts_with("224.") || ip.starts_with("255.") || ip.starts_with("239.")
+            || ip == "127.0.0.1" || ip.ends_with(".255")
+        {
+            continue;
+        }
+
+        if ip.split('.').count() == 4 && ip.split('.').all(|o| o.parse::<u8>().is_ok()) {
+            hosts.push((ip, hostname));
+        }
+    }
+
+    hosts
+}
+
+/// Attempt a TCP connection to check if a port is open.
+async fn probe_tcp_port(host: &str, port: u16, timeout: Duration) -> bool {
+    let addr = format!("{host}:{port}");
+    tokio::time::timeout(timeout, tokio::net::TcpStream::connect(&addr))
+        .await
+        .is_ok_and(|r| r.is_ok())
+}
+
+/// Read the SSH version banner (first line sent by an SSH server).
+/// Returns something like "SSH-2.0-OpenSSH_9.6" or empty string on failure.
+async fn read_ssh_banner(host: &str, port: u16) -> Option<String> {
+    let addr = format!("{host}:{port}");
+    let stream = tokio::time::timeout(
+        Duration::from_millis(500),
+        tokio::net::TcpStream::connect(&addr),
+    ).await.ok()?.ok()?;
+
+    let mut reader = tokio::io::BufReader::new(stream);
+    let mut banner = String::new();
+    tokio::time::timeout(
+        Duration::from_millis(500),
+        tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut banner),
+    ).await.ok()?.ok()?;
+
+    let banner = banner.trim().to_string();
+    if banner.starts_with("SSH-") {
+        Some(banner)
+    } else {
+        None
+    }
 }

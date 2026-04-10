@@ -37,7 +37,7 @@ services:
 
   # ── NATS ────────────────────────────────────────────────────────
   nats:
-    image: nats:2-linux
+    image: nats:2-alpine
     ports:
       - "4222:4222"   # client
       - "8222:8222"   # monitoring

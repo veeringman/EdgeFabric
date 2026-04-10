@@ -55,6 +55,7 @@ impl CommandEngine {
             Os::Android => adb::AdbDriver::install(serial, app_path).await,
             Os::Ios => ios::IosDriver::install(serial, app_path).await,
             Os::Iot => iot::IotDriver::scp_push(serial, "root", app_path, "/tmp/app").await,
+            Os::Ssh => iot::IotDriver::scp_push(serial, "root", app_path, "/tmp/app").await,
         }
     }
 
@@ -71,6 +72,7 @@ impl CommandEngine {
                     exit_code: 0,
                 }),
             Os::Iot => iot::IotDriver::ssh_exec(serial, "root", &["rm", "-f", package]).await,
+            Os::Ssh => iot::IotDriver::ssh_exec(serial, "root", &["rm", "-f", package]).await,
         }
     }
 
@@ -88,6 +90,9 @@ impl CommandEngine {
             (Os::Iot, _) => Err(EdgeFabricError::Internal(
                 "IoT devices do not support screenshots".into(),
             )),
+            (Os::Ssh, _) => Err(EdgeFabricError::Internal(
+                "SSH servers do not support screenshots".into(),
+            )),
         }
     }
 
@@ -104,6 +109,9 @@ impl CommandEngine {
             Os::Ios => ios::IosDriver::tap(serial, x as f64, y as f64).await,
             Os::Iot => Err(EdgeFabricError::Internal(
                 "IoT devices do not support tap input".into(),
+            )),
+            Os::Ssh => Err(EdgeFabricError::Internal(
+                "SSH servers do not support tap input".into(),
             )),
         }
     }
@@ -137,6 +145,9 @@ impl CommandEngine {
             Os::Iot => Err(EdgeFabricError::Internal(
                 "IoT devices do not support swipe input".into(),
             )),
+            Os::Ssh => Err(EdgeFabricError::Internal(
+                "SSH servers do not support swipe input".into(),
+            )),
         }
     }
 
@@ -154,6 +165,9 @@ impl CommandEngine {
             Os::Iot => Err(EdgeFabricError::Internal(
                 "IoT devices do not support key input".into(),
             )),
+            Os::Ssh => Err(EdgeFabricError::Internal(
+                "SSH servers do not support key input".into(),
+            )),
         }
     }
 
@@ -168,6 +182,9 @@ impl CommandEngine {
             Os::Ios => ios::IosDriver::input_text(serial, text).await,
             Os::Iot => Err(EdgeFabricError::Internal(
                 "IoT devices do not support text input".into(),
+            )),
+            Os::Ssh => Err(EdgeFabricError::Internal(
+                "SSH servers do not support text input".into(),
             )),
         }
     }
@@ -187,6 +204,11 @@ impl CommandEngine {
                 Ok(output.stdout)
             }
             Os::Iot => {
+                let output = iot::IotDriver::journal_logs(serial, "root", lines).await?;
+                Ok(output.stdout)
+            }
+            Os::Ssh => {
+                // SSH servers: fetch last N lines via ssh command
                 let output = iot::IotDriver::journal_logs(serial, "root", lines).await?;
                 Ok(output.stdout)
             }
@@ -221,6 +243,11 @@ impl CommandEngine {
                 Ok(())
             }
             (Os::Iot, _) => {
+                iot::IotDriver::reboot(serial, "root").await?;
+                Ok(())
+            }
+            (Os::Ssh, _) => {
+                // SSH servers: reboot via ssh command
                 iot::IotDriver::reboot(serial, "root").await?;
                 Ok(())
             }

@@ -40,9 +40,9 @@ function Write-Err   { param($msg) Write-Host "[ERROR] $msg" -ForegroundColor Re
 function Get-AgentProcess {
     $procs = Get-Process -Name "ef-agent" -ErrorAction SilentlyContinue
     if (-not $procs -and (Test-Path $PidFile)) {
-        $pid = Get-Content $PidFile -ErrorAction SilentlyContinue
-        if ($pid) {
-            $procs = Get-Process -Id $pid -ErrorAction SilentlyContinue
+        $savedPid = Get-Content $PidFile -ErrorAction SilentlyContinue
+        if ($savedPid) {
+            $procs = Get-Process -Id $savedPid -ErrorAction SilentlyContinue
         }
     }
     return $procs

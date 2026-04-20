@@ -9,6 +9,7 @@
 pub mod adb;
 pub mod ios;
 pub mod iot;
+pub mod veeros;
 pub mod virtual_device;
 
 use ef_core::device::{Device, DeviceKind, Os};

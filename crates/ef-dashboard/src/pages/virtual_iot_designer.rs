@@ -1,7 +1,10 @@
 use leptos::prelude::*;
 use serde_json::Value;
 
-use crate::api::{self, CreateVirtualIotRequest, UpdateVirtualIotConfigRequest, VirtualIotConfigResponse};
+use crate::api::{
+    self, AttachVirtualIotBackendRequest, CreateVirtualIotRequest, UpdateVirtualIotConfigRequest,
+    VirtualIotBackendListResponse, VirtualIotConfigResponse,
+};
 use crate::board_config::{controller_accessories, controllers, find_controller, sensor_categories, ControllerProfile};
 use crate::components::board_layout::render_catalog_board_layout;
 
@@ -23,9 +26,25 @@ pub fn VirtualIotDesignerPage() -> impl IntoView {
     let (controller_type, set_controller_type) = signal("esp32-devkit".to_string());
     let (sim_rate_ms, set_sim_rate_ms) = signal(500i32);
     let (enabled_sensors, set_enabled_sensors) = signal(Vec::<String>::new());
+    let (selected_backend_id, set_selected_backend_id) = signal(String::new());
+    let (attached_backend_id, set_attached_backend_id) = signal(String::new());
     let (saving, set_saving) = signal(false);
     let (error, set_error) = signal(Option::<String>::None);
     let (loaded, set_loaded) = signal(!is_edit); // if creating, no load needed
+
+    let compatible_backends = LocalResource::new(move || {
+        let controller = controller_type.get();
+        let selected_region = region.get();
+        async move {
+            let path = format!(
+                "/devices/virtual-iot/backends?controller_type={}&region={}&available_only=false",
+                controller, selected_region
+            );
+            api::get::<VirtualIotBackendListResponse>(&path)
+                .await
+                .unwrap_or_default()
+        }
+    });
 
     // In edit mode, fetch existing config
     if is_edit {
@@ -50,6 +69,10 @@ pub fn VirtualIotDesignerPage() -> impl IntoView {
                 Ok(resp) => {
                     set_controller_type.set(resp.config.controller_type);
                     set_sim_rate_ms.set(resp.config.sim_rate_ms);
+                    if let Some(backend_id) = resp.config.backend_id {
+                        set_selected_backend_id.set(backend_id.clone());
+                        set_attached_backend_id.set(backend_id);
+                    }
                     if let Ok(sensors) = serde_json::from_value::<Vec<String>>(resp.config.enabled_sensors) {
                         set_enabled_sensors.set(sensors);
                     }
@@ -90,6 +113,8 @@ pub fn VirtualIotDesignerPage() -> impl IntoView {
         let reg = region.get_untracked();
         let rate = sim_rate_ms.get_untracked();
         let sensors = enabled_sensors.get_untracked();
+        let backend_id = selected_backend_id.get_untracked();
+        let current_backend_id = attached_backend_id.get_untracked();
         let is_edit = is_edit;
         let edit_id = edit_id_save.clone();
 
@@ -117,7 +142,31 @@ pub fn VirtualIotDesignerPage() -> impl IntoView {
             };
 
             match result {
-                Ok(_) => {
+                Ok(resp) => {
+                    let device_id = if is_edit {
+                        edit_id.clone()
+                    } else {
+                        resp.get("device")
+                            .and_then(|d| d.get("id"))
+                            .and_then(|id| id.as_str())
+                            .unwrap_or_default()
+                            .to_string()
+                    };
+
+                    if !device_id.is_empty() {
+                        if backend_id.is_empty() && !current_backend_id.is_empty() {
+                            let _ = api::post::<Value, Value>(
+                                &format!("/devices/{device_id}/virtual-iot/backend/detach"),
+                                &serde_json::json!({}),
+                            ).await;
+                        } else if !backend_id.is_empty() && backend_id != current_backend_id {
+                            let _ = api::post::<AttachVirtualIotBackendRequest, Value>(
+                                &format!("/devices/{device_id}/virtual-iot/backend/attach"),
+                                &AttachVirtualIotBackendRequest { backend_id: backend_id.clone() },
+                            ).await;
+                        }
+                    }
+
                     // Navigate to devices page
                     if let Some(w) = web_sys::window() {
                         let _ = w.location().set_href("/devices");
@@ -256,6 +305,42 @@ pub fn VirtualIotDesignerPage() -> impl IntoView {
                                             }
                                         }
                                     />
+                                </div>
+
+                                <div class="form-group">
+                                    <label>"Compatible Backend"</label>
+                                    <select
+                                        class="form-control"
+                                        on:change=move |ev| set_selected_backend_id.set(event_target_value(&ev))
+                                    >
+                                        <option value="">"No backend attached"</option>
+                                        {move || compatible_backends.get().map(|data| {
+                                            data.backends.into_iter().map(|backend| {
+                                                let option_value = backend.id.clone();
+                                                let label = format!(
+                                                    "{} · {} · {}{}",
+                                                    backend.name,
+                                                    backend.provider,
+                                                    backend.region,
+                                                    if backend.attached_device_id.is_some() && backend.attached_device_id.as_deref() != Some(edit_id.as_str()) {
+                                                        " · attached"
+                                                    } else {
+                                                        ""
+                                                    }
+                                                );
+                                                let selected_value = option_value.clone();
+                                                view! {
+                                                    <option value={option_value.clone()} selected=move || selected_backend_id.get() == selected_value>{label}</option>
+                                                }
+                                            }).collect::<Vec<_>>()
+                                        }).unwrap_or_default()}
+                                    </select>
+                                    <div style="display:flex; gap:0.75rem; margin-top:0.5rem; align-items:center;">
+                                        <a href="/virtual-iot/backends" class="btn btn-ghost btn-sm">"Manage Backends"</a>
+                                        <Show when=move || is_edit && !selected_backend_id.get().is_empty()>
+                                            <a href={move || format!("/virtual-iot/shell?device={}", edit_id)} class="btn btn-primary btn-sm">"Open VeerOS Shell"</a>
+                                        </Show>
+                                    </div>
                                 </div>
 
                                 // ── Sensor Categories ──

@@ -67,6 +67,7 @@ async fn main() -> Result<()> {
     let state = AppState {
         pool,
         jwt_secret: cfg.auth.jwt_secret.clone(),
+        veeros: cfg.veeros.clone(),
     };
 
     // Rate limiter: 50 requests/sec per IP

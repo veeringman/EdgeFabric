@@ -236,7 +236,62 @@ pub struct VirtualIotConfig {
     pub device_id: String,
     pub controller_type: String,
     pub enabled_sensors: serde_json::Value,
+    pub backend_id: Option<String>,
+    pub backend: serde_json::Value,
     pub sim_rate_ms: i32,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+pub struct VirtualIotBackendListResponse {
+    pub backends: Vec<VirtualIotBackend>,
+    pub total: usize,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct VirtualIotBackendEnvelope {
+    pub backend: VirtualIotBackend,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct VirtualIotBackend {
+    pub id: String,
+    pub name: String,
+    pub provider: String,
+    pub controller_type: String,
+    pub region: String,
+    pub status: String,
+    pub vm_name: Option<String>,
+    pub shell_host: Option<String>,
+    pub shell_port: Option<i32>,
+    pub config: serde_json::Value,
+    pub capabilities: Vec<String>,
+    pub attached_device_id: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct CreateVirtualIotBackendRequest {
+    pub name: String,
+    pub provider: String,
+    pub controller_type: String,
+    pub region: String,
+    pub auto_start: bool,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct AttachVirtualIotBackendRequest {
+    pub backend_id: String,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct SensorInjectRequest {
+    pub sensor: String,
+    pub value: String,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct VirtualIotShellResponse {
+    pub backend: VirtualIotBackend,
+    pub shell: serde_json::Value,
 }
 
 #[derive(Serialize, Clone, Debug)]

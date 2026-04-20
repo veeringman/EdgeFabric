@@ -13,6 +13,8 @@ pub struct AppConfig {
     pub logging: LoggingConfig,
     #[serde(default)]
     pub telemetry: crate::telemetry::TelemetryConfig,
+    #[serde(default)]
+    pub veeros: VeerOsConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -87,6 +89,31 @@ pub struct AgentConfig {
 pub struct LoggingConfig {
     pub level: String,
     pub format: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct VeerOsConfig {
+    pub root_dir: String,
+    pub vm_script_path: String,
+    pub veer_connect_path: String,
+    pub default_target: String,
+    pub default_memory_mb: u32,
+    pub default_network_mode: String,
+    pub default_region: String,
+}
+
+impl Default for VeerOsConfig {
+    fn default() -> Self {
+        Self {
+            root_dir: "/home/vijay/rnd/VeerOS".into(),
+            vm_script_path: "/home/vijay/rnd/VeerOS/scripts/veeros-vm".into(),
+            veer_connect_path: "/home/vijay/rnd/VeerOS/target/release/veer-connect".into(),
+            default_target: "esp32c6".into(),
+            default_memory_mb: 128,
+            default_network_mode: "nat".into(),
+            default_region: "local".into(),
+        }
+    }
 }
 
 impl AppConfig {
@@ -168,6 +195,15 @@ max_reconnect_attempts = 3
 [logging]
 level = "debug"
 format = "pretty"
+
+[veeros]
+root_dir = "/home/vijay/rnd/VeerOS"
+vm_script_path = "/home/vijay/rnd/VeerOS/scripts/veeros-vm"
+veer_connect_path = "/home/vijay/rnd/VeerOS/target/release/veer-connect"
+default_target = "esp32c6"
+default_memory_mb = 128
+default_network_mode = "nat"
+default_region = "local"
 "#;
         let cfg: AppConfig = toml::from_str(toml).unwrap();
         assert_eq!(cfg.server.port, 8080);
@@ -175,6 +211,7 @@ format = "pretty"
         assert_eq!(cfg.auth.jwt_secret, "test-secret");
         assert_eq!(cfg.agent.region, "test");
         assert_eq!(cfg.logging.level, "debug");
+    assert_eq!(cfg.veeros.default_target, "esp32c6");
     }
 
     #[test]
@@ -228,6 +265,15 @@ max_reconnect_attempts = 0
 [logging]
 level = "info"
 format = "json"
+
+[veeros]
+root_dir = "/tmp/veeros"
+vm_script_path = "/tmp/veeros/scripts/veeros-vm"
+veer_connect_path = "/tmp/veeros/target/release/veer-connect"
+default_target = "esp32c6"
+default_memory_mb = 128
+default_network_mode = "nat"
+default_region = "local"
 "#;
         // telemetry section omitted — should use defaults
         let cfg: AppConfig = toml::from_str(toml).unwrap();

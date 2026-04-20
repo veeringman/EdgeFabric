@@ -46,7 +46,13 @@ pub fn api_router() -> Router<AppState> {
         .route("/agent/{agent_id}/commands", get(agent::poll_commands))
         // Virtual IoT endpoints
         .route("/devices/virtual-iot", post(virtual_iot::create_virtual_iot))
+        .route("/devices/virtual-iot/backends", get(virtual_iot::list_virtual_iot_backends).post(virtual_iot::create_virtual_iot_backend))
         .route("/devices/{id}/virtual-iot/config", get(virtual_iot::get_virtual_iot_config).patch(virtual_iot::update_virtual_iot_config))
+        .route("/devices/{id}/virtual-iot/backend/attach", post(virtual_iot::attach_virtual_iot_backend))
+        .route("/devices/{id}/virtual-iot/backend/detach", post(virtual_iot::detach_virtual_iot_backend))
+        .route("/devices/{id}/virtual-iot/sensors", post(virtual_iot::inject_virtual_iot_sensor))
+        .route("/devices/{id}/virtual-iot/shell", get(virtual_iot::get_virtual_iot_shell_info))
+        .route("/devices/{id}/virtual-iot/shell/ws", get(virtual_iot::virtual_iot_shell_ws))
 }
 
 #[utoipa::path(get, path = "/health", tag = "health",

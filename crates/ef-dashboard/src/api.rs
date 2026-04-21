@@ -146,6 +146,31 @@ pub async fn patch<B: Serialize, T: DeserializeOwned>(path: &str, body: &B) -> R
     resp.json::<T>().await.map_err(|e| e.to_string())
 }
 
+/// POST with no meaningful body — for action endpoints like start/stop
+pub async fn post_empty(path: &str) -> Result<(), String> {
+    let resp = Request::post(&format!("{}{path}", base_url()))
+        .header("Authorization", &auth_header())
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if resp.status() == 401 {
+        handle_unauthorized();
+        return Err("Session expired".into());
+    }
+
+    if !resp.ok() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("HTTP {status}: {body}"));
+    }
+
+    Ok(())
+}
+
 /// Login — exchange API key for JWT (unauthed endpoint)
 pub async fn login(api_key: &str) -> Result<LoginResponse, String> {
     let resp = Request::post(&format!("{}/auth/login", base_url()))
@@ -231,6 +256,37 @@ pub struct VirtualIotConfigResponse {
     pub config: VirtualIotConfig,
 }
 
+#[derive(Deserialize, Serialize, Clone, Debug, Default, PartialEq)]
+pub struct VirtualIotEventStep {
+    pub sensor: String,
+    pub value: String,
+    #[serde(default)]
+    pub end_value: Option<String>,
+    #[serde(default)]
+    pub duration_ms: Option<i32>,
+    #[serde(default)]
+    pub action: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Default, PartialEq)]
+pub struct VirtualIotEventDefinition {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub steps: Vec<VirtualIotEventStep>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Default, PartialEq)]
+pub struct VirtualIotSensorLogEntry {
+    pub ts: String,
+    pub sensor: String,
+    pub value: String,
+    #[serde(default)]
+    pub source: String,
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct VirtualIotConfig {
     pub device_id: String,
@@ -239,6 +295,12 @@ pub struct VirtualIotConfig {
     pub backend_id: Option<String>,
     pub backend: serde_json::Value,
     pub sim_rate_ms: i32,
+    #[serde(default)]
+    pub event_definitions: Vec<VirtualIotEventDefinition>,
+    #[serde(default)]
+    pub sensor_state: serde_json::Value,
+    #[serde(default)]
+    pub sensor_log: Vec<VirtualIotSensorLogEntry>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, Default)]
@@ -258,6 +320,8 @@ pub struct VirtualIotBackend {
     pub name: String,
     pub provider: String,
     pub controller_type: String,
+    #[serde(default)]
+    pub controller_types: Vec<String>,
     pub region: String,
     pub status: String,
     pub vm_name: Option<String>,
@@ -273,8 +337,19 @@ pub struct CreateVirtualIotBackendRequest {
     pub name: String,
     pub provider: String,
     pub controller_type: String,
+    pub controller_types: Vec<String>,
     pub region: String,
     pub auto_start: bool,
+}
+
+#[derive(Serialize, Clone, Debug, Default)]
+pub struct UpdateVirtualIotBackendRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub controller_types: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -286,6 +361,8 @@ pub struct AttachVirtualIotBackendRequest {
 pub struct SensorInjectRequest {
     pub sensor: String,
     pub value: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -301,6 +378,7 @@ pub struct CreateVirtualIotRequest {
     pub region: String,
     pub sim_rate_ms: i32,
     pub enabled_sensors: Vec<String>,
+    pub event_definitions: Vec<VirtualIotEventDefinition>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -311,6 +389,8 @@ pub struct UpdateVirtualIotConfigRequest {
     pub enabled_sensors: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sim_rate_ms: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_definitions: Option<Vec<VirtualIotEventDefinition>>,
 }
 
 #[derive(Deserialize, Clone, Debug, Default)]

@@ -14,6 +14,7 @@ mod proto;
 mod routes;
 mod session_manager;
 mod virtual_iot_runtime;
+mod veeros_proxy;
 
 #[cfg(test)]
 mod api_tests;

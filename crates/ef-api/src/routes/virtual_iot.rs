@@ -7,7 +7,7 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
-use futures::{SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt, future::join_all};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, process::Command};
@@ -32,6 +32,8 @@ pub struct CreateVirtualIotRequest {
     pub sim_rate_ms: i32,
     #[serde(default)]
     pub enabled_sensors: Vec<String>,
+    #[serde(default)]
+    pub event_definitions: Vec<Value>,
 }
 
 fn default_controller() -> String { "esp32-devkit".into() }
@@ -46,6 +48,7 @@ pub struct UpdateVirtualIotConfigRequest {
     pub controller_type: Option<String>,
     pub enabled_sensors: Option<Vec<String>>,
     pub sim_rate_ms: Option<i32>,
+    pub event_definitions: Option<Vec<Value>>,
 }
 
 #[derive(Deserialize)]
@@ -55,10 +58,24 @@ pub struct CreateVirtualIotBackendRequest {
     pub provider: String,
     #[serde(default = "default_controller")]
     pub controller_type: String,
+    #[serde(default)]
+    pub controller_types: Vec<String>,
     #[serde(default = "default_region")]
     pub region: String,
     #[serde(default = "default_auto_start")]
     pub auto_start: bool,
+    /// If set, provisioning (create/start) is performed through the remote
+    /// ef-agent instead of the local VeerOsDriver, and the binding is
+    /// persisted so subsequent lifecycle ops are proxied as well.
+    #[serde(default)]
+    pub agent_id: Option<Uuid>,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateVirtualIotBackendRequest {
+    pub name: Option<String>,
+    pub region: Option<String>,
+    pub controller_types: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -78,6 +95,10 @@ pub struct AttachVirtualIotBackendRequest {
 pub struct SensorInjectRequest {
     pub sensor: String,
     pub value: String,
+    /// Optional free-form provenance tag (e.g., "manual", "event:Fever spike").
+    /// When omitted, the backend picks a sensible default.
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 /// POST /api/v1/devices/virtual-iot
@@ -106,6 +127,8 @@ pub async fn create_virtual_iot(
     })?;
 
     let sensors_json = serde_json::to_value(&body.enabled_sensors).unwrap_or_default();
+    let event_definitions_json = serde_json::to_value(&body.event_definitions).unwrap_or_else(|_| json!([]));
+    let sensor_state_json = default_sensor_state(&body.enabled_sensors);
     let config = VirtualIotConfigRepo::create(
         &state.pool,
         device.id,
@@ -114,6 +137,9 @@ pub async fn create_virtual_iot(
         None,
         &json!({}),
         body.sim_rate_ms,
+        &event_definitions_json,
+        &sensor_state_json,
+        &json!([]),
     )
     .await
     .map_err(|e| {
@@ -134,7 +160,7 @@ pub async fn list_virtual_iot_backends(
 ) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
     tracing::info!(tenant_id = %auth.tenant_id, "Listing virtual IoT backends");
 
-    let backends = VirtualIotBackendRepo::list(
+    let mut backends = VirtualIotBackendRepo::list(
         &state.pool,
         query.controller_type.as_deref(),
         query.region.as_deref(),
@@ -145,6 +171,36 @@ pub async fn list_virtual_iot_backends(
         tracing::error!("Failed to list virtual IoT backends: {e}");
         ApiError::internal("Failed to list virtual IoT backends")
     })?;
+
+    let runtime_statuses = join_all(backends.iter().map(|backend| {
+        let veeros = state.veeros.clone();
+        let pool = state.pool.clone();
+        let vm_name = backend.vm_name.clone();
+        let agent_id = backend.agent_id;
+        let agent_base_url = backend.agent_base_url.clone();
+        async move {
+            let Some(name) = vm_name else { return String::from("unknown") };
+            if let Some(aid) = agent_id {
+                match crate::veeros_proxy::resolve_agent_base_url(&pool, aid, agent_base_url.as_deref()).await {
+                    Ok(base) => crate::veeros_proxy::vm_status(&base, &name)
+                        .await
+                        .unwrap_or_else(|_| String::from("unknown")),
+                    Err(_) => String::from("unknown"),
+                }
+            } else {
+                VeerOsDriver::vm_status(&veeros, &name)
+                    .await
+                    .unwrap_or_else(|_| String::from("unknown"))
+            }
+        }
+    }))
+    .await;
+
+    for (backend, runtime_status) in backends.iter_mut().zip(runtime_statuses) {
+        if let Some(config) = backend.config.as_object_mut() {
+            config.insert("runtime_status".into(), Value::String(runtime_status));
+        }
+    }
 
     Ok(Json(json!({
         "backends": backends,
@@ -167,28 +223,87 @@ pub async fn create_virtual_iot_backend(
     let vm_name = VeerOsDriver::sanitize_vm_name(&body.name, &seed[..8]);
     let hostname = vm_name.replace('_', "-");
 
-    let create_output = VeerOsDriver::create_vm(
-        &state.veeros,
-        &vm_name,
-        &hostname,
-        &state.veeros.default_target,
-        state.veeros.default_memory_mb,
-        &state.veeros.default_network_mode,
-    )
-    .await
-    .map_err(ApiError::from_domain)?;
+    // Resolve the agent base URL up-front when binding to an agent, so we
+    // can short-circuit before any DB writes if the agent is unreachable.
+    let agent_base_url = if let Some(aid) = body.agent_id {
+        Some(
+            crate::veeros_proxy::resolve_agent_base_url(&state.pool, aid, None)
+                .await
+                .map_err(|e| ApiError::bad_request(format!("Agent {aid} not usable: {e}")))?,
+        )
+    } else {
+        None
+    };
+
+    let create_output = if let Some(base) = agent_base_url.as_deref() {
+        crate::veeros_proxy::create_vm(
+            base,
+            &vm_name,
+            &hostname,
+            &state.veeros.default_target,
+            state.veeros.default_memory_mb,
+            &state.veeros.default_network_mode,
+        )
+        .await
+        .map_err(|e| ApiError::internal(format!("Agent create_vm failed: {e}")))?
+    } else {
+        VeerOsDriver::create_vm(
+            &state.veeros,
+            &vm_name,
+            &hostname,
+            &state.veeros.default_target,
+            state.veeros.default_memory_mb,
+            &state.veeros.default_network_mode,
+        )
+        .await
+        .map_err(ApiError::from_domain)?
+    };
 
     let mut status = "available".to_string();
     if body.auto_start {
-        VeerOsDriver::start_vm(&state.veeros, &vm_name)
-            .await
-            .map_err(ApiError::from_domain)?;
+        if let Some(base) = agent_base_url.as_deref() {
+            crate::veeros_proxy::start_vm(base, &vm_name)
+                .await
+                .map_err(|e| ApiError::internal(format!("Agent start_vm failed: {e}")))?;
+        } else {
+            VeerOsDriver::start_vm(&state.veeros, &vm_name)
+                .await
+                .map_err(ApiError::from_domain)?;
+        }
         status = "running".to_string();
     }
 
-    let shell = VeerOsDriver::shell_info(&state.veeros, &vm_name)
-        .await
-        .map_err(ApiError::from_domain)?;
+    // shell_info: when the VM lives on a remote agent, fetch the real host /
+    // port / connect_command from the agent; the agent reports its own
+    // localhost, so we rewrite the host to the agent's reachable hostname so
+    // the recorded value is meaningful as diagnostic metadata. The actual
+    // shell WS is proxied to the agent regardless of these fields.
+    let shell = if let Some(base) = agent_base_url.as_deref() {
+        match crate::veeros_proxy::shell_info(base, &vm_name).await {
+            Ok((agent_host, port, cmd)) => {
+                let public_host = extract_host(base).unwrap_or(agent_host);
+                VeerOsShellInfo {
+                    vm_name: vm_name.clone(),
+                    host: public_host,
+                    port,
+                    connect_command: cmd,
+                }
+            }
+            Err(e) => {
+                tracing::warn!(vm_name = %vm_name, "agent shell_info failed: {e}");
+                VeerOsShellInfo {
+                    vm_name: vm_name.clone(),
+                    host: extract_host(base).unwrap_or_else(|| "agent".to_string()),
+                    port: 0,
+                    connect_command: String::new(),
+                }
+            }
+        }
+    } else {
+        VeerOsDriver::shell_info(&state.veeros, &vm_name)
+            .await
+            .map_err(ApiError::from_domain)?
+    };
     let backend_config = backend_json(&shell, &state.veeros.default_network_mode, &status);
     let capabilities = vec![
         format!("provider:{}", body.provider),
@@ -201,6 +316,15 @@ pub async fn create_virtual_iot_backend(
         &body.name,
         &body.provider,
         &body.controller_type,
+        &{
+            let mut types = body.controller_types.clone();
+            if types.is_empty() {
+                types.push(body.controller_type.clone());
+            } else if !types.contains(&body.controller_type) {
+                types.insert(0, body.controller_type.clone());
+            }
+            types
+        },
         &body.region,
         if body.auto_start { "available" } else { "maintenance" },
         Some(&vm_name),
@@ -208,6 +332,8 @@ pub async fn create_virtual_iot_backend(
         Some(shell.port as i32),
         &backend_config,
         &capabilities,
+        body.agent_id,
+        agent_base_url.as_deref(),
     )
     .await
     .map_err(|e| {
@@ -264,6 +390,10 @@ pub async fn update_virtual_iot_config(
         None => existing.enabled_sensors.clone(),
     };
     let sim_rate_ms = body.sim_rate_ms.unwrap_or(existing.sim_rate_ms);
+    let event_definitions_json = match &body.event_definitions {
+        Some(events) => serde_json::to_value(events).unwrap_or_else(|_| json!([])),
+        None => existing.event_definitions.clone(),
+    };
 
     let updated = VirtualIotConfigRepo::update(
         &state.pool,
@@ -273,6 +403,7 @@ pub async fn update_virtual_iot_config(
         existing.backend_id,
         &existing.backend,
         sim_rate_ms,
+        &event_definitions_json,
     )
     .await
     .map_err(|e| {
@@ -308,7 +439,7 @@ pub async fn attach_virtual_iot_backend(
         })?
         .ok_or_else(|| ApiError::not_found(format!("Virtual IoT backend {} not found", body.backend_id)))?;
 
-    if backend.controller_type != config.controller_type {
+    if !backend.controller_types.contains(&config.controller_type) && backend.controller_type != config.controller_type {
         return Err(ApiError::bad_request(format!(
             "Backend {} is not compatible with controller {}",
             backend.name, config.controller_type
@@ -397,20 +528,110 @@ pub async fn inject_virtual_iot_sensor(
     Json(body): Json<SensorInjectRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
     tracing::info!(tenant_id = %auth.tenant_id, device_id = %id, sensor = %body.sensor, "Injecting sensor into attached backend");
-    let backend = attached_backend(&state, id).await?;
-    let vm_name = backend.vm_name.clone().ok_or_else(|| ApiError::bad_request("Attached backend has no VM binding"))?;
-
-    let output = VeerOsDriver::sensor_inject(&state.veeros, &vm_name, &body.sensor, &body.value)
+    let config = VirtualIotConfigRepo::find_by_device_id(&state.pool, id)
         .await
-        .map_err(ApiError::from_domain)?;
+        .map_err(|e| {
+            tracing::error!("DB error: {e}");
+            ApiError::internal("Database error")
+        })?
+        .ok_or_else(|| ApiError::not_found(format!("Virtual IoT config for device {id} not found")))?;
+
+    let mut sensor_state = config.sensor_state.as_object().cloned().unwrap_or_default();
+    sensor_state.insert(body.sensor.clone(), Value::String(body.value.clone()));
+
+    let mut sensor_log = config.sensor_log.as_array().cloned().unwrap_or_default();
+    let source = body.source.clone().unwrap_or_else(|| {
+        if config.backend_id.is_some() { "ui+vm".to_string() } else { "ui-simulated".to_string() }
+    });
+    sensor_log.push(json!({
+        "ts": chrono::Utc::now().to_rfc3339(),
+        "sensor": body.sensor,
+        "value": body.value,
+        "source": source,
+    }));
+    if sensor_log.len() > 200 {
+        sensor_log.drain(0..sensor_log.len().saturating_sub(200));
+    }
+
+    let updated = VirtualIotConfigRepo::update_sensor_runtime(
+        &state.pool,
+        id,
+        &Value::Object(sensor_state),
+        &Value::Array(sensor_log.clone()),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to persist Virtual IoT sensor runtime state: {e}");
+        ApiError::internal("Failed to persist Virtual IoT sensor runtime state")
+    })?
+    .ok_or_else(|| ApiError::not_found(format!("Virtual IoT config for device {id} not found")))?;
+
+    let output = if let Ok(backend) = attached_backend(&state, id).await {
+        if let Some(vm_name) = backend.vm_name.clone() {
+            if let Some(base) = maybe_agent_base(&state, &backend).await? {
+                Some(
+                    crate::veeros_proxy::sensor_inject(&base, &vm_name, &body.sensor, &body.value)
+                        .await
+                        .map_err(|e| ApiError::internal(format!("Agent sensor_inject failed: {e}")))?,
+                )
+            } else {
+                Some(
+                    VeerOsDriver::sensor_inject(&state.veeros, &vm_name, &body.sensor, &body.value)
+                        .await
+                        .map_err(ApiError::from_domain)?,
+                )
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let _ = DeviceRepo::update_heartbeat(&state.pool, id).await;
 
     Ok(Json(json!({
         "device_id": id,
-        "backend_id": backend.id,
+        "backend_id": updated.backend_id,
         "sensor": body.sensor,
         "value": body.value,
-        "stdout": output.stdout,
+        "stdout": output.as_ref().map(|value| value.stdout.clone()).unwrap_or_default(),
+        "sensor_state": updated.sensor_state,
+        "sensor_log": updated.sensor_log,
     })))
+}
+
+fn default_sensor_state(enabled_sensors: &[String]) -> Value {
+    let map = enabled_sensors
+        .iter()
+        .map(|sensor| (sensor.clone(), Value::String(default_sensor_preview(sensor))))
+        .collect::<serde_json::Map<_, _>>();
+    Value::Object(map)
+}
+
+fn default_sensor_preview(sensor: &str) -> String {
+    match sensor {
+        "temperature" => "24.6 C".into(),
+        "humidity" => "58 %".into(),
+        "pressure" => "1012 hPa".into(),
+        "air_quality_co2" => "612 ppm".into(),
+        "air_quality_tvoc" => "0.41 ppm".into(),
+        "accel_xyz" => "0.04, -0.02, 0.98 g".into(),
+        "gyro_xyz" => "0.1, 0.0, -0.1 dps".into(),
+        "magnetometer" => "12, -8, 31 uT".into(),
+        "ambient_light" => "326 lux".into(),
+        "uv_index" => "2.1".into(),
+        "proximity" => "18 cm".into(),
+        "gps" => "12.9716, 77.5946".into(),
+        "battery_voltage" => "3.92 V".into(),
+        "current" => "118 mA".into(),
+        "gpio_states" => "GPIO4=1 GPIO5=0".into(),
+        "adc_raw" => "1842".into(),
+        "sound_level" => "43 dB".into(),
+        "wifi_rssi" => "-58 dBm".into(),
+        "ble_scan" => "[beacon-a]".into(),
+        _ => "--".into(),
+    }
 }
 
 pub async fn virtual_iot_shell_ws(
@@ -427,6 +648,146 @@ async fn handle_virtual_iot_shell(socket: WebSocket, device_id: Uuid, state: App
         Err(_) => return,
     };
 
+    // When the backend was attached to a remote ef-agent, proxy the shell WS
+    // to the agent's `/ws/veeros/{vm_name}/shell` endpoint. The agent runs the
+    // `veer-connect` binary against its own localhost hostfwd. Otherwise, fall
+    // back to spawning `veer-connect` locally (legacy/single-host setups).
+    if let Some(agent_id) = backend.agent_id {
+        proxy_shell_to_agent(socket, device_id, agent_id, backend, state).await;
+    } else {
+        local_shell_session(socket, device_id, backend, state).await;
+    }
+}
+
+/// Relay the dashboard ↔ agent shell WebSocket. The agent owns `veer-connect`
+/// and the VM's port, so this host only has to copy bytes each way.
+async fn proxy_shell_to_agent(
+    socket: WebSocket,
+    device_id: Uuid,
+    agent_id: Uuid,
+    backend: VirtualIotBackendRow,
+    state: AppState,
+) {
+    use tokio_tungstenite::tungstenite::Message as TsMsg;
+
+    let (mut ws_tx, mut ws_rx) = socket.split();
+
+    let vm_name = match backend.vm_name.clone() {
+        Some(n) if !n.is_empty() => n,
+        _ => {
+            let _ = ws_tx.send(Message::Text(json!({
+                "type": "error",
+                "message": "Backend has no vm_name; cannot open shell",
+            }).to_string().into())).await;
+            return;
+        }
+    };
+
+    let base = match crate::veeros_proxy::resolve_agent_base_url(
+        &state.pool,
+        agent_id,
+        backend.agent_base_url.as_deref(),
+    ).await {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::error!(%device_id, %agent_id, "resolve agent base url failed: {e}");
+            let _ = ws_tx.send(Message::Text(json!({
+                "type": "error",
+                "message": format!("Agent unreachable: {e}"),
+            }).to_string().into())).await;
+            return;
+        }
+    };
+
+    // http(s)://host:port  →  ws(s)://host:port/ws/veeros/{vm_name}/shell
+    let ws_base = if let Some(rest) = base.strip_prefix("https://") {
+        format!("wss://{rest}")
+    } else if let Some(rest) = base.strip_prefix("http://") {
+        format!("ws://{rest}")
+    } else {
+        format!("ws://{base}")
+    };
+    let agent_url = format!("{}/ws/veeros/{}/shell", ws_base.trim_end_matches('/'), vm_name);
+
+    tracing::info!(%device_id, %agent_id, %agent_url, "proxying VeerOS shell WS to agent");
+
+    let (agent_ws, _resp) = match tokio_tungstenite::connect_async(&agent_url).await {
+        Ok(pair) => pair,
+        Err(e) => {
+            tracing::error!(%device_id, %agent_url, "agent shell WS connect failed: {e}");
+            let _ = ws_tx.send(Message::Text(json!({
+                "type": "error",
+                "message": format!("Agent shell unreachable: {e}"),
+            }).to_string().into())).await;
+            return;
+        }
+    };
+
+    // Surface the `shell_ready` banner the browser expects so the xterm page
+    // moves out of the "Connecting…" state immediately. The agent may also
+    // emit its own banner; the dashboard filters any leading shell_ready JSON.
+    let _ = ws_tx.send(Message::Text(json!({
+        "type": "shell_ready",
+        "device_id": device_id,
+        "host": backend.shell_host,
+        "port": backend.shell_port,
+        "via": "agent",
+        "agent_id": agent_id,
+    }).to_string().into())).await;
+
+    let (mut agent_tx, mut agent_rx) = agent_ws.split();
+
+    // agent → dashboard
+    let a2d = tokio::spawn(async move {
+        while let Some(msg) = agent_rx.next().await {
+            let relay = match msg {
+                Ok(TsMsg::Text(t)) => Some(Message::Text(t.to_string().into())),
+                Ok(TsMsg::Binary(b)) => Some(Message::Binary(b.into())),
+                Ok(TsMsg::Close(_)) | Err(_) => break,
+                _ => None,
+            };
+            if let Some(m) = relay {
+                if ws_tx.send(m).await.is_err() {
+                    break;
+                }
+            }
+        }
+    });
+
+    // dashboard → agent
+    let d2a = tokio::spawn(async move {
+        while let Some(Ok(msg)) = ws_rx.next().await {
+            let relay = match msg {
+                Message::Text(t) => Some(TsMsg::Text(t.to_string().into())),
+                Message::Binary(b) => Some(TsMsg::Binary(b.into())),
+                Message::Close(_) => break,
+                _ => None,
+            };
+            if let Some(m) = relay {
+                if agent_tx.send(m).await.is_err() {
+                    break;
+                }
+            }
+        }
+        let _ = agent_tx.close().await;
+    });
+
+    tokio::select! {
+        _ = a2d => {},
+        _ = d2a => {},
+    }
+
+    tracing::info!(%device_id, "agent shell proxy ended");
+}
+
+/// Legacy single-host path: spawn `veer-connect` locally and pipe it over the
+/// dashboard's WebSocket. Used when the backend has no `agent_id`.
+async fn local_shell_session(
+    socket: WebSocket,
+    device_id: Uuid,
+    backend: VirtualIotBackendRow,
+    state: AppState,
+) {
     let host = backend.shell_host.clone().unwrap_or_else(|| "localhost".into());
     let port = backend.shell_port.unwrap_or_default().to_string();
     let veer_connect_path = resolve_veer_connect_path(&state);
@@ -468,13 +829,33 @@ async fn handle_virtual_iot_shell(socket: WebSocket, device_id: Uuid, state: App
         "hint": "Login with root/toor or user/veeros"
     }).to_string().into())).await;
 
+    // Funnel stdout + stderr chunks through an mpsc channel so the WebSocket sink
+    // is driven by a single writer task. Holding a Mutex across `.send().await`
+    // (the previous design) caused stdout to stall behind stderr under even
+    // slight back-pressure, which made the terminal appear to hang after a few
+    // commands.
+    let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<Message>();
+    let out_tx_stdout = out_tx.clone();
+    let out_tx_stderr = out_tx.clone();
+    drop(out_tx);
+
+    let writer_task = tokio::spawn(async move {
+        while let Some(msg) = out_rx.recv().await {
+            if ws_tx.send(msg).await.is_err() {
+                break;
+            }
+        }
+        let _ = ws_tx.close().await;
+    });
+
     let stdout_task = tokio::spawn(async move {
         let mut buf = [0u8; 4096];
         loop {
             match child_stdout.read(&mut buf).await {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
-                    if ws_tx.send(Message::Text(String::from_utf8_lossy(&buf[..n]).to_string().into())).await.is_err() {
+                    let chunk = String::from_utf8_lossy(&buf[..n]).to_string();
+                    if out_tx_stdout.send(Message::Text(chunk.into())).is_err() {
                         break;
                     }
                 }
@@ -482,12 +863,21 @@ async fn handle_virtual_iot_shell(socket: WebSocket, device_id: Uuid, state: App
         }
     });
 
+    // Forward veer-connect's stderr progress ([vsc] …) and errors to the client so
+    // handshake failures and prompts are visible in the browser terminal.
     let stderr_task = tokio::spawn(async move {
         let mut buf = [0u8; 1024];
         loop {
             match child_stderr.read(&mut buf).await {
                 Ok(0) | Err(_) => break,
-                Ok(_) => {}
+                Ok(n) => {
+                    let chunk = String::from_utf8_lossy(&buf[..n]).to_string();
+                    // Wrap stderr in ANSI dim so it's visually distinct from the shell.
+                    let decorated = format!("\x1b[2m{}\x1b[0m", chunk);
+                    if out_tx_stderr.send(Message::Text(decorated.into())).is_err() {
+                        break;
+                    }
+                }
             }
         }
     });
@@ -498,11 +888,13 @@ async fn handle_virtual_iot_shell(socket: WebSocket, device_id: Uuid, state: App
                 if child_stdin.write_all(text.as_bytes()).await.is_err() {
                     break;
                 }
+                let _ = child_stdin.flush().await;
             }
             Message::Binary(data) => {
                 if child_stdin.write_all(&data).await.is_err() {
                     break;
                 }
+                let _ = child_stdin.flush().await;
             }
             Message::Close(_) => break,
             _ => {}
@@ -512,6 +904,7 @@ async fn handle_virtual_iot_shell(socket: WebSocket, device_id: Uuid, state: App
     let _ = child.kill().await;
     let _ = stdout_task.await;
     let _ = stderr_task.await;
+    let _ = writer_task.await;
 }
 
 async fn attached_backend(
@@ -580,4 +973,184 @@ fn resolve_veer_connect_path(state: &AppState) -> String {
     } else {
         format!("{}/target/debug/veer-connect", state.veeros.root_dir)
     }
+}
+
+/// Extract just the host portion from an `http(s)://host:port/...` URL.
+/// Used to rewrite a VM's shell host to the agent's reachable hostname.
+fn extract_host(url: &str) -> Option<String> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .unwrap_or(url);
+    let rest = rest.split('/').next().unwrap_or(rest);
+    let host = rest.split(':').next().unwrap_or(rest).trim();
+    if host.is_empty() { None } else { Some(host.to_string()) }
+}
+
+/// If the backend is bound to a remote ef-agent, resolve its base URL.
+/// Returns `Ok(Some(url))` when proxying should be used, `Ok(None)` when
+/// the caller should fall back to the local `VeerOsDriver`.
+async fn maybe_agent_base(
+    state: &AppState,
+    backend: &VirtualIotBackendRow,
+) -> Result<Option<String>, (StatusCode, Json<ApiError>)> {
+    let Some(agent_id) = backend.agent_id else { return Ok(None) };
+    let base = crate::veeros_proxy::resolve_agent_base_url(
+        &state.pool,
+        agent_id,
+        backend.agent_base_url.as_deref(),
+    )
+    .await
+    .map_err(|e| ApiError::internal(format!("Agent {agent_id} not reachable: {e}")))?;
+    Ok(Some(base))
+}
+
+/// DELETE /api/v1/devices/virtual-iot/backends/:id
+pub async fn delete_virtual_iot_backend(
+    auth: AuthContext,
+    Path(id): Path<Uuid>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    tracing::info!(tenant_id = %auth.tenant_id, backend_id = %id, "Deleting virtual IoT backend");
+
+    let backend = VirtualIotBackendRepo::find_by_id(&state.pool, id)
+        .await
+        .map_err(|e| {
+            tracing::error!("DB error: {e}");
+            ApiError::internal("Database error")
+        })?
+        .ok_or_else(|| ApiError::not_found(format!("Backend {id} not found")))?;
+
+    if let Some(vm_name) = &backend.vm_name {
+        if let Some(base) = maybe_agent_base(&state, &backend).await? {
+            let _ = crate::veeros_proxy::stop_vm(&base, vm_name).await;
+            let _ = crate::veeros_proxy::destroy_vm(&base, vm_name).await;
+        } else {
+            let _ = VeerOsDriver::stop_vm(&state.veeros, vm_name).await;
+            let _ = VeerOsDriver::destroy_vm(&state.veeros, vm_name).await;
+        }
+    }
+
+    let deleted = VirtualIotBackendRepo::delete(&state.pool, id)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to delete backend: {e}");
+            ApiError::internal("Failed to delete backend")
+        })?;
+
+    if !deleted {
+        return Err(ApiError::not_found(format!("Backend {id} not found")));
+    }
+
+    Ok(Json(json!({ "deleted": true, "id": id })))
+}
+
+/// POST /api/v1/devices/virtual-iot/backends/:id/start
+pub async fn start_virtual_iot_backend(
+    auth: AuthContext,
+    Path(id): Path<Uuid>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    tracing::info!(tenant_id = %auth.tenant_id, backend_id = %id, "Starting virtual IoT backend");
+
+    let backend = VirtualIotBackendRepo::find_by_id(&state.pool, id)
+        .await
+        .map_err(|e| {
+            tracing::error!("DB error: {e}");
+            ApiError::internal("Database error")
+        })?
+        .ok_or_else(|| ApiError::not_found(format!("Backend {id} not found")))?;
+
+    let vm_name = backend.vm_name.as_deref()
+        .ok_or_else(|| ApiError::bad_request("Backend has no VM binding"))?;
+
+    if let Some(base) = maybe_agent_base(&state, &backend).await? {
+        crate::veeros_proxy::start_vm(&base, vm_name)
+            .await
+            .map_err(|e| ApiError::internal(format!("Agent start_vm failed: {e}")))?;
+    } else {
+        VeerOsDriver::start_vm(&state.veeros, vm_name)
+            .await
+            .map_err(ApiError::from_domain)?;
+    }
+
+    let next_status = if backend.attached_device_id.is_some() { "busy" } else { "available" };
+
+    let updated = VirtualIotBackendRepo::update_status_and_attachment(&state.pool, id, next_status, backend.attached_device_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to update backend status: {e}");
+            ApiError::internal("Failed to update backend status")
+        })?
+        .ok_or_else(|| ApiError::not_found(format!("Backend {id} not found")))?;
+
+    Ok(Json(json!({ "backend": updated })))
+}
+
+/// POST /api/v1/devices/virtual-iot/backends/:id/stop
+pub async fn stop_virtual_iot_backend(
+    auth: AuthContext,
+    Path(id): Path<Uuid>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    tracing::info!(tenant_id = %auth.tenant_id, backend_id = %id, "Stopping virtual IoT backend");
+
+    let backend = VirtualIotBackendRepo::find_by_id(&state.pool, id)
+        .await
+        .map_err(|e| {
+            tracing::error!("DB error: {e}");
+            ApiError::internal("Database error")
+        })?
+        .ok_or_else(|| ApiError::not_found(format!("Backend {id} not found")))?;
+
+    let vm_name = backend.vm_name.as_deref()
+        .ok_or_else(|| ApiError::bad_request("Backend has no VM binding"))?;
+
+    if let Some(base) = maybe_agent_base(&state, &backend).await? {
+        crate::veeros_proxy::stop_vm(&base, vm_name)
+            .await
+            .map_err(|e| ApiError::internal(format!("Agent stop_vm failed: {e}")))?;
+    } else {
+        VeerOsDriver::stop_vm(&state.veeros, vm_name)
+            .await
+            .map_err(ApiError::from_domain)?;
+    }
+
+    let next_status = if backend.attached_device_id.is_some() { "busy" } else { "available" };
+
+    let updated = VirtualIotBackendRepo::update_status_and_attachment(&state.pool, id, next_status, backend.attached_device_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to update backend status: {e}");
+            ApiError::internal("Failed to update backend status")
+        })?
+        .ok_or_else(|| ApiError::not_found(format!("Backend {id} not found")))?;
+
+    Ok(Json(json!({ "backend": updated })))
+}
+
+/// PATCH /api/v1/devices/virtual-iot/backends/:id
+pub async fn update_virtual_iot_backend(
+    auth: AuthContext,
+    Path(id): Path<Uuid>,
+    State(state): State<AppState>,
+    Json(body): Json<UpdateVirtualIotBackendRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    tracing::info!(tenant_id = %auth.tenant_id, backend_id = %id, "Updating virtual IoT backend");
+
+    let updated = VirtualIotBackendRepo::update(
+        &state.pool,
+        id,
+        body.name.as_deref(),
+        body.region.as_deref(),
+        body.controller_types.as_deref(),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to update backend: {e}");
+        ApiError::internal("Failed to update backend")
+    })?
+    .ok_or_else(|| ApiError::not_found(format!("Backend {id} not found")))?;
+
+    Ok(Json(json!({ "backend": updated })))
 }

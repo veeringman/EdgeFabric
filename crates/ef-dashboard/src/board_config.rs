@@ -239,6 +239,20 @@ pub fn pin_anchor_for_family(family_id: &str, pin: &str) -> Option<f32> {
     find_wiring_family(family_id).and_then(|f| f.pin_anchors.get(pin).copied())
 }
 
+pub fn pin_anchors_for_family(family_id: &str) -> Vec<(String, f32)> {
+    find_wiring_family(family_id)
+        .map(|family| {
+            let mut anchors = family
+                .pin_anchors
+                .iter()
+                .map(|(pin, y)| (pin.clone(), *y))
+                .collect::<Vec<_>>();
+            anchors.sort_by(|left, right| left.1.partial_cmp(&right.1).unwrap_or(std::cmp::Ordering::Equal));
+            anchors
+        })
+        .unwrap_or_default()
+}
+
 pub fn bus_wire_color(pin: &str, bus: &str) -> Option<&'static str> {
     if pin == "INTERNAL" || pin == "N/A" {
         let c = catalog().bus_wire_colors.get("INTERNAL").map(String::as_str);

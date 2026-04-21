@@ -4,12 +4,15 @@ use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use crate::api::{self, DeviceListResponse};
-use crate::api::VirtualIotConfigResponse;
+use crate::api::{
+    self, DeviceListResponse, SensorInjectRequest, VirtualIotConfigResponse,
+    VirtualIotEventDefinition, VirtualIotSensorLogEntry,
+};
 use crate::board_config;
 use crate::components::board_layout::render_catalog_board_layout;
 use crate::components::device_icon::DeviceOsIcon;
 use crate::components::status_badge::StatusBadge;
+use crate::pages::virtual_iot_shell::VirtualIotShellTerminal;
 
 /// Device info passed from card selection to the viewer.
 #[derive(Clone, Debug)]
@@ -2080,6 +2083,22 @@ fn VirtualIotViewer(
     let (controller_type, set_controller_type) = signal(String::from("esp32-devkit"));
     let (sim_rate_ms, set_sim_rate_ms) = signal(500i32);
     let (enabled_sensors, set_enabled_sensors) = signal(Vec::<String>::new());
+    let (sensor_values, set_sensor_values) = signal(HashMap::<String, String>::new());
+    let (event_definitions, set_event_definitions) = signal(Vec::<VirtualIotEventDefinition>::new());
+    let (sensor_log, set_sensor_log) = signal(Vec::<VirtualIotSensorLogEntry>::new());
+    let (backend_attached, set_backend_attached) = signal(false);
+    let (injecting_sensor, set_injecting_sensor) = signal(Option::<String>::None);
+    let (inject_error, set_inject_error) = signal(Option::<String>::None);
+    let (active_tab, set_active_tab) = signal("detail".to_string());
+    // Once user opens the shell tab, keep the terminal mounted so switching
+    // back to "Detail" and returning doesn't kill the WS / xterm session.
+    let (shell_opened, set_shell_opened) = signal(false);
+    let device_id_value = StoredValue::new(device_id.clone());
+
+    // Free-form scene layout: each item (controller + each sensor module) stores [x, y, w, h]
+    // in container-relative px. Seeded on first render per enabled-sensors list.
+    let scene_rects = RwSignal::new(HashMap::<String, [f64; 4]>::new());
+    let scene_ref = NodeRef::<leptos::html::Div>::new();
 
     let fetch_device_id = device_id.clone();
     Effect::new(move || {
@@ -2089,9 +2108,22 @@ fn VirtualIotViewer(
                 Ok(resp) => {
                     set_controller_type.set(resp.config.controller_type);
                     set_sim_rate_ms.set(resp.config.sim_rate_ms);
+                    set_event_definitions.set(resp.config.event_definitions);
                     if let Ok(sensors) = serde_json::from_value::<Vec<String>>(resp.config.enabled_sensors) {
+                        let defaults = virtual_iot_default_sensor_values(&sensors);
+                        let persisted = virtual_iot_sensor_state_map(&resp.config.sensor_state);
+                        let merged = defaults
+                            .into_iter()
+                            .map(|(key, default_value)| {
+                                let value = persisted.get(&key).cloned().unwrap_or(default_value);
+                                (key, value)
+                            })
+                            .collect::<HashMap<_, _>>();
+                        set_sensor_values.set(merged);
                         set_enabled_sensors.set(sensors);
                     }
+                    set_sensor_log.set(resp.config.sensor_log);
+                    set_backend_attached.set(resp.config.backend_id.is_some());
                     set_loading.set(false);
                 }
                 Err(err) => {
@@ -2104,17 +2136,168 @@ fn VirtualIotViewer(
 
     let controller_name = move || virtual_iot_controller_name(&controller_type.get()).to_string();
     let sensor_count = move || enabled_sensors.get().len();
-    let wiring_map = move || virtual_iot_default_wiring(&controller_type.get(), &enabled_sensors.get());
+    let scene_modules = move || {
+        virtual_iot_scene_modules(
+            &controller_type.get(),
+            &enabled_sensors.get(),
+            &sensor_values.get(),
+        )
+    };
+    let board_alert = move || virtual_iot_controller_has_alert(&sensor_values.get());
+
+    // Seed scene positions for any new items (controller + each module) as sensors load/change.
+    Effect::new(move || {
+        let modules = scene_modules();
+        scene_rects.update(|rects| {
+            rects.entry(String::from("__controller")).or_insert([340.0, 60.0, 380.0, 640.0]);
+            for m in &modules {
+                let idx_on_side = modules
+                    .iter()
+                    .filter(|x| x.side == m.side)
+                    .position(|x| x.sensor_key == m.sensor_key)
+                    .unwrap_or(0) as f64;
+                let (x, y) = match m.side {
+                    VirtualIotSceneSide::Left  => (20.0,  40.0 + idx_on_side * 190.0),
+                    VirtualIotSceneSide::Right => (720.0, 40.0 + idx_on_side * 190.0),
+                };
+                rects.entry(m.sensor_key.clone()).or_insert([x, y, 260.0, 180.0]);
+            }
+        });
+    });
+
+    // Reset all scene positions to seeded defaults.
+    let reset_layout = move || {
+        scene_rects.set(HashMap::new());
+    };
+
+    let inject_device_id = device_id.clone();
+    let inject_sensor = Callback::new(move |(sensor, value, source): (String, String, Option<String>)| {
+        set_inject_error.set(None);
+        set_injecting_sensor.set(Some(sensor.clone()));
+        set_sensor_values.update(|values| {
+            values.insert(sensor.clone(), value.clone());
+        });
+
+        let device_id = inject_device_id.clone();
+        spawn_local(async move {
+            let request = SensorInjectRequest {
+                sensor: sensor.clone(),
+                value: value.clone(),
+                source: source.clone(),
+            };
+            let result = api::post::<SensorInjectRequest, serde_json::Value>(
+                &format!("/devices/{device_id}/virtual-iot/sensors"),
+                &request,
+            )
+            .await;
+
+            set_injecting_sensor.set(None);
+            match result {
+                Ok(payload) => {
+                    if let Some(log_value) = payload.get("sensor_log") {
+                        if let Ok(next_log) = serde_json::from_value::<Vec<VirtualIotSensorLogEntry>>(log_value.clone()) {
+                            set_sensor_log.set(next_log);
+                        }
+                    }
+                    if let Some(state_value) = payload.get("sensor_state") {
+                        let next_state = virtual_iot_sensor_state_map(state_value);
+                        set_sensor_values.update(|values| {
+                            for (key, value) in next_state {
+                                values.insert(key, value);
+                            }
+                        });
+                    }
+                }
+                Err(err) => {
+                    set_inject_error.set(Some(err));
+                }
+            }
+        });
+    });
+    let trigger_event = {
+        let inject_sensor = inject_sensor;
+        Callback::new(move |event: VirtualIotEventDefinition| {
+            let source_tag = format!("event:{}", event.name);
+            for step in event.steps {
+                if step.sensor.trim().is_empty() || step.value.trim().is_empty() {
+                    continue;
+                }
+
+                // Step label = "event:<event name> · <action>" if action present, else just the event.
+                let step_source = match step.action.as_deref() {
+                    Some(a) if !a.is_empty() => format!("{source_tag} · {a}"),
+                    _ => source_tag.clone(),
+                };
+
+                inject_sensor.run((step.sensor.clone(), step.value.clone(), Some(step_source.clone())));
+
+                if let (Some(end_value), Some(duration_ms)) = (step.end_value.clone(), step.duration_ms) {
+                    if duration_ms > 0 {
+                        queue_virtual_iot_event_follow_up(
+                            inject_sensor,
+                            step.sensor,
+                            end_value,
+                            duration_ms,
+                            Some(format!("{step_source} → end")),
+                        );
+                    }
+                }
+            }
+        })
+    };
 
     view! {
         <div class="card virtual-iot-viewer">
-            <div class="card-header">
-                <h2>
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; gap:1rem;">
+                <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
                     <DeviceOsIcon os="virtual_iot".to_string() class="os-icon-title"/>
-                    " "
-                    "Virtual IoT Detail"
-                </h2>
-                <button class="btn btn-ghost btn-sm" on:click=move |_| on_close.run(())>"✕ Close"</button>
+                    <div role="tablist" aria-label="Virtual IoT viewer tabs" style="display:flex; gap:0.25rem;">
+                        <button
+                            type="button"
+                            role="tab"
+                            class=move || {
+                                if active_tab.get() == "detail" { "btn btn-primary btn-sm" } else { "btn btn-ghost btn-sm" }
+                            }
+                            aria-selected=move || (active_tab.get() == "detail").to_string()
+                            on:click=move |_| set_active_tab.set("detail".to_string())
+                        >"Virtual IoT Detail"</button>
+                        <button
+                            type="button"
+                            role="tab"
+                            class=move || {
+                                let base = if active_tab.get() == "shell" { "btn btn-primary btn-sm" } else { "btn btn-ghost btn-sm" };
+                                base.to_string()
+                            }
+                            aria-selected=move || (active_tab.get() == "shell").to_string()
+                            disabled=move || !backend_attached.get()
+                            title=move || {
+                                if backend_attached.get() {
+                                    "Open the VeerOS runtime shell for the attached backend".to_string()
+                                } else {
+                                    "Attach a VeerOS backend to enable the runtime shell".to_string()
+                                }
+                            }
+                            on:click=move |_| {
+                                if backend_attached.get_untracked() {
+                                    set_active_tab.set("shell".to_string());
+                                    set_shell_opened.set(true);
+                                }
+                            }
+                        >"IoT Runtime Shell"</button>
+                    </div>
+                </div>
+                <div style="display:flex; gap:0.5rem; align-items:center;">
+                    <Show when=move || backend_attached.get() && active_tab.get() == "shell">
+                        <a
+                            class="btn btn-ghost btn-sm"
+                            href={move || format!("/virtual-iot/shell?device={}", device_id_value.get_value())}
+                            target="_blank"
+                            rel="noopener"
+                            title="Pop the shell out to a new browser tab"
+                        >"⇗ Pop out"</a>
+                    </Show>
+                    <button class="btn btn-ghost btn-sm" on:click=move |_| on_close.run(())>"✕ Close"</button>
+                </div>
             </div>
 
             <Show when=move || loading.get()>
@@ -2127,111 +2310,733 @@ fn VirtualIotViewer(
                 </div>
             </Show>
 
-            <Show when=move || !loading.get() && error.get().is_none()>
-                <div class="virtual-iot-layout">
-                    <div class="virtual-iot-preview">
-                        <div class="virtual-iot-board-wrap">
-                            {move || {
-                                let current = controller_type.get();
-                                view! { <VirtualIotBoard controller_type=current/> }
-                            }}
+            <Show when=move || !loading.get() && error.get().is_none() && shell_opened.get() && backend_attached.get()>
+                <div
+                    style=move || {
+                        let visible = active_tab.get() == "shell";
+                        format!(
+                            "padding:1rem; flex-direction:column; flex:1; min-height:30rem; display:{};",
+                            if visible { "flex" } else { "none" }
+                        )
+                    }
+                >
+                    <VirtualIotShellTerminal device_id=device_id_value.get_value() />
+                </div>
+            </Show>
+
+            <Show when=move || !loading.get() && error.get().is_none() && active_tab.get() == "detail">
+                <div class="virtual-iot-workbench">
+                    <div class="virtual-iot-workbench-meta">
+                        <div class="virtual-iot-meta-chip">
+                            <span class="virtual-iot-meta-label">"Device"</span>
+                            <strong>{device_name.clone()}</strong>
                         </div>
-                        <div class="virtual-iot-meta">
-                            <div class="info-row">
-                                <span class="info-label">"Device"</span>
-                                <span>{device_name.clone()}</span>
-                            </div>
-                            <div class="info-row">
-                                <span class="info-label">"Controller"</span>
-                                <span>{controller_name}</span>
-                            </div>
-                            <div class="info-row">
-                                <span class="info-label">"Mode"</span>
-                                <span class="badge active">"● Simulated"</span>
-                            </div>
-                            <div class="info-row">
-                                <span class="info-label">"Rate"</span>
-                                <span>{move || format!("{} ms", sim_rate_ms.get())}</span>
-                            </div>
-                            <div class="info-row">
-                                <span class="info-label">"Sensors"</span>
-                                <span>{sensor_count}</span>
-                            </div>
-                            <div class="info-row">
-                                <span class="info-label">"ID"</span>
-                                <span class="mono" style="font-size: 0.75rem;">{device_id.clone()}</span>
-                            </div>
+                        <div class="virtual-iot-meta-chip">
+                            <span class="virtual-iot-meta-label">"Controller"</span>
+                            <strong>{controller_name}</strong>
+                        </div>
+                        <div class="virtual-iot-meta-chip">
+                            <span class="virtual-iot-meta-label">"Simulation"</span>
+                            <strong>{move || format!("{} ms loop", sim_rate_ms.get())}</strong>
+                        </div>
+                        <div class="virtual-iot-meta-chip">
+                            <span class="virtual-iot-meta-label">"Sensors"</span>
+                            <strong>{sensor_count}</strong>
+                        </div>
+                        <div class="virtual-iot-meta-chip">
+                            <span class="virtual-iot-meta-label">"Link"</span>
+                            <strong>{move || if backend_attached.get() { "Attached backend" } else { "Controller-only" }}</strong>
                         </div>
                     </div>
 
-                    <div class="virtual-iot-details">
-                        <div class="card" style="height: 100%;">
-                            <div class="card-header"><h2>"Wiring + Sensors"</h2></div>
-                            <div class="virtual-iot-sensor-panel">
-                                <Show
-                                    when=move || !enabled_sensors.get().is_empty()
-                                    fallback=move || view! { <p class="empty-state">"No sensors enabled for this Virtual IoT device."</p> }
-                                >
-                                    <div class="virtual-iot-wiring-block">
-                                        <h3 class="virtual-iot-section-title">"Default Wiring Diagram"</h3>
-                                        <VirtualIotWiringDiagram
-                                            controller_type=controller_type.get()
-                                            wiring_map=wiring_map()
-                                        />
-                                        <div class="virtual-iot-wiring-note">
-                                            "Program firmware against this default wiring map. If you remap pins in firmware, keep the same bus semantics (I2C/UART/ADC/GPIO)."
-                                        </div>
-                                    </div>
+                    <Show when=move || inject_error.get().is_some()>
+                        <div class="alert error" style="margin: 0 1rem;">
+                            {move || inject_error.get().unwrap_or_default()}
+                        </div>
+                    </Show>
 
-                                    <div class="virtual-iot-wiring-table-wrap">
-                                        <table class="virtual-iot-wiring-table">
-                                            <thead>
-                                                <tr>
-                                                    <th>"Sensor"</th>
-                                                    <th>"Default Pin(s)"</th>
-                                                    <th>"Bus"</th>
-                                                    <th>"Firmware Hint"</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {move || wiring_map().into_iter().map(|entry| {
-                                                    view! {
-                                                        <tr>
-                                                            <td>{entry.sensor_label.clone()}</td>
-                                                            <td class="mono">{entry.pin.clone()}</td>
-                                                            <td>{entry.bus.clone()}</td>
-                                                            <td>{entry.note.clone()}</td>
-                                                        </tr>
-                                                    }
-                                                }).collect::<Vec<_>>()}
-                                            </tbody>
-                                        </table>
-                                    </div>
-
-                                    <h3 class="virtual-iot-section-title" style="margin-top: 1rem;">"Sensor Preview"</h3>
-                                    <div class="virtual-iot-sensor-grid">
-                                        {move || enabled_sensors.get().into_iter().map(|sensor| {
-                                            let label = virtual_iot_sensor_label(&sensor).to_string();
-                                            let preview = virtual_iot_sensor_preview(&sensor).to_string();
-                                            let (module_profile, expected_range) = virtual_iot_sensor_realism(&sensor);
-                                            view! {
-                                                <div class="virtual-iot-sensor-card">
-                                                    <div class="virtual-iot-sensor-title">{label}</div>
-                                                    <div class="virtual-iot-sensor-value">{preview}</div>
-                                                    <div class="virtual-iot-sensor-meta">{module_profile}</div>
-                                                    <div class="virtual-iot-sensor-meta">{expected_range}</div>
-                                                    <div class="virtual-iot-sensor-key mono">{sensor}</div>
-                                                </div>
-                                            }
-                                        }).collect::<Vec<_>>()}
-                                    </div>
-                                </Show>
+                    <Show when=move || !event_definitions.get().is_empty()>
+                        <div class="virtual-iot-events-rack">
+                            <div>
+                                <div class="virtual-iot-section-title">"Scenario triggers"</div>
+                                <div class="virtual-iot-section-caption">"Replay saved Virtual IoT events directly from the live dashboard. End values are applied after the configured interval."</div>
                             </div>
+                            <div class="virtual-iot-event-trigger-list">
+                                {move || event_definitions.get().into_iter().map(|event| {
+                                    let button_label = event.name.clone();
+                                    let event_summary = if event.description.trim().is_empty() {
+                                        format!("{} step(s)", event.steps.len())
+                                    } else {
+                                        event.description.clone()
+                                    };
+                                    let event_to_run = event.clone();
+                                    view! {
+                                        <button class="virtual-iot-event-trigger" on:click=move |_| trigger_event.run(event_to_run.clone())>
+                                            <strong>{button_label}</strong>
+                                            <span>{event_summary}</span>
+                                        </button>
+                                    }
+                                }).collect::<Vec<_>>()}
+                            </div>
+                        </div>
+                    </Show>
+
+                    <Show
+                        when=move || !enabled_sensors.get().is_empty()
+                        fallback=move || view! { <p class="empty-state" style="padding: 1rem;">"No sensors enabled for this Virtual IoT device."</p> }
+                    >
+                        <div class="virtual-iot-scene-toolbar">
+                            <span class="virtual-iot-section-caption">"Drag from the top bar to move. Drag the bottom-right corner to resize. Layout is clamped to the scene."</span>
+                            <button class="btn btn-ghost btn-sm" on:click=move |_| reset_layout()>"Reset layout"</button>
+                        </div>
+                        <div class="virtual-iot-physical-scene virtual-iot-physical-scene-canvas" node_ref=scene_ref>
+                            <VirtualIotWorkbenchWires
+                                modules=scene_modules()
+                                scene_rects=scene_rects
+                            />
+
+                            {move || {
+                                let modules = scene_modules();
+                                modules.into_iter().map(|module| {
+                                    let inject_sensor = inject_sensor;
+                                    let key = module.sensor_key.clone();
+                                    view! {
+                                        <VirtualIotSceneItem
+                                            item_key=key
+                                            scene_rects=scene_rects
+                                            scene_ref=scene_ref
+                                            min_w=200.0
+                                            min_h=150.0
+                                        >
+                                            <VirtualIotSensorWorkbenchModule
+                                                module=module
+                                                on_inject=inject_sensor
+                                                injecting_sensor
+                                            />
+                                        </VirtualIotSceneItem>
+                                    }
+                                }).collect::<Vec<_>>()
+                            }}
+
+                            <VirtualIotSceneItem
+                                item_key="__controller".to_string()
+                                scene_rects=scene_rects
+                                scene_ref=scene_ref
+                                min_w=300.0
+                                min_h=480.0
+                            >
+                                <div class="virtual-iot-controller-shell">
+                                    <div class="virtual-iot-controller-led-strip">
+                                        <span class="virtual-iot-led virtual-iot-led-power is-on"></span>
+                                        <span class="virtual-iot-led virtual-iot-led-activity" class:is-on=move || injecting_sensor.get().is_some()></span>
+                                        <span class="virtual-iot-led virtual-iot-led-alert" class:is-on=board_alert></span>
+                                        <span class="virtual-iot-led virtual-iot-led-link" class:is-on=move || backend_attached.get()></span>
+                                    </div>
+                                    <div class="virtual-iot-controller-board-wrap">
+                                        {move || {
+                                            let current = controller_type.get();
+                                            view! { <VirtualIotBoard controller_type=current/> }
+                                        }}
+                                    </div>
+                                    <div class="virtual-iot-controller-readout">
+                                        <div class="virtual-iot-controller-title">{move || format!("{} bench harness", virtual_iot_controller_name(&controller_type.get()))}</div>
+                                        <div class="virtual-iot-controller-status-row">
+                                            <span class="virtual-iot-status-pill">"PWR"</span>
+                                            <span class="virtual-iot-status-pill" class:is-hot=move || injecting_sensor.get().is_some()>"ACT"</span>
+                                            <span class="virtual-iot-status-pill" class:is-alert=board_alert>"ALERT"</span>
+                                            <span class="virtual-iot-status-pill" class:is-linked=move || backend_attached.get()>"LINK"</span>
+                                        </div>
+                                        <div class="virtual-iot-controller-caption mono">{device_id_value.get_value()}</div>
+                                    </div>
+                                </div>
+                            </VirtualIotSceneItem>
+                        </div>
+                    </Show>
+
+                    <div class="virtual-iot-runtime-log card-section">
+                        <div class="virtual-iot-section-title">"Recent sensor history"</div>
+                        <div class="virtual-iot-runtime-log-table">
+                            <Show
+                                when=move || !sensor_log.get().is_empty()
+                                fallback=move || view! { <div class="virtual-iot-runtime-log-empty">"No readings stored yet. Use a preset, slider, or scenario trigger to generate simulated telemetry."</div> }
+                            >
+                                {move || sensor_log.get().into_iter().rev().take(20).map(|entry| {
+                                    let is_event = entry.source.starts_with("event:");
+                                    let source_text = entry.source.clone();
+                                    view! {
+                                        <div class="virtual-iot-runtime-log-row" class:is-event=is_event>
+                                            <span class="virtual-iot-runtime-log-ts mono">{virtual_iot_short_ts(&entry.ts)}</span>
+                                            <span class="virtual-iot-runtime-log-sensor">{virtual_iot_sensor_label(&entry.sensor)}</span>
+                                            <span class="virtual-iot-runtime-log-value mono">{entry.value}</span>
+                                            <span
+                                                class="virtual-iot-runtime-log-source"
+                                                class:is-event=is_event
+                                            >{source_text}</span>
+                                        </div>
+                                    }
+                                }).collect::<Vec<_>>()}
+                            </Show>
                         </div>
                     </div>
                 </div>
             </Show>
         </div>
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum VirtualIotSceneSide {
+    Left,
+    Right,
+}
+
+#[derive(Clone)]
+struct VirtualIotSceneModule {
+    sensor_key: String,
+    sensor_label: String,
+    reading: String,
+    module_profile: String,
+    expected_range: String,
+    pin: String,
+    bus: String,
+    note: String,
+    side: VirtualIotSceneSide,
+    row: usize,
+}
+
+fn virtual_iot_default_sensor_values(enabled_sensors: &[String]) -> HashMap<String, String> {
+    enabled_sensors
+        .iter()
+        .map(|sensor| (sensor.clone(), virtual_iot_sensor_preview(sensor).to_string()))
+        .collect()
+}
+
+fn virtual_iot_sensor_state_map(value: &serde_json::Value) -> HashMap<String, String> {
+    value
+        .as_object()
+        .map(|map| {
+            map.iter()
+                .filter_map(|(key, value)| value.as_str().map(|text| (key.clone(), text.to_string())))
+                .collect::<HashMap<_, _>>()
+        })
+        .unwrap_or_default()
+}
+
+fn queue_virtual_iot_event_follow_up(
+    inject_sensor: Callback<(String, String, Option<String>)>,
+    sensor: String,
+    value: String,
+    delay_ms: i32,
+    source: Option<String>,
+) {
+    if let Some(window) = web_sys::window() {
+        let follow_up = Closure::once_into_js(move || {
+            inject_sensor.run((sensor.clone(), value.clone(), source.clone()));
+        });
+        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+            follow_up.unchecked_ref(),
+            delay_ms,
+        );
+    }
+}
+
+fn virtual_iot_short_ts(input: &str) -> String {
+    input
+        .split('T')
+        .nth(1)
+        .and_then(|value| value.split('.').next())
+        .unwrap_or(input)
+        .to_string()
+}
+
+fn virtual_iot_scene_modules(
+    controller_type: &str,
+    enabled_sensors: &[String],
+    sensor_values: &HashMap<String, String>,
+) -> Vec<VirtualIotSceneModule> {
+    let wiring = virtual_iot_default_wiring(controller_type, enabled_sensors);
+
+    enabled_sensors
+        .iter()
+        .enumerate()
+        .map(|(idx, sensor)| {
+            let (module_profile, expected_range) = virtual_iot_sensor_realism(sensor);
+            let default_wiring = wiring
+                .iter()
+                .find(|entry| entry.sensor_key == *sensor)
+                .cloned()
+                .unwrap_or_else(|| WiringMapEntry {
+                    sensor_key: sensor.clone(),
+                    sensor_label: virtual_iot_sensor_label(sensor).to_string(),
+                    pin: String::from("PIN_1"),
+                    bus: String::from("I2C"),
+                    note: String::from("Default mapping"),
+                });
+
+            VirtualIotSceneModule {
+                sensor_key: sensor.clone(),
+                sensor_label: virtual_iot_sensor_label(sensor).to_string(),
+                reading: sensor_values
+                    .get(sensor)
+                    .cloned()
+                    .unwrap_or_else(|| virtual_iot_sensor_preview(sensor).to_string()),
+                module_profile: module_profile.to_string(),
+                expected_range: expected_range.to_string(),
+                pin: default_wiring.pin,
+                bus: default_wiring.bus,
+                note: default_wiring.note,
+                side: if idx % 2 == 0 { VirtualIotSceneSide::Left } else { VirtualIotSceneSide::Right },
+                row: idx / 2,
+            }
+        })
+        .collect()
+}
+
+fn virtual_iot_parse_numeric(sensor: &str, reading: &str) -> Option<f64> {
+    let trimmed = reading.trim();
+    if sensor == "wifi_rssi" {
+        return trimmed.split_whitespace().next()?.parse::<f64>().ok();
+    }
+    trimmed
+        .split(|ch: char| !(ch.is_ascii_digit() || ch == '.' || ch == '-'))
+        .find(|chunk| !chunk.is_empty())?
+        .parse::<f64>()
+        .ok()
+}
+
+fn virtual_iot_slider_spec(sensor: &str) -> Option<(f64, f64, f64, &'static str)> {
+    match sensor {
+        "temperature" => Some((10.0, 45.0, 0.1, "C")),
+        "humidity" => Some((10.0, 100.0, 1.0, "%")),
+        "pressure" => Some((960.0, 1045.0, 1.0, "hPa")),
+        "air_quality_co2" => Some((350.0, 2400.0, 10.0, "ppm")),
+        "air_quality_tvoc" => Some((0.0, 2.0, 0.01, "ppm")),
+        "ambient_light" => Some((0.0, 1600.0, 5.0, "lux")),
+        "uv_index" => Some((0.0, 12.0, 0.1, "uv")),
+        "proximity" => Some((2.0, 140.0, 1.0, "cm")),
+        "battery_voltage" => Some((3.2, 4.25, 0.01, "V")),
+        "current" => Some((0.0, 600.0, 5.0, "mA")),
+        "adc_raw" => Some((0.0, 4095.0, 1.0, "raw")),
+        "sound_level" => Some((20.0, 100.0, 1.0, "dB")),
+        "wifi_rssi" => Some((-90.0, -30.0, 1.0, "dBm")),
+        _ => None,
+    }
+}
+
+fn virtual_iot_format_sensor_value(sensor: &str, raw: f64) -> String {
+    match sensor {
+        "temperature" => format!("{raw:.1} C"),
+        "humidity" => format!("{raw:.0} %"),
+        "pressure" => format!("{raw:.0} hPa"),
+        "air_quality_co2" => format!("{raw:.0} ppm"),
+        "air_quality_tvoc" => format!("{raw:.2} ppm"),
+        "ambient_light" => format!("{raw:.0} lux"),
+        "uv_index" => format!("{raw:.1}"),
+        "proximity" => format!("{raw:.0} cm"),
+        "battery_voltage" => format!("{raw:.2} V"),
+        "current" => format!("{raw:.0} mA"),
+        "adc_raw" => format!("{raw:.0}"),
+        "sound_level" => format!("{raw:.0} dB"),
+        "wifi_rssi" => format!("{raw:.0} dBm"),
+        _ => format!("{raw:.1}"),
+    }
+}
+
+fn virtual_iot_sensor_presets(sensor: &str) -> Vec<(&'static str, &'static str)> {
+    match sensor {
+        "temperature" => vec![("Cool", "18.4 C"), ("Nominal", "24.6 C"), ("Hot", "33.8 C")],
+        "humidity" => vec![("Dry", "34 %"), ("Normal", "58 %"), ("Damp", "86 %")],
+        "pressure" => vec![("Low", "990 hPa"), ("Sea", "1012 hPa"), ("Storm", "1030 hPa")],
+        "air_quality_co2" => vec![("Fresh", "420 ppm"), ("Office", "830 ppm"), ("Alert", "1650 ppm")],
+        "air_quality_tvoc" => vec![("Clean", "0.08 ppm"), ("Normal", "0.41 ppm"), ("Poor", "0.92 ppm")],
+        "ambient_light" => vec![("Night", "8 lux"), ("Desk", "326 lux"), ("Sun", "1290 lux")],
+        "uv_index" => vec![("Shade", "0.6"), ("Outdoor", "2.8"), ("Harsh", "7.1")],
+        "proximity" => vec![("Far", "120 cm"), ("Near", "18 cm"), ("Touch", "4 cm")],
+        "battery_voltage" => vec![("Low", "3.42 V"), ("Run", "3.92 V"), ("Full", "4.18 V")],
+        "current" => vec![("Idle", "72 mA"), ("Run", "118 mA"), ("Peak", "310 mA")],
+        "sound_level" => vec![("Quiet", "31 dB"), ("Speech", "52 dB"), ("Alarm", "88 dB")],
+        "accel_xyz" => vec![("Level", "0.04, -0.02, 0.98 g"), ("Tilt", "0.42, 0.12, 0.86 g"), ("Shake", "1.44, -0.65, 0.32 g")],
+        "gyro_xyz" => vec![("Idle", "0.1, 0.0, -0.1 dps"), ("Turn", "8.2, 1.4, 17.0 dps"), ("Spin", "42.0, -11.0, 86.5 dps")],
+        "magnetometer" => vec![("North", "12, -8, 31 uT"), ("East", "30, 5, 10 uT"), ("Disturbed", "84, -66, 54 uT")],
+        "gps" => vec![("HQ", "12.9716, 77.5946"), ("Warehouse", "12.9352, 77.6245"), ("Transit", "12.9981, 77.7004")],
+        "gpio_states" => vec![("Idle", "GPIO4=0 GPIO5=0"), ("Latch", "GPIO4=1 GPIO5=0"), ("Both", "GPIO4=1 GPIO5=1")],
+        "adc_raw" => vec![("Low", "412"), ("Mid", "1842"), ("High", "3510")],
+        "ble_scan" => vec![("Quiet", "[]"), ("One tag", "[beacon-a]"), ("Crowded", "[beacon-a, tag-b, watch-c]")],
+        "wifi_rssi" => vec![("Weak", "-84 dBm"), ("Good", "-58 dBm"), ("Strong", "-39 dBm")],
+        _ => Vec::new(),
+    }
+}
+
+fn virtual_iot_sensor_level(sensor: &str, reading: &str) -> f64 {
+    if let Some((min, max, _, _)) = virtual_iot_slider_spec(sensor) {
+        if let Some(value) = virtual_iot_parse_numeric(sensor, reading) {
+            return ((value - min) / (max - min)).clamp(0.0, 1.0);
+        }
+    }
+    0.45
+}
+
+fn virtual_iot_sensor_visual_kind(sensor: &str) -> &'static str {
+    match sensor {
+        "temperature" | "humidity" | "pressure" => "env",
+        "air_quality_co2" | "air_quality_tvoc" => "air",
+        "ambient_light" | "uv_index" => "light",
+        "proximity" => "proximity",
+        "battery_voltage" | "current" => "power",
+        "sound_level" => "audio",
+        "gps" => "location",
+        "gpio_states" | "adc_raw" => "digital",
+        "wifi_rssi" | "ble_scan" => "network",
+        _ => "motion",
+    }
+}
+
+fn virtual_iot_controller_has_alert(sensor_values: &HashMap<String, String>) -> bool {
+    let reading = |key: &str| sensor_values.get(key).and_then(|value| virtual_iot_parse_numeric(key, value));
+    reading("temperature").is_some_and(|value| value >= 32.0)
+        || reading("humidity").is_some_and(|value| value >= 82.0)
+        || reading("air_quality_co2").is_some_and(|value| value >= 1200.0)
+        || reading("sound_level").is_some_and(|value| value >= 80.0)
+        || reading("battery_voltage").is_some_and(|value| value <= 3.5)
+        || reading("proximity").is_some_and(|value| value <= 6.0)
+}
+
+#[component]
+fn VirtualIotSceneItem(
+    item_key: String,
+    scene_rects: RwSignal<HashMap<String, [f64; 4]>>,
+    scene_ref: NodeRef<leptos::html::Div>,
+    #[prop(default = 180.0)] min_w: f64,
+    #[prop(default = 140.0)] min_h: f64,
+    children: Children,
+) -> impl IntoView {
+    let key = StoredValue::new(item_key);
+    let (dragging, set_dragging) = signal(false);
+    let (resizing, set_resizing) = signal(false);
+    let drag_origin = StoredValue::new((0.0f64, 0.0f64));
+    let start_rect = StoredValue::new([0.0f64, 0.0f64, 260.0f64, 180.0f64]);
+    let container_size = StoredValue::new((1000.0f64, 760.0f64));
+
+    let refresh_container = move || {
+        if let Some(el) = scene_ref.get_untracked() {
+            let r = el.get_bounding_client_rect();
+            container_size.set_value((r.width(), r.height()));
+        }
+    };
+
+    let style = move || {
+        let rects = scene_rects.get();
+        let k = key.get_value();
+        let r = rects.get(&k).copied().unwrap_or([20.0, 20.0, 260.0, 180.0]);
+        format!("left:{:.1}px;top:{:.1}px;width:{:.1}px;height:{:.1}px;", r[0], r[1], r[2], r[3])
+    };
+
+    let on_drag_start = move |evt: web_sys::PointerEvent| {
+        evt.prevent_default();
+        evt.stop_propagation();
+        set_dragging.set(true);
+        drag_origin.set_value((evt.client_x() as f64, evt.client_y() as f64));
+        let k = key.get_value();
+        let r = scene_rects.get_untracked().get(&k).copied().unwrap_or([0.0, 0.0, 260.0, 180.0]);
+        start_rect.set_value(r);
+        refresh_container();
+        if let Some(target) = evt.current_target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()) {
+            let _ = target.set_pointer_capture(evt.pointer_id());
+        }
+    };
+
+    let on_drag_move = move |evt: web_sys::PointerEvent| {
+        if !dragging.get_untracked() { return; }
+        evt.prevent_default();
+        let (ox, oy) = drag_origin.get_value();
+        let sr = start_rect.get_value();
+        let (cw, ch) = container_size.get_value();
+        let dx = evt.client_x() as f64 - ox;
+        let dy = evt.client_y() as f64 - oy;
+        let max_x = (cw - sr[2]).max(0.0);
+        let max_y = (ch - sr[3]).max(0.0);
+        let new_x = (sr[0] + dx).clamp(0.0, max_x);
+        let new_y = (sr[1] + dy).clamp(0.0, max_y);
+        let k = key.get_value();
+        scene_rects.update(|m| {
+            let r = m.entry(k).or_insert(sr);
+            r[0] = new_x;
+            r[1] = new_y;
+        });
+    };
+
+    let on_drag_end = move |evt: web_sys::PointerEvent| {
+        if dragging.get_untracked() {
+            set_dragging.set(false);
+            if let Some(target) = evt.current_target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()) {
+                let _ = target.release_pointer_capture(evt.pointer_id());
+            }
+        }
+    };
+
+    let on_resize_start = move |evt: web_sys::PointerEvent| {
+        evt.prevent_default();
+        evt.stop_propagation();
+        set_resizing.set(true);
+        drag_origin.set_value((evt.client_x() as f64, evt.client_y() as f64));
+        let k = key.get_value();
+        let r = scene_rects.get_untracked().get(&k).copied().unwrap_or([0.0, 0.0, 260.0, 180.0]);
+        start_rect.set_value(r);
+        refresh_container();
+        if let Some(target) = evt.current_target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()) {
+            let _ = target.set_pointer_capture(evt.pointer_id());
+        }
+    };
+
+    let on_resize_move = move |evt: web_sys::PointerEvent| {
+        if !resizing.get_untracked() { return; }
+        evt.prevent_default();
+        let (ox, oy) = drag_origin.get_value();
+        let sr = start_rect.get_value();
+        let (cw, ch) = container_size.get_value();
+        let dx = evt.client_x() as f64 - ox;
+        let dy = evt.client_y() as f64 - oy;
+        let max_w = (cw - sr[0]).max(min_w);
+        let max_h = (ch - sr[1]).max(min_h);
+        let new_w = (sr[2] + dx).clamp(min_w, max_w);
+        let new_h = (sr[3] + dy).clamp(min_h, max_h);
+        let k = key.get_value();
+        scene_rects.update(|m| {
+            let r = m.entry(k).or_insert(sr);
+            r[2] = new_w;
+            r[3] = new_h;
+        });
+    };
+
+    let on_resize_end = move |evt: web_sys::PointerEvent| {
+        if resizing.get_untracked() {
+            set_resizing.set(false);
+            if let Some(target) = evt.current_target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()) {
+                let _ = target.release_pointer_capture(evt.pointer_id());
+            }
+        }
+    };
+
+    view! {
+        <div
+            class="virtual-iot-scene-item"
+            class:is-dragging=move || dragging.get()
+            class:is-resizing=move || resizing.get()
+            style=style
+        >
+            <div
+                class="virtual-iot-scene-drag-handle"
+                on:pointerdown=on_drag_start
+                on:pointermove=on_drag_move
+                on:pointerup=on_drag_end
+                on:pointercancel=on_drag_end
+                title="Drag to move"
+            >
+                <span class="virtual-iot-scene-drag-grip"></span>
+            </div>
+            <div class="virtual-iot-scene-body">
+                {children()}
+            </div>
+            <div
+                class="virtual-iot-scene-resize-handle"
+                on:pointerdown=on_resize_start
+                on:pointermove=on_resize_move
+                on:pointerup=on_resize_end
+                on:pointercancel=on_resize_end
+                title="Drag to resize"
+            ></div>
+        </div>
+    }
+}
+
+#[component]
+fn VirtualIotWorkbenchWires(
+    modules: Vec<VirtualIotSceneModule>,
+    scene_rects: RwSignal<HashMap<String, [f64; 4]>>,
+) -> impl IntoView {
+    view! {
+        <svg class="virtual-iot-physical-wires" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">
+            <defs>
+                <filter id="viot-wire-shadow" x="-30%" y="-30%" width="160%" height="160%">
+                    <feDropShadow dx="0" dy="2" stdDeviation="2.5" flood-color="rgba(0,0,0,0.45)"/>
+                </filter>
+            </defs>
+            {modules.into_iter().map(|module| {
+                let key = module.sensor_key.clone();
+                let pin = module.pin.clone();
+                let bus = module.bus.clone();
+                view! {
+                    <g>
+                        {move || {
+                            let rects = scene_rects.get();
+                            let default = [0.0f64, 0.0, 260.0, 180.0];
+                            let ctrl = rects.get("__controller").copied().unwrap_or(default);
+                            let m = rects.get(&key).copied().unwrap_or(default);
+                            let ctrl_cx = ctrl[0] + ctrl[2] / 2.0;
+                            let m_cx = m[0] + m[2] / 2.0;
+                            let is_left = m_cx < ctrl_cx;
+                            let (start_x, start_y) = if is_left {
+                                (ctrl[0], ctrl[1] + ctrl[3] / 2.0)
+                            } else {
+                                (ctrl[0] + ctrl[2], ctrl[1] + ctrl[3] / 2.0)
+                            };
+                            let (end_x, end_y) = if is_left {
+                                (m[0] + m[2], m[1] + m[3] / 2.0)
+                            } else {
+                                (m[0], m[1] + m[3] / 2.0)
+                            };
+                            let mid_x = (start_x + end_x) / 2.0;
+                            let d = format!(
+                                "M {:.1} {:.1} C {:.1} {:.1}, {:.1} {:.1}, {:.1} {:.1}",
+                                start_x, start_y, mid_x, start_y, mid_x, end_y, end_x, end_y,
+                            );
+                            let stroke = wire_color_for_bus(&pin, &bus);
+                            let dash = if pin == "INTERNAL" || pin == "EXTERNAL" { "6 6" } else { "0" };
+                            view! {
+                                <>
+                                    <path d={d.clone()} stroke={stroke.clone()} stroke-opacity="0.22" stroke-width="9" fill="none" stroke-linecap="round"/>
+                                    <path d={d.clone()} stroke={stroke.clone()} stroke-width="3.8" stroke-dasharray={dash} fill="none" stroke-linecap="round" filter="url(#viot-wire-shadow)"/>
+                                    <circle cx={format!("{start_x:.1}")} cy={format!("{start_y:.1}")} r="5" fill="#0f172a" stroke={stroke.clone()} stroke-width="1.6"/>
+                                    <circle cx={format!("{end_x:.1}")} cy={format!("{end_y:.1}")} r="5" fill="#0a1524" stroke={stroke} stroke-width="1.6"/>
+                                </>
+                            }
+                        }}
+                    </g>
+                }
+            }).collect::<Vec<_>>()}
+        </svg>
+    }
+}
+
+#[component]
+fn VirtualIotSensorWorkbenchModule(
+    module: VirtualIotSceneModule,
+    on_inject: Callback<(String, String, Option<String>)>,
+    injecting_sensor: ReadSignal<Option<String>>,
+) -> impl IntoView {
+    let sensor_key = module.sensor_key.clone();
+    let reading = module.reading.clone();
+    let presets = virtual_iot_sensor_presets(&sensor_key);
+    let slider_spec = virtual_iot_slider_spec(&sensor_key);
+    let level = virtual_iot_sensor_level(&sensor_key, &reading);
+    let visual_kind = virtual_iot_sensor_visual_kind(&sensor_key).to_string();
+    let chip_name = virtual_iot_sensor_chip_name(&sensor_key);
+    let busy_sensor_key = sensor_key.clone();
+    let busy_text_sensor_key = sensor_key.clone();
+    let active_sensor_key = sensor_key.clone();
+
+    view! {
+        <div
+            class="virtual-iot-module-card"
+            class:is-active=move || injecting_sensor.get().as_deref() == Some(active_sensor_key.as_str())
+            data-kind={visual_kind.clone()}
+        >
+            <div class="virtual-iot-module-header">
+                <div>
+                    <div class="virtual-iot-module-title">{module.sensor_label.clone()}</div>
+                    <div class="virtual-iot-module-subtitle mono">{chip_name}</div>
+                </div>
+                <div class="virtual-iot-module-io mono">{module.pin.clone()}</div>
+            </div>
+
+            <div class="virtual-iot-module-body">
+                <div class={format!("virtual-iot-module-visual {}", visual_kind)} style={format!("--level: {:.3};", level)}>
+                    <div class="virtual-iot-module-visual-inner">
+                        <span class="virtual-iot-module-icon">{virtual_iot_sensor_visual_icon(&module.sensor_key)}</span>
+                    </div>
+                    <div class="virtual-iot-module-silk mono">{chip_name}</div>
+                    <div class="virtual-iot-module-pins">
+                        <span></span><span></span><span></span><span></span>
+                    </div>
+                </div>
+                <div class="virtual-iot-module-readout-panel">
+                    <div class="virtual-iot-module-reading mono">{reading.clone()}</div>
+                    <div class="virtual-iot-module-range mono">{module.bus.clone()}</div>
+                </div>
+            </div>
+
+            {if let Some((min, max, step, unit)) = slider_spec {
+                let sensor_for_slider = module.sensor_key.clone();
+                let on_inject_slider = on_inject;
+                let slider_value = virtual_iot_parse_numeric(&sensor_for_slider, &reading).unwrap_or((min + max) / 2.0);
+                view! {
+                    <div class="virtual-iot-module-control-row">
+                        <input
+                            class="virtual-iot-module-slider"
+                            type="range"
+                            min={min.to_string()}
+                            max={max.to_string()}
+                            step={step.to_string()}
+                            prop:value={slider_value.to_string()}
+                            on:change=move |ev| {
+                                if let Ok(next_value) = event_target_value(&ev).parse::<f64>() {
+                                    on_inject_slider.run((sensor_for_slider.clone(), virtual_iot_format_sensor_value(&sensor_for_slider, next_value), None));
+                                }
+                            }
+                        />
+                        <div class="virtual-iot-module-control-meta mono">{format!("{min:.0} → {max:.0} {unit}")}</div>
+                    </div>
+                }.into_any()
+            } else {
+                view! { <div class="virtual-iot-module-control-meta mono">"Preset-driven simulation module"</div> }.into_any()
+            }}
+
+            <div class="virtual-iot-module-actions">
+                {presets.into_iter().map(|(label, value)| {
+                    let sensor_key = module.sensor_key.clone();
+                    let next_value = value.to_string();
+                    let on_inject = on_inject;
+                    view! {
+                        <button class="btn btn-secondary btn-sm" on:click=move |_| on_inject.run((sensor_key.clone(), next_value.clone(), None))>{label}</button>
+                    }
+                }).collect::<Vec<_>>()}
+                <span class="virtual-iot-module-busy" class:is-visible=move || injecting_sensor.get().as_deref() == Some(busy_sensor_key.as_str())>
+                    {move || if injecting_sensor.get().as_deref() == Some(busy_text_sensor_key.as_str()) { "Applying…" } else { "Ready" }}
+                </span>
+            </div>
+        </div>
+    }
+}
+
+fn virtual_iot_sensor_visual_icon(sensor: &str) -> &'static str {
+    match sensor {
+        "temperature" => "T",
+        "humidity" => "H",
+        "pressure" => "P",
+        "air_quality_co2" | "air_quality_tvoc" => "AQ",
+        "ambient_light" | "uv_index" => "LX",
+        "proximity" => "PX",
+        "battery_voltage" | "current" => "V",
+        "sound_level" => "DB",
+        "gps" => "GPS",
+        "gpio_states" | "adc_raw" => "IO",
+        "wifi_rssi" | "ble_scan" => "RF",
+        _ => "IMU",
+    }
+}
+
+/// Short module/chip name used as silkscreen text on each sensor card.
+/// Chosen to feel like real breakout boards (adafruit/sparkfun style).
+fn virtual_iot_sensor_chip_name(sensor: &str) -> &'static str {
+    match sensor {
+        "temperature" | "humidity" | "pressure" => "BME280",
+        "air_quality_co2" => "SCD41",
+        "air_quality_tvoc" => "SGP40",
+        "ambient_light" => "TSL2591",
+        "uv_index" => "VEML6075",
+        "proximity" => "VL53L1X",
+        "battery_voltage" => "MAX17048",
+        "current" => "INA219",
+        "sound_level" => "MAX4466",
+        "gps" => "MAX-M10",
+        "gpio_states" => "MCP23017",
+        "adc_raw" => "ADS1115",
+        "wifi_rssi" => "ESP-WROOM",
+        "ble_scan" => "NRF52840",
+        "accel_xyz" => "LSM6DSOX",
+        "gyro_xyz" => "BMI270",
+        "magnetometer" => "LIS3MDL",
+        _ => "MCU-MOD",
     }
 }
 

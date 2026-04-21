@@ -4,7 +4,7 @@
 //! but adds agent-specific validation and a dedicated `AgentRuntime` config
 //! that captures only the fields the agent binary needs.
 
-use ef_core::config::{AgentConfig, LoggingConfig, NatsConfig, StreamingConfig};
+use ef_core::config::{AgentConfig, LoggingConfig, NatsConfig, StreamingConfig, VeerOsConfig};
 use ef_core::telemetry::TelemetryConfig;
 
 /// Runtime configuration for the edge agent, extracted from the full `AppConfig`.
@@ -15,6 +15,7 @@ pub struct AgentRuntime {
     pub streaming: StreamingConfig,
     pub logging: LoggingConfig,
     pub telemetry: TelemetryConfig,
+    pub veeros: VeerOsConfig,
 }
 
 impl AgentRuntime {
@@ -40,6 +41,7 @@ impl AgentRuntime {
             streaming: cfg.streaming,
             logging: cfg.logging,
             telemetry: cfg.telemetry,
+            veeros: cfg.veeros,
         })
     }
 }

@@ -11,6 +11,7 @@ mod heartbeat;
 mod streaming;
 mod streaming_server;
 mod updater;
+mod veeros_api;
 
 use client::ControlPlaneClient;
 use config::AgentRuntime;
@@ -63,6 +64,18 @@ async fn main() -> Result<()> {
     };
     tracing::info!(%streaming_url, "Agent streaming URL");
 
+    // ── Detect agent capabilities ──────────────────────────────────
+    let capabilities = detect_capabilities(&cfg);
+    tracing::info!(capabilities = ?capabilities, "Agent capabilities");
+
+    // ── Register this agent with the control plane ────────────────
+    if let Err(e) = cp_client
+        .register_agent(&cfg.agent.region, Some(&streaming_url), &capabilities)
+        .await
+    {
+        tracing::warn!("Agent register failed (will retry on next heartbeat cycle): {e}");
+    }
+
     // ── P8.3 Device discovery loop ────────────────────────────────
     let discovery_handle = discovery::spawn_discovery_loop(
         Arc::clone(&cp_client),
@@ -109,8 +122,9 @@ async fn main() -> Result<()> {
 
     // ── Agent-local streaming HTTP/WS server ──────────────────────
     let streaming_port = cfg.agent.streaming_port.unwrap_or(7070);
+    let veeros_cfg = cfg.veeros.clone();
     tokio::spawn(async move {
-        if let Err(e) = streaming_server::start_streaming_server(streaming_port).await {
+        if let Err(e) = streaming_server::start_streaming_server(streaming_port, veeros_cfg).await {
             tracing::error!("Streaming server failed: {e}");
         }
     });
@@ -182,4 +196,19 @@ fn detect_local_ip() -> Option<String> {
     socket.connect("10.255.255.255:1").ok()?;
     let addr = socket.local_addr().ok()?;
     Some(addr.ip().to_string())
+}
+
+/// Detect which high-level capabilities this agent host can serve.
+/// Platform-level device capabilities (android, ios, iot) are always
+/// advertised — discovery will prove them out. Richer capabilities are
+/// probed for locally-installed tooling.
+fn detect_capabilities(cfg: &config::AgentRuntime) -> Vec<String> {
+    let mut caps: Vec<String> = vec!["android".into(), "ios".into(), "iot".into()];
+
+    if std::path::Path::new(&cfg.veeros.vm_script_path).exists() {
+        caps.push("veeros".into());
+    }
+
+    // Future: detect runner (cargo/gradle/xcodebuild), dockerized capabilities, etc.
+    caps
 }

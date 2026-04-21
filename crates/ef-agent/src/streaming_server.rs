@@ -34,12 +34,16 @@ fn ffmpeg_path() -> &'static str {
 }
 
 /// Start the agent's streaming HTTP server on the given port.
-pub async fn start_streaming_server(port: u16) -> anyhow::Result<()> {
+pub async fn start_streaming_server(
+    port: u16,
+    veeros_cfg: ef_core::config::VeerOsConfig,
+) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/ws/stream/{*serial}", get(ws_stream_handler))
         .route("/ws/logs/{*serial}", get(ws_logs_handler))
         .route("/ws/ssh", get(ws_ssh_handler))
-        .route("/health", get(health));
+        .route("/health", get(health))
+        .merge(crate::veeros_api::router(veeros_cfg));
 
     let addr = format!("0.0.0.0:{port}");
     tracing::info!(%addr, "Agent streaming server starting");

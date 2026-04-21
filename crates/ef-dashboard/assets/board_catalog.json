@@ -577,6 +577,37 @@
       }
     },
     {
+      "id": "xiao-esp32c6",
+      "pin_anchors": {
+        "GPIO0": 95.0, "GPIO1": 127.0, "GPIO2": 159.0, "GPIO21": 191.0,
+        "GPIO22": 223.0, "GPIO23": 255.0, "GPIO16": 287.0,
+        "GPIO17": 287.0, "GPIO19": 255.0, "GPIO20": 223.0, "GPIO18": 191.0,
+        "5V": 95.0, "GND": 127.0, "3V3": 159.0,
+        "INTERNAL": 205.0
+      },
+      "rules": {
+        "temperature": { "pin": "D4 / D5 (GPIO22 / GPIO23)", "bus": "I2C", "note": "SDA=D4, SCL=D5" },
+        "humidity": { "pin": "D4 / D5 (GPIO22 / GPIO23)", "bus": "I2C", "note": "SDA=D4, SCL=D5" },
+        "pressure": { "pin": "D4 / D5 (GPIO22 / GPIO23)", "bus": "I2C", "note": "SDA=D4, SCL=D5" },
+        "air_quality_co2": { "pin": "D4 / D5 (GPIO22 / GPIO23)", "bus": "I2C", "note": "SDA=D4, SCL=D5" },
+        "air_quality_tvoc": { "pin": "D4 / D5 (GPIO22 / GPIO23)", "bus": "I2C", "note": "SDA=D4, SCL=D5" },
+        "accel_xyz": { "pin": "D4 / D5 (GPIO22 / GPIO23)", "bus": "I2C", "note": "SDA=D4, SCL=D5" },
+        "gyro_xyz": { "pin": "D4 / D5 (GPIO22 / GPIO23)", "bus": "I2C", "note": "SDA=D4, SCL=D5" },
+        "magnetometer": { "pin": "D4 / D5 (GPIO22 / GPIO23)", "bus": "I2C", "note": "SDA=D4, SCL=D5" },
+        "uv_index": { "pin": "D4 / D5 (GPIO22 / GPIO23)", "bus": "I2C", "note": "SDA=D4, SCL=D5" },
+        "proximity": { "pin": "D4 / D5 (GPIO22 / GPIO23)", "bus": "I2C", "note": "SDA=D4, SCL=D5" },
+        "ambient_light": { "pin": "D0 (GPIO0 / A0)", "bus": "ADC1_CH0", "note": "Analog in, shared with RF switch enable" },
+        "gps": { "pin": "D6 / D7 (GPIO16 / GPIO17)", "bus": "UART1", "note": "TX=D6, RX=D7" },
+        "battery_voltage": { "pin": "D1 (GPIO1 / A1)", "bus": "ADC1_CH1", "note": "1:2 divider recommended" },
+        "current": { "pin": "D2 (GPIO2 / A2)", "bus": "ADC1_CH2", "note": "Current sensor analog out" },
+        "gpio_states": { "pin": "D8 / D9 / D10 (GPIO19 / GPIO20 / GPIO18)", "bus": "Digital GPIO", "note": "SPI pads reused as DIO" },
+        "adc_raw": { "pin": "D2 (GPIO2 / A2)", "bus": "ADC1_CH2", "note": "Raw ADC capture" },
+        "sound_level": { "pin": "D1 (GPIO1 / A1)", "bus": "ADC1_CH1", "note": "Mic module analog out" },
+        "wifi_rssi": { "pin": "INTERNAL", "bus": "WiFi 6", "note": "Onboard ceramic antenna / UFL" },
+        "ble_scan": { "pin": "INTERNAL", "bus": "BLE 5.3", "note": "Onboard ceramic antenna / UFL" }
+      }
+    },
+    {
       "id": "generic",
       "rules": {
         "temperature": { "pin": "PIN_1 / PIN_2", "bus": "I2C", "note": "SDA/SCL default" },
@@ -1463,6 +1494,55 @@
       "pin_count": 16,
       "board_color": "#1a2c4e",
       "wiring_family": "stm32-nucleo"
+    },
+    {
+      "id": "xiao-esp32c6",
+      "name": "Seeed XIAO ESP32C6",
+      "flash": "4 MB",
+      "ram": "512 KB",
+      "connectivity": "WiFi 6 + BLE 5.3 + Thread/Zigbee (802.15.4)",
+      "visual_family": "xiao",
+      "chip_label": "ESP32-C6",
+      "has_wifi": true,
+      "pin_count": 14,
+      "board_color": "#c44414",
+      "wiring_family": "xiao-esp32c6",
+      "visual_layout": {
+        "module": { "label": "SHIELD", "x": 92, "y": 116, "width": 76, "height": 98, "radius": 4, "fill": "#9aa4ad", "stroke": "#4a5560", "text_fill": "#1a2233", "font_size": 7.8 },
+        "headers": [
+          { "label": "", "x": 16, "y": 87, "columns": 1, "rows": 7, "pitch_x": 0, "pitch_y": 32, "pin_width": 18, "pin_height": 12, "base_fill": "#d1460d", "base_stroke": "#7a2806", "pin_fill": "#f0c24b", "pin_corner_radius": 1.5, "text_fill": "#fef3c7" },
+          { "label": "", "x": 226, "y": 87, "columns": 1, "rows": 7, "pitch_x": 0, "pitch_y": 32, "pin_width": 18, "pin_height": 12, "base_fill": "#d1460d", "base_stroke": "#7a2806", "pin_fill": "#f0c24b", "pin_corner_radius": 1.5, "text_fill": "#fef3c7" }
+        ],
+        "ports": [
+          { "label": "USB-C", "x": 98, "y": 24, "width": 64, "height": 22, "radius": 5, "fill": "#b5bcc3", "stroke": "#5a636c", "text_fill": "#1f2937", "font_size": 6.2 },
+          { "label": "UFL", "x": 118, "y": 258, "width": 24, "height": 14, "radius": 3, "fill": "#1c1f24", "stroke": "#8a9099", "text_fill": "#d0d6dc", "font_size": 4.6 },
+          { "label": "≋ ANT ≋", "x": 40, "y": 282, "width": 180, "height": 12, "radius": 2, "fill": "#efe3b3", "stroke": "#8c7a3c", "text_fill": "#5b4a13", "font_size": 5.0 }
+        ],
+        "power": [
+          { "label": "D0·A0", "x": 36, "y": 86, "width": 48, "height": 13, "radius": 2, "fill": "#7a2806", "stroke": "#4a1704", "text_fill": "#ffe8cd", "font_size": 4.8 },
+          { "label": "D1·A1", "x": 36, "y": 118, "width": 48, "height": 13, "radius": 2, "fill": "#7a2806", "stroke": "#4a1704", "text_fill": "#ffe8cd", "font_size": 4.8 },
+          { "label": "D2·A2", "x": 36, "y": 150, "width": 48, "height": 13, "radius": 2, "fill": "#7a2806", "stroke": "#4a1704", "text_fill": "#ffe8cd", "font_size": 4.8 },
+          { "label": "D3", "x": 36, "y": 182, "width": 48, "height": 13, "radius": 2, "fill": "#7a2806", "stroke": "#4a1704", "text_fill": "#ffe8cd", "font_size": 4.8 },
+          { "label": "D4·SDA", "x": 36, "y": 214, "width": 48, "height": 13, "radius": 2, "fill": "#7a2806", "stroke": "#4a1704", "text_fill": "#ffe8cd", "font_size": 4.8 },
+          { "label": "D5·SCL", "x": 36, "y": 246, "width": 48, "height": 13, "radius": 2, "fill": "#7a2806", "stroke": "#4a1704", "text_fill": "#ffe8cd", "font_size": 4.8 },
+          { "label": "D6·TX", "x": 36, "y": 278, "width": 48, "height": 13, "radius": 2, "fill": "#7a2806", "stroke": "#4a1704", "text_fill": "#ffe8cd", "font_size": 4.8 },
+          { "label": "5V", "x": 176, "y": 86, "width": 48, "height": 13, "radius": 2, "fill": "#7a2806", "stroke": "#4a1704", "text_fill": "#ffe8cd", "font_size": 4.8 },
+          { "label": "GND", "x": 176, "y": 118, "width": 48, "height": 13, "radius": 2, "fill": "#7a2806", "stroke": "#4a1704", "text_fill": "#ffe8cd", "font_size": 4.8 },
+          { "label": "3V3", "x": 176, "y": 150, "width": 48, "height": 13, "radius": 2, "fill": "#7a2806", "stroke": "#4a1704", "text_fill": "#ffe8cd", "font_size": 4.8 },
+          { "label": "D10·MO", "x": 176, "y": 182, "width": 48, "height": 13, "radius": 2, "fill": "#7a2806", "stroke": "#4a1704", "text_fill": "#ffe8cd", "font_size": 4.8 },
+          { "label": "D9·MI", "x": 176, "y": 214, "width": 48, "height": 13, "radius": 2, "fill": "#7a2806", "stroke": "#4a1704", "text_fill": "#ffe8cd", "font_size": 4.8 },
+          { "label": "D8·SCK", "x": 176, "y": 246, "width": 48, "height": 13, "radius": 2, "fill": "#7a2806", "stroke": "#4a1704", "text_fill": "#ffe8cd", "font_size": 4.8 },
+          { "label": "D7·RX", "x": 176, "y": 278, "width": 48, "height": 13, "radius": 2, "fill": "#7a2806", "stroke": "#4a1704", "text_fill": "#ffe8cd", "font_size": 4.8 }
+        ],
+        "indicators": [
+          { "x": 74, "y": 62, "radius": 5, "fill": "#1a1a1a", "stroke": "#8a8f95", "label": "R", "text_fill": "#e6e9ec" },
+          { "x": 186, "y": 62, "radius": 5, "fill": "#1a1a1a", "stroke": "#8a8f95", "label": "B", "text_fill": "#e6e9ec" },
+          { "x": 108, "y": 232, "radius": 4, "fill": "#3a0d0d", "stroke": "#ef4444", "label": "CHG", "text_fill": "#fee2e2" },
+          { "x": 152, "y": 232, "radius": 4, "fill": "#3a2207", "stroke": "#fb923c", "label": "LED", "text_fill": "#ffedd5" }
+        ],
+        "accessories": [],
+        "footer_label": "XIAO ESP32C6 · RISC-V 160 MHz · WiFi 6 + BLE 5.3 + Thread/Zigbee · 14 pads"
+      }
     },
     {
       "id": "generic-mcu",

@@ -183,4 +183,30 @@ impl ControlPlaneClient {
             Err(_) => false,
         }
     }
+
+    /// Register this agent with the control plane, announcing its
+    /// capabilities (veeros, runner, android, ios, ...). Called once
+    /// at startup and again whenever capabilities change.
+    pub async fn register_agent(
+        &self,
+        region: &str,
+        streaming_url: Option<&str>,
+        capabilities: &[String],
+    ) -> anyhow::Result<()> {
+        let url = format!("{}/api/v1/agent/register", self.base_url);
+        let body = serde_json::json!({
+            "agent_id": self.agent_id,
+            "region": region,
+            "streaming_url": streaming_url,
+            "capabilities": capabilities,
+        });
+
+        let resp = self.http.post(&url).json(&body).send().await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            anyhow::bail!("Agent register failed ({status}): {text}");
+        }
+        Ok(())
+    }
 }

@@ -29,3 +29,7 @@ base64 = { workspace = true }
 axum = { workspace = true }
 futures = { workspace = true }
 tower-http = { workspace = true }
+tokio-stream = { workspace = true }
+
+[build-dependencies]
+tonic-build = { workspace = true }

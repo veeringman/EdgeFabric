@@ -12,6 +12,10 @@ pub mod test {
     tonic::include_proto!("edgefabric.test.v1");
 }
 
+pub mod agent {
+    tonic::include_proto!("edgefabric.agent.v1");
+}
+
 /// File descriptor set for gRPC server reflection.
 pub const FILE_DESCRIPTOR_SET: &[u8] =
     tonic::include_file_descriptor_set!("edgefabric_descriptor");

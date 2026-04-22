@@ -3,6 +3,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "../../proto/device.proto",
         "../../proto/session.proto",
         "../../proto/test.proto",
+        "../../proto/agent.proto",
     ];
 
     let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR")?);

@@ -7,6 +7,7 @@ mod client;
 mod config;
 mod discovery;
 mod executor;
+mod grpc_client;
 mod heartbeat;
 mod streaming;
 mod streaming_server;
@@ -119,6 +120,43 @@ async fn main() -> Result<()> {
         cfg.streaming.clone(),
         Arc::clone(&registry),
     );
+
+    // ── Prototype gRPC control-plane channel (opt-in) ─────────────
+    // Enable by setting env var EF_AGENT_GRPC_URL=http://<api-host>:50051.
+    // Runs in parallel with the HTTP client; does not replace it yet.
+    if let Ok(grpc_url) = std::env::var("EF_AGENT_GRPC_URL") {
+        if !grpc_url.is_empty() {
+            let hostname = std::env::var("HOSTNAME")
+                .or_else(|_| {
+                    std::process::Command::new("hostname")
+                        .output()
+                        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                        .map_err(|_| std::env::VarError::NotPresent)
+                })
+                .unwrap_or_else(|_| "unknown".to_string());
+            let streaming_url_clone = {
+                let addr = cfg.agent.advertise_address.clone()
+                    .or_else(|| detect_local_ip())
+                    .unwrap_or_else(|| "127.0.0.1".to_string());
+                Some(format!("http://{addr}:{streaming_port}"))
+            };
+            match grpc_client::spawn(
+                grpc_url,
+                cfg.agent.agent_id.clone(),
+                cfg.agent.region.clone(),
+                hostname,
+                env!("CARGO_PKG_VERSION").to_string(),
+                streaming_url_clone,
+                cfg.agent.heartbeat_interval_seconds,
+                shutdown_rx.clone(),
+            )
+            .await
+            {
+                Ok(_) => tracing::info!("gRPC prototype channel started"),
+                Err(e) => tracing::warn!("gRPC prototype channel failed to start: {e}"),
+            }
+        }
+    }
 
     // ── Agent-local streaming HTTP/WS server ──────────────────────
     let streaming_port = cfg.agent.streaming_port.unwrap_or(7070);

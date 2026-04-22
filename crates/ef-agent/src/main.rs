@@ -203,7 +203,7 @@ fn detect_local_ip() -> Option<String> {
 /// advertised — discovery will prove them out. Richer capabilities are
 /// probed for locally-installed tooling.
 fn detect_capabilities(cfg: &config::AgentRuntime) -> Vec<String> {
-    let mut caps: Vec<String> = vec!["android".into(), "ios".into(), "iot".into()];
+    let mut caps: Vec<String> = vec!["android".into(), "ios".into(), "iot".into(), "ssh".into()];
 
     if std::path::Path::new(&cfg.veeros.vm_script_path).exists() {
         caps.push("veeros".into());

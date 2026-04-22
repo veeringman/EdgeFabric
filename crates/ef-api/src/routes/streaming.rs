@@ -148,20 +148,33 @@ async fn handle_stream(socket: WebSocket, id: Uuid, state: AppState) {
             if let Some(ref streaming_url) = agent.streaming_url {
                 // SSH devices: proxy to agent's SSH endpoint with host/port query params
                 if device.os == "ssh" {
-                    tracing::info!(%id, %streaming_url, %serial, "Proxying SSH session to remote agent");
-                    let (host, port) = match parse_ssh_serial(&serial) {
-                        Some(hp) => hp,
-                        None => {
-                            let _ = ws_tx.send(Message::Text(
-                                serde_json::json!({"type":"error","message":format!("Invalid SSH serial: {serial}")}).to_string().into()
-                            )).await;
+                        // Devices with local_pty capability: spawn a direct PTY on the agent
+                        // (the agent IS the host machine — no SSH credentials needed).
+                        if device.capabilities.contains(&"local_pty".to_string()) {
+                            tracing::info!(%id, %streaming_url, "Proxying local PTY session to remote agent");
+                            let agent_ws_url = format!("{}/ws/pty", streaming_url.trim_end_matches('/'))
+                                .replace("http://", "ws://").replace("https://", "wss://");
+                            proxy_ws_to_agent(ws_tx, ws_rx, &agent_ws_url, id).await;
                             return;
                         }
-                    };
-                    let agent_ws_url = format!(
-                        "{}/ws/ssh?host={}&port={}",
-                        streaming_url.trim_end_matches('/'), host, port
-                    ).replace("http://", "ws://").replace("https://", "wss://");
+                        tracing::info!(%id, %streaming_url, %serial, "Proxying SSH session to remote agent");
+                        let (username, host, port) = match parse_ssh_target(&serial) {
+                            Some(hp) => hp,
+                            None => {
+                                let _ = ws_tx.send(Message::Text(
+                                    serde_json::json!({"type":"error","message":format!("Invalid SSH serial: {serial}")}).to_string().into()
+                                )).await;
+                                return;
+                            }
+                        };
+                        let mut agent_ws_url = format!(
+                            "{}/ws/ssh?host={}&port={}",
+                            streaming_url.trim_end_matches('/'), host, port
+                        );
+                        if let Some(username) = username.as_deref() {
+                            agent_ws_url.push_str(&format!("&username={username}"));
+                        }
+                        let agent_ws_url = agent_ws_url.replace("http://", "ws://").replace("https://", "wss://");
                     proxy_ws_to_agent(ws_tx, ws_rx, &agent_ws_url, id).await;
                     return;
                 }
@@ -179,7 +192,7 @@ async fn handle_stream(socket: WebSocket, id: Uuid, state: AppState) {
 
     // SSH devices: run SSH session locally (agent on this machine)
     if device.os == "ssh" {
-        let (host, port) = match parse_ssh_serial(&serial) {
+        let (username, host, port) = match parse_ssh_target(&serial) {
             Some(hp) => hp,
             None => {
                 let _ = ws_tx.send(Message::Text(
@@ -197,7 +210,7 @@ async fn handle_stream(socket: WebSocket, id: Uuid, state: AppState) {
                 "device_type": "ssh",
             }).to_string().into()
         )).await;
-        run_ssh_session(ws_tx, ws_rx, &host, port, id).await;
+        run_ssh_session(ws_tx, ws_rx, username.as_deref(), &host, port, id).await;
         tracing::info!(%id, "SSH session ended");
         return;
     }
@@ -1032,13 +1045,17 @@ fn parse_iot_log_line(line: &str) -> serde_json::Value {
 
 // ── SSH terminal streaming ────────────────────────────────────────
 
-/// Parse SSH device serial string (`"user@host:port"` or `"host:port"`) into (host, port).
-fn parse_ssh_serial(serial: &str) -> Option<(String, u16)> {
-    // Strip optional user@ prefix
-    let host_port = serial
-        .rfind('@')
-        .map(|i| &serial[i + 1..])
-        .unwrap_or(serial);
+/// Parse SSH device serial string (`"user@host:port"` or `"host:port"`) into
+/// `(username, host, port)`.
+fn parse_ssh_target(serial: &str) -> Option<(Option<String>, String, u16)> {
+    let (username, host_port) = if let Some(at) = serial.rfind('@') {
+        let user = serial[..at].trim();
+        let host_port = &serial[at + 1..];
+        let username = if user.is_empty() { None } else { Some(user.to_string()) };
+        (username, host_port)
+    } else {
+        (None, serial)
+    };
 
     if let Some(colon) = host_port.rfind(':') {
         let host = host_port[..colon].to_string();
@@ -1046,141 +1063,58 @@ fn parse_ssh_serial(serial: &str) -> Option<(String, u16)> {
         if host.is_empty() {
             return None;
         }
-        Some((host, port))
+        Some((username, host, port))
     } else {
-        // No port specified, default to 22
         let host = host_port.to_string();
         if host.is_empty() {
             return None;
         }
-        Some((host, 22))
+        Some((username, host, 22))
     }
 }
 
 /// Stream SSH terminal session as raw bytes over WebSocket (API-local, no agent proxy).
 ///
-/// Protocol:
-///   1. Server sends `{"type":"ssh_auth_required","host":"...","port":N}`
-///   2. Client sends `{"type":"ssh_auth","username":"...","password":"..."}` or
-///      `{"type":"ssh_auth","username":"...","key":"..."}`
-///   3. After auth, bidirectional raw byte relay begins
-///   4. Client → Server: `terminal_input`, `send_text`, `terminal_resize`, or binary frames
-///   5. Server → Client: binary frames (raw SSH output)
+/// SSH is run inside a real PTY via `script`, so host key prompts, login prompts,
+/// password prompts, and the interactive shell all appear inside the terminal.
 async fn run_ssh_session(
     mut ws_tx: futures::stream::SplitSink<WebSocket, Message>,
     mut ws_rx: futures::stream::SplitStream<WebSocket>,
+    username: Option<&str>,
     host: &str,
     port: u16,
     device_id: Uuid,
 ) {
-    // 1. Request auth
-    let auth_req = serde_json::json!({
-        "type": "ssh_auth_required",
-        "host": host,
-        "port": port,
-    });
-    if ws_tx.send(Message::Text(auth_req.to_string().into())).await.is_err() {
-        return;
-    }
+    // Always prompt for username — never auto-login with a pre-selected user,
+    // even if the device serial contains one.
+    let _ = username;
+    let ssh_opts = format!(
+        "ssh -tt -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o ConnectTimeout=10 -p {}",
+        port
+    );
+    let host_esc = shell_escape(host);
+    let ssh_cmd = format!(
+        "printf 'login as: '; IFS= read -r EF_USER; [ -z \"$EF_USER\" ] && {{ echo 'no username entered'; exit 1; }}; exec {} \"$EF_USER\"@{}",
+        ssh_opts, host_esc
+    );
 
-    // 2. Wait for auth response (timeout 60s)
-    let auth = tokio::time::timeout(std::time::Duration::from_secs(60), async {
-        while let Some(Ok(msg)) = ws_rx.next().await {
-            if let Message::Text(t) = msg {
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&t.to_string()) {
-                    if v.get("type").and_then(|t| t.as_str()) == Some("ssh_auth") {
-                        let username = v.get("username").and_then(|u| u.as_str()).unwrap_or("root").to_string();
-                        let password = v.get("password").and_then(|p| p.as_str()).map(|s| s.to_string());
-                        let key = v.get("key").and_then(|k| k.as_str()).map(|s| s.to_string());
-                        return Some((username, password, key));
-                    }
-                }
-            }
-        }
-        None
-    }).await;
+    #[cfg(target_os = "macos")]
+    let child = tokio::process::Command::new("script")
+        .args(["-q", "/dev/null", "sh", "-lc", &ssh_cmd])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn();
 
-    let (username, password, key) = match auth {
-        Ok(Some(creds)) => creds,
-        _ => {
-            let _ = ws_tx.send(Message::Text(
-                serde_json::json!({"type":"error","message":"SSH authentication timeout"}).to_string().into()
-            )).await;
-            return;
-        }
-    };
-
-    // 3. Spawn SSH process
-    let mut child = if let Some(ref key_data) = key {
-        // Write key to temp file
-        let key_path = std::env::temp_dir().join(format!("ef_ssh_{}", device_id));
-        if tokio::fs::write(&key_path, key_data.as_bytes()).await.is_err() {
-            let _ = ws_tx.send(Message::Text(
-                serde_json::json!({"type":"error","message":"Failed to write SSH key"}).to_string().into()
-            )).await;
-            return;
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600));
-        }
-        let child = tokio::process::Command::new("ssh")
-            .args([
-                "-o", "StrictHostKeyChecking=no",
-                "-o", "UserKnownHostsFile=/dev/null",
-                "-i", key_path.to_str().unwrap_or(""),
-                "-p", &port.to_string(),
-                "-tt",
-                &format!("{}@{}", username, host),
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn();
-        // Clean up key file after spawn
-        let _ = tokio::fs::remove_file(&key_path).await;
-        child
-    } else if let Some(ref pw) = password {
-        // Use sshpass for password auth
-        let sshpass_available = tokio::process::Command::new(
-            if cfg!(target_os = "windows") { "where" } else { "which" }
-        )
-            .arg("sshpass")
-            .output()
-            .await
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-
-        if sshpass_available {
-            tokio::process::Command::new("sshpass")
-                .args([
-                    "-p", pw,
-                    "ssh",
-                    "-o", "StrictHostKeyChecking=no",
-                    "-o", "UserKnownHostsFile=/dev/null",
-                    "-p", &port.to_string(),
-                    "-tt",
-                    &format!("{}@{}", username, host),
-                ])
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .kill_on_drop(true)
-                .spawn()
-        } else {
-            let _ = ws_tx.send(Message::Text(
-                serde_json::json!({"type":"error","message":"sshpass not installed — password auth unavailable. Use SSH key auth or install sshpass."}).to_string().into()
-            )).await;
-            return;
-        }
-    } else {
-        let _ = ws_tx.send(Message::Text(
-            serde_json::json!({"type":"error","message":"No password or key provided"}).to_string().into()
-        )).await;
-        return;
-    };
+    #[cfg(not(target_os = "macos"))]
+    let child = tokio::process::Command::new("script")
+        .args(["-q", "-c", &ssh_cmd, "/dev/null"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn();
 
     let mut child = match child {
         Ok(c) => c,
@@ -1198,11 +1132,6 @@ async fn run_ssh_session(
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take();
     let stdin = child.stdin.take().unwrap();
-
-    // Notify client that connection is established
-    let _ = ws_tx.send(Message::Text(
-        serde_json::json!({"type":"ssh_connected","host":host,"port":port}).to_string().into()
-    )).await;
 
     // stdin writer: WS messages → SSH stdin
     let (input_tx, mut input_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(256);

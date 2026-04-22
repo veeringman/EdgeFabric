@@ -42,7 +42,8 @@ pub async fn start_streaming_server(
         .route("/ws/stream/{*serial}", get(ws_stream_handler))
         .route("/ws/logs/{*serial}", get(ws_logs_handler))
         .route("/ws/ssh", get(ws_ssh_handler))
-        .route("/health", get(health))
+            .route("/ws/pty", get(ws_pty_handler))
+            .route("/health", get(health))
         .merge(crate::veeros_api::router(veeros_cfg));
 
     let addr = format!("0.0.0.0:{port}");
@@ -1086,33 +1087,22 @@ fn parse_iot_log_line(line: &str) -> serde_json::Value {
 // ── SSH terminal streaming ────────────────────────────────────────
 
 /// WebSocket upgrade handler for SSH terminal sessions.
-/// Query parameters: `?host=IP&port=22`
-/// The actual SSH credentials are sent from the client after the WebSocket is
-/// established (never in the URL), keeping passwords out of logs and URLs.
+/// Query parameters: `?host=IP&port=22[&username=foo]`
 ///
-/// Protocol:
-///   Client → Server:
-///     `{"type":"ssh_auth","username":"...","password":"..."}` — start SSH session
-///     `{"type":"ssh_auth","username":"...","key":"..."}` — SSH key auth
-///     `{"type":"terminal_input","data":"..."}` — raw keystrokes from xterm.js
-///     `{"type":"terminal_resize","cols":N,"rows":M}` — terminal resize (SIGWINCH)
-///     `{"type":"send_text","data":"..."}` — emergency command
-///   Server → Client:
-///     binary frames — raw terminal output (PTY bytes)
-///     `{"type":"ssh_ready"}` — shell session established
-///     `{"type":"ssh_auth_required","host":"...","port":N}` — prompt for credentials
-///     `{"type":"error","message":"..."}` — error
+/// SSH runs inside a real PTY via `script`, so host-key confirmation, username,
+/// password prompts, and the interactive shell all appear directly in xterm.
 async fn ws_ssh_handler(
     ws: WebSocketUpgrade,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
     let host = params.get("host").cloned().unwrap_or_default();
     let port: u16 = params.get("port").and_then(|p| p.parse().ok()).unwrap_or(22);
-    tracing::info!(%host, %port, "SSH terminal WebSocket upgrade");
-    ws.on_upgrade(move |socket| handle_ssh_session(socket, host, port))
+    let username = params.get("username").cloned();
+    tracing::info!(%host, %port, username = ?username, "SSH terminal WebSocket upgrade");
+    ws.on_upgrade(move |socket| handle_ssh_session(socket, username, host, port))
 }
 
-async fn handle_ssh_session(socket: WebSocket, host: String, port: u16) {
+async fn handle_ssh_session(socket: WebSocket, username: Option<String>, host: String, port: u16) {
     let (mut ws_tx, mut ws_rx) = socket.split();
 
     if host.is_empty() {
@@ -1122,102 +1112,37 @@ async fn handle_ssh_session(socket: WebSocket, host: String, port: u16) {
         return;
     }
 
-    // Ask client for credentials
-    let _ = ws_tx.send(Message::Text(
-        json!({"type":"ssh_auth_required","host":&host,"port":port}).to_string().into()
-    )).await;
+    // Always prompt for username — never auto-login with a pre-selected user.
+    let _ = username;
+    let ssh_opts = format!(
+        "ssh -tt -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o ConnectTimeout=10 -p {}",
+        port
+    );
+    let host_esc = shell_escape(&host);
+    let ssh_cmd = format!(
+        "printf 'login as: '; IFS= read -r EF_USER; [ -z \"$EF_USER\" ] && {{ echo 'no username entered'; exit 1; }}; exec {} \"$EF_USER\"@{}",
+        ssh_opts, host_esc
+    );
 
-    // Wait for auth message from client
-    let (username, auth_method) = loop {
-        match ws_rx.next().await {
-            Some(Ok(Message::Text(t))) => {
-                let text = t.to_string();
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
-                    if v.get("type").and_then(|t| t.as_str()) == Some("ssh_auth") {
-                        let user = v.get("username").and_then(|u| u.as_str()).unwrap_or("root").to_string();
-                        if let Some(pw) = v.get("password").and_then(|p| p.as_str()) {
-                            break (user, SshAuth::Password(pw.to_string()));
-                        } else if let Some(key) = v.get("key").and_then(|k| k.as_str()) {
-                            break (user, SshAuth::Key(key.to_string()));
-                        } else {
-                            let _ = ws_tx.send(Message::Text(
-                                json!({"type":"error","message":"Missing password or key"}).to_string().into()
-                            )).await;
-                            return;
-                        }
-                    }
-                }
-            }
-            Some(Ok(Message::Close(_))) | None => return,
-            _ => continue,
-        }
-    };
-
-    tracing::info!(%host, %port, %username, "SSH auth received, spawning ssh process");
-
-    // Spawn ssh subprocess using system ssh client (universally available)
-    // -tt forces PTY allocation, -o options prevent host key prompts in automation
-    let mut cmd = tokio::process::Command::new("ssh");
-    cmd.args([
-        "-tt",
-        "-o", "StrictHostKeyChecking=accept-new",
-        "-o", "ServerAliveInterval=15",
-        "-o", "ServerAliveCountMax=3",
-        "-o", "ConnectTimeout=10",
-        "-p", &port.to_string(),
-        &format!("{username}@{host}"),
-    ]);
-
-    match &auth_method {
-        SshAuth::Password(pw) => {
-            // Check sshpass availability before attempting password auth
-            let sshpass_ok = tokio::process::Command::new("which")
-                .arg("sshpass")
-                .output()
-                .await
-                .map(|o| o.status.success())
-                .unwrap_or(false);
-            if !sshpass_ok {
-                let _ = ws_tx.send(Message::Text(
-                    json!({"type":"error","message":"sshpass not installed on this agent — password auth unavailable"}).to_string().into()
-                )).await;
-                return;
-            }
-            cmd = tokio::process::Command::new("sshpass");
-            cmd.args(["-p", pw, "ssh",
-                "-tt",
-                "-o", "StrictHostKeyChecking=accept-new",
-                "-o", "ServerAliveInterval=15",
-                "-o", "ServerAliveCountMax=3",
-                "-o", "ConnectTimeout=10",
-                "-p", &port.to_string(),
-                &format!("{username}@{host}"),
-            ]);
-        }
-        SshAuth::Key(key_data) => {
-            // Write key to a temporary file
-            let key_path = format!("/tmp/ef-ssh-key-{}", uuid::Uuid::new_v4().simple());
-            if let Err(e) = tokio::fs::write(&key_path, key_data.as_bytes()).await {
-                let _ = ws_tx.send(Message::Text(
-                    json!({"type":"error","message":format!("Failed to write key: {e}")}).to_string().into()
-                )).await;
-                return;
-            }
-            let _ = tokio::process::Command::new("chmod")
-                .args(["600", &key_path])
-                .status()
-                .await;
-            cmd.args(["-i", &key_path]);
-        }
-    }
-
-    let mut child = match cmd
+    #[cfg(target_os = "macos")]
+    let child = tokio::process::Command::new("script")
+        .args(["-q", "/dev/null", "sh", "-lc", &ssh_cmd])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
-        .spawn()
-    {
+        .spawn();
+
+    #[cfg(not(target_os = "macos"))]
+    let child = tokio::process::Command::new("script")
+        .args(["-q", "-c", &ssh_cmd, "/dev/null"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn();
+
+    let mut child = match child {
         Ok(c) => c,
         Err(e) => {
             let _ = ws_tx.send(Message::Text(
@@ -1226,10 +1151,6 @@ async fn handle_ssh_session(socket: WebSocket, host: String, port: u16) {
             return;
         }
     };
-
-    let _ = ws_tx.send(Message::Text(
-        json!({"type":"ssh_ready"}).to_string().into()
-    )).await;
 
     let (stop_tx, _) = tokio::sync::watch::channel(false);
     let stop_tx2 = stop_tx.clone();
@@ -1325,20 +1246,162 @@ async fn handle_ssh_session(socket: WebSocket, host: String, port: u16) {
     }
 
     let _ = child.kill().await;
+}
 
-    // Clean up temporary key file if used
-    if let SshAuth::Key(_) = &auth_method {
-        // The key file path was generated with a UUID; try to clean up
-        // (best effort — file may already be gone)
-        let pattern = "/tmp/ef-ssh-key-*";
-        let _ = tokio::process::Command::new("sh")
-            .args(["-c", &format!("rm -f {pattern}")])
-            .output()
-            .await;
+    // ── Local PTY shell (no credentials needed) ───────────────────────
+
+    /// WebSocket handler that spawns a local bash shell via `script` for full PTY
+    /// emulation.  No credentials required — this endpoint is only reachable when
+    /// the API proxies a device that has the `local_pty` capability, meaning the
+    /// agent itself is the host machine being accessed.
+    ///
+    /// Protocol identical to IoT serial stream:
+    ///   Server → Client: binary frames (raw PTY output)
+    ///   Client → Server:
+    ///     `{"type":"terminal_input","data":"..."}` — raw keystrokes
+    ///     `{"type":"terminal_resize","cols":N,"rows":M}` — resize
+    ///     binary frames — raw keystrokes (fallback)
+    ///     `{"type":"stop_stream"}` — disconnect
+    async fn ws_pty_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
+        tracing::info!("Local PTY WebSocket upgrade");
+        ws.on_upgrade(handle_pty_session)
     }
-}
 
-enum SshAuth {
-    Password(String),
-    Key(String),
-}
+    async fn handle_pty_session(socket: WebSocket) {
+        let (mut ws_tx, mut ws_rx) = socket.split();
+
+        let (stop_tx, _) = tokio::sync::watch::channel(false);
+        let stop_tx2 = stop_tx.clone();
+        let (input_tx, mut input_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(256);
+
+        // WS message handler
+        tokio::spawn(async move {
+            while let Some(Ok(msg)) = ws_rx.next().await {
+                match msg {
+                    Message::Text(t) => {
+                        let text = t.to_string();
+                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                            match v.get("type").and_then(|t| t.as_str()) {
+                                Some("terminal_input") | Some("send_text") => {
+                                    if let Some(data) = v.get("data").and_then(|d| d.as_str()) {
+                                        let _ = input_tx.send(data.as_bytes().to_vec()).await;
+                                    }
+                                }
+                                Some("terminal_resize") => {
+                                    // Pass resize as TIOCSWINSZ via stty inside the shell
+                                    let cols = v.get("cols").and_then(|c| c.as_u64()).unwrap_or(80);
+                                    let rows = v.get("rows").and_then(|r| r.as_u64()).unwrap_or(24);
+                                    let cmd = format!("stty cols {} rows {}\r", cols, rows);
+                                    let _ = input_tx.send(cmd.into_bytes()).await;
+                                }
+                                Some("stop_stream") | Some("stop") => {
+                                    let _ = stop_tx2.send(true);
+                                    break;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    Message::Binary(data) => {
+                        let _ = input_tx.send(data.to_vec()).await;
+                    }
+                    Message::Close(_) => {
+                        let _ = stop_tx2.send(true);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        });
+
+        // Spawn shell: `script` allocates a real PTY so interactive programs work.
+        // Linux: script -q -c /bin/bash /dev/null
+        // macOS: script -q /dev/null /bin/bash
+        #[cfg(target_os = "macos")]
+        let mut child = {
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+            tokio::process::Command::new("script")
+                .args(["-q", "/dev/null", &shell])
+                .env("TERM", "xterm-256color")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .kill_on_drop(true)
+                .spawn()
+        };
+
+        #[cfg(not(target_os = "macos"))]
+        let mut child = {
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+            tokio::process::Command::new("script")
+                .args(["-q", "-c", &shell, "/dev/null"])
+                .env("TERM", "xterm-256color")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .kill_on_drop(true)
+                .spawn()
+        };
+
+        let mut child = match child {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = ws_tx.send(Message::Text(
+                    serde_json::json!({"type":"error","message":format!("Failed to spawn shell: {e}")}).to_string().into()
+                )).await;
+                return;
+            }
+        };
+
+        let stdout = child.stdout.take().unwrap();
+        let mut stdin = child.stdin.take();
+
+        // stdin writer
+        let write_stop = stop_tx.clone();
+        tokio::spawn(async move {
+            let mut stop_rx = write_stop.subscribe();
+            loop {
+                tokio::select! {
+                    data = input_rx.recv() => {
+                        match data {
+                            Some(bytes) => {
+                                if let Some(ref mut s) = stdin {
+                                    if s.write_all(&bytes).await.is_err() { break; }
+                                    let _ = s.flush().await;
+                                }
+                            }
+                            None => break,
+                        }
+                    }
+                    _ = stop_rx.changed() => break,
+                }
+            }
+        });
+
+        // stdout → WS binary frames
+        let mut stop_rx = stop_tx.subscribe();
+        let mut reader = tokio::io::BufReader::with_capacity(4096, stdout);
+        let mut buf = [0u8; 4096];
+        let mut byte_count: u64 = 0;
+
+        loop {
+            tokio::select! {
+                n = reader.read(&mut buf) => {
+                    match n {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            byte_count += n as u64;
+                            if ws_tx.send(Message::Binary(buf[..n].to_vec().into())).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+                _ = stop_rx.changed() => break,
+            }
+        }
+
+        let _ = child.kill().await;
+        tracing::info!(byte_count, "Local PTY session ended");
+    }

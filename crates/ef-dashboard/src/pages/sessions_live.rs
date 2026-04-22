@@ -274,6 +274,7 @@ fn DeviceViewer(
     let (shell_input, set_shell_input) = signal(String::new());
     let (cmd_history, set_cmd_history) = signal(Vec::<String>::new());
     let (history_idx, set_history_idx) = signal(Option::<usize>::None);
+    let (term_maximized, set_term_maximized) = signal(false);
 
     // Log panel signals
     let (log_lines, set_log_lines) = signal(Vec::<(String, String, String)>::new()); // (level, tag, message)
@@ -328,15 +329,6 @@ fn DeviceViewer(
     let (logs_drag_start_pos, set_logs_drag_start_pos) = signal((0.0f64, 0.0f64));
     let (logs_drag_start_rect, set_logs_drag_start_rect) = signal((0.0f64, 0.0f64, 0.0f64, 0.0f64));
 
-    // SSH auth signals
-    let (ssh_auth_needed, set_ssh_auth_needed) = signal(false);
-    let (ssh_username, set_ssh_username) = signal(String::from("root"));
-    let (ssh_password, set_ssh_password) = signal(String::new());
-    let (ssh_auth_error, set_ssh_auth_error) = signal(Option::<String>::None);
-
-    // xterm.js terminal handle (JS object)
-    let (xterm_ready, set_xterm_ready) = signal(false);
-
     let dev_id = device_id.clone();
     let log_dev_id = device_id.clone();
     let is_android = device_os == "android";
@@ -362,6 +354,10 @@ fn DeviceViewer(
     let fps_counter = std::rc::Rc::new(std::cell::RefCell::new(Vec::<f64>::new()));
 
     Effect::new(move || {
+        if is_terminal && term_ref.get().is_none() {
+            return;
+        }
+
         let dev_id = dev_id.clone();
         let set_connected = set_connected.clone();
         let set_error = set_error.clone();
@@ -371,8 +367,51 @@ fn DeviceViewer(
         let set_fps = set_fps.clone();
         let fps_counter = fps_counter.clone();
         let img_ref = img_ref;
+        let term_ref = term_ref;
 
         leptos::task::spawn_local(async move {
+            if is_terminal {
+                let init_js = r#"(function() {
+                    if (typeof Terminal === 'undefined') return null;
+                    var container = document.getElementById('ef-terminal-container');
+                    if (!container) return null;
+                    if (!window.__ef_xterm) {
+                        var term = new Terminal({
+                            cursorBlink: true,
+                            fontSize: 14,
+                            fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+                            theme: {
+                                background: '#0d1117',
+                                foreground: '#c9d1d9',
+                                cursor: '#58a6ff',
+                                selectionBackground: '#264f78',
+                            },
+                            scrollback: 10000,
+                            convertEol: false,
+                        });
+                        term.open(container);
+                        if (typeof FitAddon !== 'undefined') {
+                            var fitAddon = new FitAddon.FitAddon();
+                            term.loadAddon(fitAddon);
+                            try { fitAddon.fit(); } catch (e) {}
+                            window.__ef_fit = fitAddon;
+                            try {
+                                var ro = new ResizeObserver(function() { try { fitAddon.fit(); } catch (e) {} });
+                                ro.observe(container);
+                                window.__ef_ro = ro;
+                            } catch (e) {}
+                        }
+                        if (typeof WebLinksAddon !== 'undefined') {
+                            term.loadAddon(new WebLinksAddon.WebLinksAddon());
+                        }
+                        window.__ef_xterm = term;
+                    }
+                    return window.__ef_xterm;
+                })()"#;
+                let _ = js_sys::eval(init_js);
+                let _ = term_ref.get_untracked();
+            }
+
             let host = web_sys::window()
                 .and_then(|w| w.location().hostname().ok())
                 .unwrap_or_else(|| "localhost".to_string());
@@ -386,6 +425,30 @@ fn DeviceViewer(
                 }
             };
             ws.set_binary_type(web_sys::BinaryType::Arraybuffer);
+
+            if is_terminal {
+                let win = web_sys::window().unwrap();
+                let _ = js_sys::Reflect::set(
+                    &win,
+                    &wasm_bindgen::JsValue::from_str("__ef_ws"),
+                    &ws,
+                );
+                let hook_js = r#"(function() {
+                    if (!window.__ef_xterm || window.__ef_xterm_hooked) return;
+                    window.__ef_xterm_hooked = true;
+                    window.__ef_xterm.onData(function(data) {
+                        if (window.__ef_ws && window.__ef_ws.readyState === 1) {
+                            window.__ef_ws.send(JSON.stringify({type: 'terminal_input', data: data}));
+                        }
+                    });
+                    window.__ef_xterm.onResize(function(size) {
+                        if (window.__ef_ws && window.__ef_ws.readyState === 1) {
+                            window.__ef_ws.send(JSON.stringify({type: 'terminal_resize', cols: size.cols, rows: size.rows}));
+                        }
+                    });
+                })()"#;
+                let _ = js_sys::eval(hook_js);
+            }
 
             let ws_clone = ws.clone();
             let onopen = Closure::wrap(Box::new(move |_: web_sys::Event| {
@@ -458,21 +521,9 @@ fn DeviceViewer(
                                     }
                                 }
                             }
-                            Some("ssh_auth_required") => {
-                                set_ssh_auth_needed.set(true);
-                            }
-                            Some("ssh_connected") => {
-                                set_ssh_auth_needed.set(false);
-                                set_ssh_auth_error.set(None);
-                                set_xterm_ready.set(true);
-                            }
                             Some("error") => {
                                 if let Some(message) = msg.get("message").and_then(|m| m.as_str()) {
-                                    if ssh_auth_needed.get_untracked() {
-                                        set_ssh_auth_error.set(Some(message.to_string()));
-                                    } else {
-                                        set_error.set(Some(message.to_string()));
-                                    }
+                                    set_error.set(Some(message.to_string()));
                                 }
                             }
                             Some("serial_data") => {
@@ -989,177 +1040,112 @@ fn DeviceViewer(
                 }.into_any()
             } else if is_terminal {
                 view! {
-                    <div class="card" style="flex: 1; min-width: 0;">
+                    <div
+                        class="card ef-term-card"
+                        style=move || if term_maximized.get() {
+                            "position:fixed; top:0; left:0; right:0; bottom:0; width:100vw; height:100vh; z-index:2147483647; margin:0; border-radius:0; display:flex; flex-direction:column; min-width:0; background:var(--bg-primary,#0d1117);".to_string()
+                        } else {
+                            "flex: 1; min-width: 0;".to_string()
+                        }
+                    >
                         <div class="card-header">
                             <h2>
                                 <DeviceOsIcon os=if is_ssh { "ssh".to_string() } else { "iot".to_string() } class="os-icon-title"/>
                                 " "
                                 {if is_ssh { "SSH Terminal" } else { "Serial Console" }}
                             </h2>
-                            <button class="btn btn-ghost btn-sm" on:click=move |_| {
-                                // Clean up xterm instance
-                                let win = web_sys::window().unwrap();
-                                let _ = js_sys::Reflect::delete_property(&win, &wasm_bindgen::JsValue::from_str("__ef_xterm"));
-                                if let Some(ws) = ws_handle.get_untracked() {
-                                    let _ = ws.close();
-                                }
-                                on_close();
-                            }>"✕ Close"</button>
+                            <div style="display:flex; gap:0.5rem;">
+                                <button
+                                    class="btn btn-ghost btn-sm"
+                                    title=move || if term_maximized.get() { "Exit fullscreen (Esc)" } else { "Maximize" }
+                                    on:click=move |_| {
+                                        let next = !term_maximized.get_untracked();
+                                        set_term_maximized.set(next);
+                                        // Use Fullscreen API for true topmost + whole-screen; fall back to CSS overlay.
+                                        let js = if next {
+                                            r#"
+                                            (function(){
+                                              try {
+                                                var el = document.querySelector('.ef-term-card') || document.getElementById('ef-terminal-container');
+                                                if (el) {
+                                                  var req = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+                                                  if (req) req.call(el).catch(function(){});
+                                                }
+                                              } catch(e){}
+                                              setTimeout(function(){
+                                                try { if (window.__ef_fit) window.__ef_fit.fit(); } catch(e){}
+                                                try {
+                                                  if (window.__ef_xterm && window.__ef_ws && window.__ef_ws.readyState === 1) {
+                                                    window.__ef_ws.send(JSON.stringify({
+                                                      type:'terminal_resize',
+                                                      cols: window.__ef_xterm.cols,
+                                                      rows: window.__ef_xterm.rows
+                                                    }));
+                                                  }
+                                                } catch(e){}
+                                              }, 120);
+                                            })();
+                                            "#
+                                        } else {
+                                            r#"
+                                            (function(){
+                                              try {
+                                                if (document.fullscreenElement || document.webkitFullscreenElement) {
+                                                  var ex = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+                                                  if (ex) ex.call(document).catch(function(){});
+                                                }
+                                              } catch(e){}
+                                              setTimeout(function(){
+                                                try { if (window.__ef_fit) window.__ef_fit.fit(); } catch(e){}
+                                                try {
+                                                  if (window.__ef_xterm && window.__ef_ws && window.__ef_ws.readyState === 1) {
+                                                    window.__ef_ws.send(JSON.stringify({
+                                                      type:'terminal_resize',
+                                                      cols: window.__ef_xterm.cols,
+                                                      rows: window.__ef_xterm.rows
+                                                    }));
+                                                  }
+                                                } catch(e){}
+                                              }, 120);
+                                            })();
+                                            "#
+                                        };
+                                        let _ = js_sys::eval(js);
+                                    }
+                                >
+                                    {move || if term_maximized.get() { "🗗 Restore" } else { "⛶ Maximize" }}
+                                </button>
+                                <button class="btn btn-ghost btn-sm" on:click=move |_| {
+                                    // Clean up xterm instance
+                                    let win = web_sys::window().unwrap();
+                                    let _ = js_sys::Reflect::delete_property(&win, &wasm_bindgen::JsValue::from_str("__ef_ws"));
+                                    let _ = js_sys::Reflect::delete_property(&win, &wasm_bindgen::JsValue::from_str("__ef_xterm"));
+                                    let _ = js_sys::Reflect::delete_property(&win, &wasm_bindgen::JsValue::from_str("__ef_xterm_hooked"));
+                                    let _ = js_sys::Reflect::delete_property(&win, &wasm_bindgen::JsValue::from_str("__ef_fit"));
+                                    let _ = js_sys::Reflect::delete_property(&win, &wasm_bindgen::JsValue::from_str("__ef_ro"));
+                                    if let Some(ws) = ws_handle.get_untracked() {
+                                        let _ = ws.close();
+                                    }
+                                    set_term_maximized.set(false);
+                                    on_close();
+                                }>"✕ Close"</button>
+                            </div>
                         </div>
 
-                        // SSH Login form (shown before terminal)
-                        <Show when=move || ssh_auth_needed.get()>
-                            <div style="padding: 1rem; background: #161b22; border-radius: 6px; margin: 0.5rem;">
-                                <h3 style="color: #58a6ff; margin: 0 0 0.75rem 0; font-size: 0.95rem;">"SSH Authentication"</h3>
-                                <Show when=move || ssh_auth_error.get().is_some()>
-                                    <div class="alert error" style="margin-bottom: 0.5rem; font-size: 0.82rem;">
-                                        {move || ssh_auth_error.get().unwrap_or_default()}
-                                    </div>
-                                </Show>
-                                <div style="display: flex; flex-direction: column; gap: 0.5rem;">
-                                    <div style="display: flex; align-items: center; gap: 0.5rem;">
-                                        <label style="color: #8b949e; font-size: 0.82rem; width: 70px;">"Username"</label>
-                                        <input
-                                            type="text"
-                                            class="form-control"
-                                            placeholder="root"
-                                            style="flex: 1; font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 4px; padding: 0.4rem 0.6rem;"
-                                            prop:value=move || ssh_username.get()
-                                            on:input=move |ev| set_ssh_username.set(event_target_value(&ev))
-                                        />
-                                    </div>
-                                    <div style="display: flex; align-items: center; gap: 0.5rem;">
-                                        <label style="color: #8b949e; font-size: 0.82rem; width: 70px;">"Password"</label>
-                                        <input
-                                            type="password"
-                                            class="form-control"
-                                            placeholder="Enter password"
-                                            style="flex: 1; font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 4px; padding: 0.4rem 0.6rem;"
-                                            prop:value=move || ssh_password.get()
-                                            on:input=move |ev| set_ssh_password.set(event_target_value(&ev))
-                                            on:keydown=move |ev: web_sys::KeyboardEvent| {
-                                                if ev.key() == "Enter" {
-                                                    if let Some(ws) = ws_handle.get_untracked() {
-                                                        let msg = serde_json::json!({
-                                                            "type": "ssh_auth",
-                                                            "username": ssh_username.get_untracked(),
-                                                            "password": ssh_password.get_untracked(),
-                                                        });
-                                                        let _ = ws.send_with_str(&msg.to_string());
-                                                    }
-                                                }
-                                            }
-                                        />
-                                    </div>
-                                    <button
-                                        class="btn btn-primary btn-sm"
-                                        style="align-self: flex-end; margin-top: 0.25rem;"
-                                        on:click=move |_| {
-                                            if let Some(ws) = ws_handle.get_untracked() {
-                                                let msg = serde_json::json!({
-                                                    "type": "ssh_auth",
-                                                    "username": ssh_username.get_untracked(),
-                                                    "password": ssh_password.get_untracked(),
-                                                });
-                                                let _ = ws.send_with_str(&msg.to_string());
-                                            }
-                                        }
-                                    >"Connect"</button>
-                                </div>
-                            </div>
-                        </Show>
+                        <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem; color: var(--text-muted); font-size: 0.85rem;">
+                            <span>{move || if connected.get() { "Connected" } else { if is_ssh { "Connecting to SSH server…" } else { "Connecting to serial console…" } }}</span>
+                            {move || error.get().map(|msg| view! { <span style="color:#f85149;">{msg}</span> })}
+                        </div>
 
-                        <Show
-                            when=move || connected.get() && !ssh_auth_needed.get()
-                            fallback=move || {
-                                if !ssh_auth_needed.get() {
-                                    view! {
-                                        <div class="loading">{if is_ssh { "Connecting to SSH server…" } else { "Connecting to serial port…" }}</div>
-                                    }.into_any()
-                                } else {
-                                    view! { <span></span> }.into_any()
-                                }
+                        <div
+                            node_ref=term_ref
+                            id="ef-terminal-container"
+                            style=move || if term_maximized.get() {
+                                "flex:1; min-height:0; background:#000; border-radius:6px; overflow:hidden;".to_string()
+                            } else {
+                                "min-height: 400px; max-height: 600px; background: #000; border-radius: 6px; overflow: hidden;".to_string()
                             }
-                        >
-                            // xterm.js terminal container
-                            <div
-                                node_ref=term_ref
-                                id="ef-terminal-container"
-                                style="min-height: 400px; max-height: 600px; background: #000; border-radius: 6px; overflow: hidden;"
-                            ></div>
-
-                            // Initialize xterm.js when container is mounted
-                            {move || {
-                                if let Some(container) = term_ref.get() {
-                                    let win = web_sys::window().unwrap();
-                                    // Only init once
-                                    let existing = js_sys::Reflect::get(&win, &wasm_bindgen::JsValue::from_str("__ef_xterm")).ok();
-                                    if existing.map(|v| v.is_undefined() || v.is_null()).unwrap_or(true) {
-                                        // Create xterm Terminal instance via JS eval
-                                        let init_js = format!(
-                                            r#"(function() {{
-                                                if (typeof Terminal === 'undefined') return null;
-                                                var term = new Terminal({{
-                                                    cursorBlink: true,
-                                                    fontSize: 14,
-                                                    fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-                                                    theme: {{
-                                                        background: '#0d1117',
-                                                        foreground: '#c9d1d9',
-                                                        cursor: '#58a6ff',
-                                                        selectionBackground: '#264f78',
-                                                    }},
-                                                    scrollback: 10000,
-                                                    convertEol: true,
-                                                }});
-                                                var container = document.getElementById('ef-terminal-container');
-                                                if (container) {{
-                                                    term.open(container);
-                                                    if (typeof FitAddon !== 'undefined') {{
-                                                        var fitAddon = new FitAddon.FitAddon();
-                                                        term.loadAddon(fitAddon);
-                                                        fitAddon.fit();
-                                                        window.__ef_fit = fitAddon;
-                                                        new ResizeObserver(function() {{ try {{ fitAddon.fit(); }} catch(e) {{}} }}).observe(container);
-                                                    }}
-                                                    if (typeof WebLinksAddon !== 'undefined') {{
-                                                        term.loadAddon(new WebLinksAddon.WebLinksAddon());
-                                                    }}
-                                                    window.__ef_xterm = term;
-                                                }}
-                                                return term;
-                                            }})()"#
-                                        );
-                                        let _ = js_sys::eval(&init_js);
-
-                                        // Hook up xterm.onData → WS terminal_input
-                                        let hook_js = r#"(function() {
-                                            if (!window.__ef_xterm) return;
-                                            window.__ef_xterm.onData(function(data) {
-                                                if (window.__ef_ws && window.__ef_ws.readyState === 1) {
-                                                    window.__ef_ws.send(JSON.stringify({type: 'terminal_input', data: data}));
-                                                }
-                                            });
-                                            window.__ef_xterm.onResize(function(size) {
-                                                if (window.__ef_ws && window.__ef_ws.readyState === 1) {
-                                                    window.__ef_ws.send(JSON.stringify({type: 'terminal_resize', cols: size.cols, rows: size.rows}));
-                                                }
-                                            });
-                                        })()"#;
-                                        let _ = js_sys::eval(hook_js);
-
-                                        // Store WS reference for xterm callbacks
-                                        if let Some(ws) = ws_handle.get_untracked() {
-                                            let _ = js_sys::Reflect::set(
-                                                &win,
-                                                &wasm_bindgen::JsValue::from_str("__ef_ws"),
-                                                &ws,
-                                            );
-                                        }
-                                    }
-                                }
-                                view! { <span></span> }
-                            }}
+                        ></div>
 
                             // ── Emergency command input ──
                             <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem; align-items: center;">
@@ -1236,7 +1222,6 @@ fn DeviceViewer(
                                     }
                                 >"Send"</button>
                             </div>
-                        </Show>
                         <div class="stream-info" style="margin-top: 0.75rem;">
                             <div class="info-row">
                                 <span class="info-label">"Device"</span>

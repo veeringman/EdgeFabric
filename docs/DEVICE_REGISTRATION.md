@@ -23,6 +23,8 @@ device_scan_interval_seconds = 5
 | iOS | Simulator | `xcrun simctl list --json` | `["simctl"]` |
 | IoT | USB Serial | `/dev/ttyACM*`, `/dev/cu.usbmodem*` | `["serial", "usb"]` |
 | IoT | WiFi (mDNS) | `avahi-browse _edgefabric._tcp` | `["mdns", "ssh"]` |
+| SSH Host | LAN (mDNS / ARP) | `avahi-browse _ssh._tcp`, `dns-sd`, ARP sweep | `["ssh"]` |
+| SSH Host | Agent host self | Auto-registered by `ef-agent` | `["ssh"]` |
 
 ---
 
@@ -189,3 +191,24 @@ heartbeat_interval_seconds = 10
 | `POST` | `/api/v1/devices/:id/heartbeat` | Send heartbeat |
 | `GET` | `/api/v1/devices/:id/health` | Check health |
 | `PUT` | `/api/v1/devices/:id/preference` | Set preference (e.g., bezel style) |
+
+---
+
+## SSH Host Discovery
+
+`ef-agent` discovers reachable SSH hosts on the local network and registers each as a device with capability `["ssh"]`. Three probe paths feed the same dedup map:
+
+1. **mDNS (Linux)** — `avahi-browse -rtp _ssh._tcp`
+2. **mDNS (macOS)** — `dns-sd -Z _ssh._tcp local.`
+3. **ARP sweep fallback** — probes TCP/22 on each neighbor reported by `ip neigh` / `arp -a`
+
+The agent also auto-registers its own host as an SSH device (serial = `<host-ip>:22`, name = `hostname`). All SSH discovery serials use the form `ip:port` — no preselected username is embedded in the serial, so duplicate rows from different probe paths collapse into a single device.
+
+### Live Terminal (Dashboard)
+
+Opening an SSH device in the **Live Device Viewer** launches an xterm.js session over a WebSocket proxied through `ef-api` → `ef-agent`. The session behaves like a regular SSH client:
+
+- Inline `login as:` prompt (username is never preselected).
+- Standard SSH password / key prompts from the remote host.
+- **Maximize** button toggles true browser fullscreen over the terminal card; Esc or the Restore button returns to the inline layout.
+- Works with legacy OpenSSH (pre-7.6) — uses `StrictHostKeyChecking=no` + `UserKnownHostsFile=/dev/null` instead of `accept-new`.

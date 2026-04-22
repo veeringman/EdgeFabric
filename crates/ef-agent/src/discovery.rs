@@ -9,7 +9,7 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use ef_control::discovery::DeviceDiscovery;
-use ef_core::device::Device;
+use ef_core::device::{Device, DeviceKind, DeviceStatus, Os};
 
 use crate::client::{ControlPlaneClient, RegisterDeviceRequest};
 
@@ -93,6 +93,14 @@ async fn run_scan(
         if let Some(ref serial) = d.serial {
             current_serials.insert(serial.clone(), d.clone());
         }
+    }
+
+    // Always include the agent's own host machine as an SSH device so operators
+    // can open a terminal session directly to this node from the Live Viewer.
+    // Overrides any ARP/mDNS-discovered entry for the same IP so we get the
+    // proper hostname and kind (Real host vs anonymous "SSH Server").
+    if let Some((host_serial, host_device)) = build_host_ssh_device(streaming_url, region) {
+        current_serials.insert(host_serial, host_device);
     }
 
     // Register newly discovered devices
@@ -190,4 +198,74 @@ async fn get_device_ip(serial: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Build a `Device` entry representing the agent's host machine for SSH terminal access.
+///
+/// The device serial is `"<host_ip>:22"` which is the format expected by `parse_ssh_serial`
+/// in the streaming route.  Returns `None` if no routable IP can be determined.
+fn build_host_ssh_device(streaming_url: Option<&str>, region: &str) -> Option<(String, Device)> {
+    // Extract the advertised IP from the streaming URL ("http://192.168.x.x:7070").
+    let ip = streaming_url
+        .and_then(|url| {
+            url.strip_prefix("http://")
+                .or_else(|| url.strip_prefix("https://"))
+        })
+        .and_then(|host_port| host_port.splitn(2, ':').next())
+        .filter(|ip| !ip.is_empty() && *ip != "127.0.0.1" && *ip != "0.0.0.0")
+        .map(|s| s.to_string())?;
+
+    let serial = format!("{ip}:22");
+
+    let (hostname, os_version) = detect_host_info();
+
+    let device = Device {
+        id: Uuid::nil(),
+        name: hostname,
+        serial: Some(serial.clone()),
+        os: Os::Ssh,
+        os_version,
+        kind: DeviceKind::Real,
+        status: DeviceStatus::Available,
+        region: region.to_string(),
+            capabilities: vec!["ssh".into()],
+        registered_at: chrono::Utc::now(),
+        last_heartbeat: None,
+    };
+
+    Some((serial, device))
+}
+
+/// Return the current machine's hostname and OS version string.
+fn detect_host_info() -> (String, String) {
+    let hostname = std::process::Command::new("hostname")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "agent-host".to_string());
+
+    #[cfg(target_os = "linux")]
+    let os_version = std::process::Command::new("uname")
+        .arg("-r")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| format!("Linux {}", s.trim()))
+        .unwrap_or_else(|| "Linux".to_string());
+
+    #[cfg(target_os = "macos")]
+    let os_version = std::process::Command::new("sw_vers")
+        .arg("-productVersion")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| format!("macOS {}", s.trim()))
+        .unwrap_or_else(|| "macOS".to_string());
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    let os_version = "Unknown OS".to_string();
+
+    (hostname, os_version)
 }

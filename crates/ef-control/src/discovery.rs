@@ -936,8 +936,8 @@ fn parse_ssh_avahi_output(stdout: &str) -> Vec<Device> {
             // Skip localhost
             if ip == "127.0.0.1" || ip == "::1" { continue; }
 
-            // serial = "root@ip:port" — user will be prompted at connection time
-            let serial = format!("root@{ip}:{port}");
+            // serial = "ip:port" — username prompted interactively at connect time
+            let serial = format!("{ip}:{port}");
             let name = if hostname.is_empty() || hostname == ip {
                 format!("SSH Server ({ip})")
             } else {
@@ -977,7 +977,7 @@ fn parse_ssh_dns_sd_output(stdout: &str) -> Vec<Device> {
                     .and_then(|p| p.parse().ok())
                     .unwrap_or(22);
 
-                let serial = format!("root@{host}:{port}");
+                let serial = format!("{host}:{port}");
                 devices.push(Device {
                     id: Uuid::new_v4(),
                     name: format!("{host} (SSH)"),
@@ -1023,7 +1023,7 @@ async fn scan_ssh_arp_probe() -> Vec<Device> {
                 } else {
                     format!("{hostname} ({ip})")
                 };
-                let serial = format!("root@{ip}:22");
+                let serial = format!("{ip}:22");
                 Some(Device {
                     id: Uuid::new_v4(),
                     name,

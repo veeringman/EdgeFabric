@@ -2,12 +2,38 @@ use gloo_net::http::Request;
 use gloo_storage::Storage;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-/// Build API base URL from the browser's current hostname (port 6060).
+/// Build API base URL from the browser's current origin.
+///
+/// The dashboard dev server proxies `/api` to the backend, so using same-origin
+/// avoids localhost-vs-LAN-IP drift and keeps HTTPS/WSS aligned automatically.
 fn base_url() -> String {
-    let host = web_sys::window()
-        .and_then(|w| w.location().hostname().ok())
-        .unwrap_or_else(|| "localhost".to_string());
-    format!("http://{host}:6060/api/v1")
+    let origin = web_sys::window()
+        .and_then(|w| w.location().origin().ok())
+        .unwrap_or_else(|| "http://127.0.0.1:9080".to_string());
+    format!("{origin}/api/v1")
+}
+
+pub fn ws_base_url() -> String {
+    let Some(window) = web_sys::window() else {
+        return "ws://127.0.0.1:6060/api/v1".to_string();
+    };
+
+    let hostname = window
+        .location()
+        .hostname()
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+
+    let scheme = window
+        .location()
+        .protocol()
+        .ok()
+        .map(|p| if p == "https:" { "wss" } else { "ws" })
+        .unwrap_or("ws");
+
+    // Direct API WS is more stable than Trunk's WS proxy for terminal streams.
+    format!("{scheme}://{hostname}:6060/api/v1")
 }
 
 fn token() -> Option<String> {
@@ -309,6 +335,22 @@ pub struct VirtualIotBackendListResponse {
     pub total: usize,
 }
 
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+pub struct AgentListResponse {
+    pub agents: Vec<Agent>,
+    pub total: usize,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct Agent {
+    pub id: String,
+    pub name: String,
+    pub region: String,
+    pub streaming_url: Option<String>,
+    pub status: String,
+    pub capabilities: Vec<String>,
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct VirtualIotBackendEnvelope {
     pub backend: VirtualIotBackend,
@@ -330,6 +372,8 @@ pub struct VirtualIotBackend {
     pub config: serde_json::Value,
     pub capabilities: Vec<String>,
     pub attached_device_id: Option<String>,
+    pub agent_id: Option<String>,
+    pub agent_base_url: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -340,6 +384,8 @@ pub struct CreateVirtualIotBackendRequest {
     pub controller_types: Vec<String>,
     pub region: String,
     pub auto_start: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug, Default)]
@@ -363,6 +409,17 @@ pub struct SensorInjectRequest {
     pub value: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct ActuatorWriteRequest {
+    pub pin: u32,
+    pub level: u32,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct ScriptRunRequest {
+    pub source: String,
 }
 
 #[derive(Deserialize, Clone, Debug)]

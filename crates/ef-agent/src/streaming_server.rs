@@ -33,6 +33,69 @@ fn ffmpeg_path() -> &'static str {
     })
 }
 
+#[cfg(target_os = "macos")]
+fn idevicescreenshot_path() -> &'static str {
+    static PATH: OnceLock<String> = OnceLock::new();
+    PATH.get_or_init(|| {
+        for p in [
+            "/opt/homebrew/bin/idevicescreenshot",
+            "/usr/local/bin/idevicescreenshot",
+            "/usr/bin/idevicescreenshot",
+        ] {
+            if std::path::Path::new(p).exists() { return p.to_string(); }
+        }
+        "idevicescreenshot".to_string()
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn idevicesyslog_path() -> &'static str {
+    static PATH: OnceLock<String> = OnceLock::new();
+    PATH.get_or_init(|| {
+        for p in [
+            "/opt/homebrew/bin/idevicesyslog",
+            "/usr/local/bin/idevicesyslog",
+            "/usr/bin/idevicesyslog",
+        ] {
+            if std::path::Path::new(p).exists() { return p.to_string(); }
+        }
+        "idevicesyslog".to_string()
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn ideviceinfo_path() -> &'static str {
+    static PATH: OnceLock<String> = OnceLock::new();
+    PATH.get_or_init(|| {
+        for p in [
+            "/opt/homebrew/bin/ideviceinfo",
+            "/usr/local/bin/ideviceinfo",
+            "/usr/bin/ideviceinfo",
+        ] {
+            if std::path::Path::new(p).exists() { return p.to_string(); }
+        }
+        "ideviceinfo".to_string()
+    })
+}
+
+fn adb_path() -> &'static str {
+    static PATH: OnceLock<String> = OnceLock::new();
+    PATH.get_or_init(|| {
+        for p in [
+            "/opt/homebrew/bin/adb",
+            "/usr/local/bin/adb",
+            "/usr/bin/adb",
+        ] {
+            if std::path::Path::new(p).exists() { return p.to_string(); }
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            let sdk = format!("{home}/Library/Android/sdk/platform-tools/adb");
+            if std::path::Path::new(&sdk).exists() { return sdk; }
+        }
+        "adb".to_string()
+    })
+}
+
 /// Start the agent's streaming HTTP server on the given port.
 pub async fn start_streaming_server(
     port: u16,
@@ -278,7 +341,7 @@ async fn handle_logs(socket: WebSocket, serial: String) {
         #[cfg(target_os = "macos")]
         "ios" => {
             // Try idevicesyslog first
-            match tokio::process::Command::new("idevicesyslog")
+            match tokio::process::Command::new(idevicesyslog_path())
                 .args(["-u", &serial])
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
@@ -302,7 +365,7 @@ async fn handle_logs(socket: WebSocket, serial: String) {
         }
         _ => {
             // Android: adb logcat
-            match tokio::process::Command::new("adb")
+            match tokio::process::Command::new(adb_path())
                 .args(["-s", &serial, "logcat", "-v", "threadtime"])
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
@@ -368,8 +431,10 @@ async fn capture_android_frame(serial: &str) -> anyhow::Result<Vec<u8>> {
         .args([
             "-c",
             &format!(
-                "adb -s {} exec-out screencap -p | ffmpeg -y -hide_banner -loglevel error -i - -vframes 1 -f mjpeg -q:v 15 -vf scale=540:-1 -",
-                shell_escape(serial)
+                "{} -s {} exec-out screencap -p | {} -y -hide_banner -loglevel error -i - -vframes 1 -f mjpeg -q:v 15 -vf scale=540:-1 -",
+                adb_path(),
+                shell_escape(serial),
+                ffmpeg_path()
             ),
         ])
         .stdout(Stdio::piped())
@@ -382,7 +447,7 @@ async fn capture_android_frame(serial: &str) -> anyhow::Result<Vec<u8>> {
     }
 
     // Fallback: raw PNG
-    let output = tokio::process::Command::new("adb")
+    let output = tokio::process::Command::new(adb_path())
         .args(["-s", serial, "exec-out", "screencap", "-p"])
         .output()
         .await?;
@@ -437,19 +502,27 @@ async fn capture_simulator_frame(serial: &str, tmp: &str) -> anyhow::Result<Vec<
     anyhow::bail!("simulator screenshot too small ({} bytes)", data.len())
 }
 
-/// iOS: idevicescreenshot → ffmpeg → JPEG
+/// iOS: WDA screenshot (iOS 17+) → fallback idevicescreenshot → ffmpeg → JPEG
 #[cfg(target_os = "macos")]
 async fn capture_ios_frame(serial: &str, tmp: &str) -> anyhow::Result<Vec<u8>> {
-    // idevicescreenshot writes a TIFF to a file — we use a temp file then ffmpeg
+    // iOS 17+ path: try WebDriverAgent screenshot endpoint first.
+    // WDA returns a base64-encoded PNG; decode and return as-is.
+    if let Ok(png) = capture_ios_via_wda().await {
+        return Ok(png);
+    }
 
-    let status = tokio::process::Command::new("idevicescreenshot")
+    // Legacy path (iOS ≤ 16): idevicescreenshot → ffmpeg → JPEG
+    // On iOS 17+ this requires Xcode to have prepared the device (mounted DDI).
+    let status = tokio::process::Command::new(idevicescreenshot_path())
         .args(["-u", serial, tmp])
         .stderr(Stdio::null())
         .status()
         .await?;
 
     if !status.success() {
-        anyhow::bail!("idevicescreenshot failed");
+        anyhow::bail!(
+            "idevicescreenshot failed (iOS 17+: start WDA for screenshot support, or open Xcode → Window → Devices to prepare device)"
+        );
     }
 
     // Convert TIFF → JPEG via ffmpeg
@@ -472,8 +545,39 @@ async fn capture_ios_frame(serial: &str, tmp: &str) -> anyhow::Result<Vec<u8>> {
         return Ok(output.stdout);
     }
 
-    // Fallback: return raw TIFF (browser won't display, but at least it's data)
     anyhow::bail!("ffmpeg TIFF→JPEG conversion failed")
+}
+
+/// Try to grab a screenshot from WDA (WebDriverAgent) at localhost:8100.
+/// WDA is the reliable method on iOS 17+ where idevicescreenshot requires a mounted DDI.
+/// Returns raw PNG bytes on success.
+#[cfg(target_os = "macos")]
+async fn capture_ios_via_wda() -> anyhow::Result<Vec<u8>> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()?;
+
+    let resp = client
+        .get("http://127.0.0.1:8100/screenshot")
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        anyhow::bail!("WDA screenshot endpoint returned {}", resp.status());
+    }
+
+    let body: serde_json::Value = resp.json().await?;
+    // WDA returns { value: "<base64 PNG>" }
+    let b64 = body["value"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("WDA response missing value field"))?;
+
+    use base64::Engine as _;
+    let png = base64::engine::general_purpose::STANDARD.decode(b64)?;
+    if png.len() < 100 {
+        anyhow::bail!("WDA returned too-small image ({} bytes)", png.len());
+    }
+    Ok(png)
 }
 
 // ── Input handling ────────────────────────────────────────────────
@@ -638,7 +742,7 @@ async fn handle_input_event(serial: &str, os: &str, event_json: &str) {
                                  "keyevent".into(), "KEYCODE_APP_SWITCH".into()],
                 _ => return,
             };
-            match tokio::process::Command::new("adb").args(&args).output().await {
+            match tokio::process::Command::new(adb_path()).args(&args).output().await {
                 Ok(out) => {
                     if !out.status.success() {
                         let stderr = String::from_utf8_lossy(&out.stderr);
@@ -685,7 +789,7 @@ async fn detect_device_os(serial: &str) -> String {
 
         // iOS UDIDs are 40 hex chars (or 25 chars for newer devices)
         if serial.len() >= 24 && serial.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
-            let result = tokio::process::Command::new("ideviceinfo")
+            let result = tokio::process::Command::new(ideviceinfo_path())
                 .args(["-u", serial, "-k", "DeviceClass"])
                 .output()
                 .await;
@@ -695,11 +799,22 @@ async fn detect_device_os(serial: &str) -> String {
                     return "ios".into();
                 }
             }
+
+            let result = tokio::process::Command::new("xcrun")
+                .args(["xctrace", "list", "devices"])
+                .output()
+                .await;
+            if let Ok(out) = result {
+                let s = String::from_utf8_lossy(&out.stdout);
+                if s.contains(serial) {
+                    return "ios".into();
+                }
+            }
         }
     }
 
     // Check if ADB knows this serial
-    let result = tokio::process::Command::new("adb")
+    let result = tokio::process::Command::new(adb_path())
         .args(["-s", serial, "get-state"])
         .output()
         .await;

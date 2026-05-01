@@ -6,6 +6,38 @@ use tokio::process::Command;
 use tracing::info;
 use uuid::Uuid;
 
+fn adb_path() -> String {
+    for p in [
+        "/opt/homebrew/bin/adb",
+        "/usr/local/bin/adb",
+        "/usr/bin/adb",
+    ] {
+        if std::path::Path::new(p).exists() {
+            return p.to_string();
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let sdk = format!("{home}/Library/Android/sdk/platform-tools/adb");
+        if std::path::Path::new(&sdk).exists() {
+            return sdk;
+        }
+    }
+    "adb".to_string()
+}
+
+fn ideviceinfo_path() -> &'static str {
+    for p in [
+        "/opt/homebrew/bin/ideviceinfo",
+        "/usr/local/bin/ideviceinfo",
+        "/usr/bin/ideviceinfo",
+    ] {
+        if std::path::Path::new(p).exists() {
+            return p;
+        }
+    }
+    "ideviceinfo"
+}
+
 /// Discovers devices connected to this edge node.
 pub struct DeviceDiscovery;
 
@@ -15,7 +47,7 @@ impl DeviceDiscovery {
     pub async fn scan_adb() -> Result<Vec<Device>> {
         info!("Scanning for ADB devices...");
 
-        let output = Command::new("adb")
+        let output = Command::new(adb_path())
             .args(["devices", "-l"])
             .output()
             .await;
@@ -666,7 +698,7 @@ async fn scan_mdns_iot() -> Vec<Device> {
 
 /// Query ideviceinfo for the ProductType (e.g. "iPhone7,2", "iPhone14,3").
 async fn query_ios_model(udid: &str) -> Option<String> {
-    let out = Command::new("ideviceinfo")
+    let out = Command::new(ideviceinfo_path())
         .args(["-u", udid, "-k", "ProductType"])
         .output()
         .await

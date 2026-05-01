@@ -207,13 +207,14 @@ async fn handle_shell(socket: WebSocket, state: VeerOsState, vm_name: String) {
         }
     };
 
-    let mut child = match Command::new(&state.cfg.veer_connect_path)
-        .args(["shell", &info.host, &info.port.to_string()])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-    {
+    // Folded VMs: stdin → sensor-feed FIFO, stdout ← `fold logs -f`
+    if let Some(fifo_path) = info.sensor_feed_path.clone() {
+        handle_shell_folded(ws_tx, ws_rx, &state, &info.connect_command, &fifo_path).await;
+        return;
+    }
+
+    // Standard TCP VMs: single process stdin/stdout bridge
+    let mut child = match spawn_shell_command(&state, &info.connect_command, &info.host, info.port) {
         Ok(c) => c,
         Err(e) => {
             let _ = ws_tx.send(Message::Text(format!("spawn failed: {e}\n").into())).await;
@@ -277,4 +278,175 @@ async fn handle_shell(socket: WebSocket, state: VeerOsState, vm_name: String) {
         }
         let _ = ws_tx.send(Message::Close(None)).await;
     }
+}
+
+/// Shell bridge for folded VMs:
+///   - stdout: `fold logs -f <name>` (a child process whose stdout we stream)
+///   - stdin:  sensor-feed FIFO (writes go directly to the file, bypassing the child)
+async fn handle_shell_folded(
+    mut ws_tx: futures::stream::SplitSink<WebSocket, Message>,
+    mut ws_rx: futures::stream::SplitStream<WebSocket>,
+    state: &VeerOsState,
+    logs_command: &str,  // e.g. "fold logs -f <vm>"
+    fifo_path: &str,
+) {
+    let _ = ws_tx
+        .send(Message::Text(
+            "\r\n[EdgeFabric] Connected to VeerOS folded runtime (root shell, no login).\r\n".into(),
+        ))
+        .await;
+
+    // Open sensor-feed FIFO for writing (non-blocking open so we don't hang
+    // forever if no reader is on the other side yet).
+    let fifo_path = fifo_path.to_owned();
+    let logs_command = logs_command.to_owned();
+
+    // Spawn `fold logs -f <vm>` — its stdout is the VM console output stream.
+    let mut parts = logs_command.split_whitespace();
+    let program = match parts.next() {
+        Some(p) => p.to_owned(),
+        None => {
+            let _ = ws_tx.send(Message::Text("error: empty logs command\n".into())).await;
+            return;
+        }
+    };
+    let args: Vec<String> = parts.map(|s| s.to_owned()).collect();
+
+    let mut child = match Command::new(&program)
+        .current_dir(&state.cfg.root_dir)
+        .args(&args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = ws_tx.send(Message::Text(format!("spawn failed: {e}\n").into())).await;
+            return;
+        }
+    };
+
+    let mut stdout = child.stdout.take();
+    let fifo_path_for_stdout = fifo_path.clone();
+
+    // WS input → sensor-feed FIFO (VM keyboard input via UART)
+    let (fifo_ready_tx, mut fifo_ready_rx) = tokio::sync::mpsc::unbounded_channel::<Result<(), String>>();
+
+    let fifo_writer = tokio::spawn(async move {
+        // Open FIFO with O_WRONLY|O_NONBLOCK; retry briefly if not ready.
+        let file = {
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut attempts = 0u8;
+            loop {
+                match std::fs::OpenOptions::new()
+                    .write(true)
+                    .custom_flags(libc::O_NONBLOCK)
+                    .open(&fifo_path)
+                {
+                    Ok(f) => {
+                        // Convert std::fs::File → tokio::fs::File
+                        break Some(tokio::fs::File::from_std(f));
+                    }
+                    Err(_) if attempts < 10 => {
+                        attempts += 1;
+                        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                    }
+                    Err(_) => break None,
+                }
+            }
+        };
+        let mut file = match file {
+            Some(f) => {
+                let _ = fifo_ready_tx.send(Ok(()));
+                f
+            }
+            None => {
+                let _ = fifo_ready_tx.send(Err(format!(
+                    "cannot open sensor FIFO {} for shell input (VM may still be booting)",
+                    fifo_path
+                )));
+                return;
+            }
+        };
+        // Send a single newline so the VM redraws a fresh prompt line for
+        // this session. VeerOS has no login gate; it's already root.
+        let _ = tokio::io::AsyncWriteExt::write_all(&mut file, b"\n").await;
+        while let Some(Ok(msg)) = ws_rx.next().await {
+            let bytes = match msg {
+                Message::Text(t) => t.as_bytes().to_vec(),
+                Message::Binary(b) => b.to_vec(),
+                Message::Close(_) => break,
+                _ => continue,
+            };
+            if tokio::io::AsyncWriteExt::write_all(&mut file, &bytes).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // Child stdout → WS (VM console output)
+    let _ = fifo_path_for_stdout; // legacy: previously used for forced-logout hack
+    let stdout_task = tokio::spawn(async move {
+        let mut buf = [0u8; 4096];
+        if let Some(out) = stdout.as_mut() {
+            loop {
+                match tokio::io::AsyncReadExt::read(out, &mut buf).await {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if ws_tx.send(Message::Binary(buf[..n].to_vec().into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        }
+        ws_tx
+    });
+
+    if let Some(fifo_result) = fifo_ready_rx.recv().await {
+        if let Err(msg) = fifo_result {
+            if let Ok(mut tx) = stdout_task.await {
+                let _ = tx
+                    .send(Message::Text(format!("\r\n[EdgeFabric] {msg}\r\n").into()))
+                    .await;
+                let _ = tx.send(Message::Close(None)).await;
+            }
+            let _ = child.kill().await;
+            return;
+        }
+    }
+
+    let _ = child.wait().await;
+    fifo_writer.abort();
+    if let Ok(mut ws_tx) = stdout_task.await {
+        let _ = ws_tx.send(Message::Close(None)).await;
+    }
+}
+
+fn spawn_shell_command(
+    state: &VeerOsState,
+    connect_command: &str,
+    host: &str,
+    port: u16,
+) -> Result<tokio::process::Child, std::io::Error> {
+    let command_line = if connect_command.trim().is_empty() {
+        format!("{} shell {} {}", state.cfg.veer_connect_path, host, port)
+    } else {
+        connect_command.trim().to_string()
+    };
+
+    let mut parts = command_line.split_whitespace();
+    let program = parts.next().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "shell command is empty")
+    })?;
+
+    Command::new(program)
+        .current_dir(&state.cfg.root_dir)
+        .args(parts)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
 }

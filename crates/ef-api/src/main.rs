@@ -14,6 +14,7 @@ mod proto;
 mod routes;
 mod session_manager;
 mod virtual_iot_runtime;
+mod sensor_bus;
 mod veeros_proxy;
 
 #[cfg(test)]
@@ -63,12 +64,14 @@ async fn main() -> Result<()> {
 
     // Minimal Virtual IoT runtime — periodically heartbeats saved virtual devices
     // so they behave like software-backed controllers instead of going stale.
-    virtual_iot_runtime::spawn_virtual_iot_runtime(pool.clone());
+    let bus = sensor_bus::new_bus();
+    virtual_iot_runtime::spawn_virtual_iot_runtime(pool.clone(), bus.clone());
 
     let state = AppState {
         pool,
         jwt_secret: cfg.auth.jwt_secret.clone(),
         veeros: cfg.veeros.clone(),
+        sensor_bus: bus,
     };
 
     // Rate limiter: 50 requests/sec per IP

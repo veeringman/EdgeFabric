@@ -41,6 +41,7 @@ reqwest = { workspace = true }
 tokio-tungstenite = "0.26"
 utoipa = { workspace = true }
 utoipa-swagger-ui = { workspace = true }
+libc = "0.2"
 
 [build-dependencies]
 tonic-build = { workspace = true }

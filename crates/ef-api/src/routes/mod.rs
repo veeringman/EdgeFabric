@@ -56,8 +56,15 @@ pub fn api_router() -> Router<AppState> {
         .route("/devices/{id}/virtual-iot/backend/attach", post(virtual_iot::attach_virtual_iot_backend))
         .route("/devices/{id}/virtual-iot/backend/detach", post(virtual_iot::detach_virtual_iot_backend))
         .route("/devices/{id}/virtual-iot/sensors", post(virtual_iot::inject_virtual_iot_sensor))
+        .route("/devices/{id}/virtual-iot/sensors/stream", get(virtual_iot::virtual_iot_sensor_stream_ws))
+        .route("/devices/{id}/virtual-iot/actuators", post(virtual_iot::write_virtual_iot_actuator))
+        .route("/devices/{id}/virtual-iot/scripts/run", post(virtual_iot::run_virtual_iot_script))
         .route("/devices/{id}/virtual-iot/shell", get(virtual_iot::get_virtual_iot_shell_info))
         .route("/devices/{id}/virtual-iot/shell/ws", get(virtual_iot::virtual_iot_shell_ws))
+        // Global synthetic sensor simulation toggle (disabled by default).
+        .route("/virtual-iot/simulation", get(virtual_iot::get_simulation_state))
+        .route("/virtual-iot/simulation/start", post(virtual_iot::start_simulation))
+        .route("/virtual-iot/simulation/stop", post(virtual_iot::stop_simulation))
 }
 
 #[utoipa::path(get, path = "/health", tag = "health",

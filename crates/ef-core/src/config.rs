@@ -106,11 +106,11 @@ impl Default for VeerOsConfig {
     fn default() -> Self {
         Self {
             root_dir: "/home/vijay/rnd/VeerOS".into(),
-            vm_script_path: "/home/vijay/rnd/VeerOS/scripts/veeros-vm".into(),
+            vm_script_path: "/home/vijay/rnd/VeerOS/scripts/veer-vm".into(),
             veer_connect_path: "/home/vijay/rnd/VeerOS/target/release/veer-connect".into(),
             default_target: "esp32c6".into(),
             default_memory_mb: 128,
-            default_network_mode: "nat".into(),
+            default_network_mode: "tap0".into(),
             default_region: "local".into(),
         }
     }
@@ -198,11 +198,11 @@ format = "pretty"
 
 [veeros]
 root_dir = "/home/vijay/rnd/VeerOS"
-vm_script_path = "/home/vijay/rnd/VeerOS/scripts/veeros-vm"
+vm_script_path = "/home/vijay/rnd/VeerOS/scripts/veer-vm"
 veer_connect_path = "/home/vijay/rnd/VeerOS/target/release/veer-connect"
 default_target = "esp32c6"
 default_memory_mb = 128
-default_network_mode = "nat"
+default_network_mode = "tap0"
 default_region = "local"
 "#;
         let cfg: AppConfig = toml::from_str(toml).unwrap();
@@ -268,11 +268,11 @@ format = "json"
 
 [veeros]
 root_dir = "/tmp/veeros"
-vm_script_path = "/tmp/veeros/scripts/veeros-vm"
+vm_script_path = "/tmp/veeros/scripts/veer-vm"
 veer_connect_path = "/tmp/veeros/target/release/veer-connect"
 default_target = "esp32c6"
 default_memory_mb = 128
-default_network_mode = "nat"
+default_network_mode = "tap0"
 default_region = "local"
 "#;
         // telemetry section omitted — should use defaults

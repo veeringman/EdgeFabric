@@ -26,24 +26,54 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_ROOT"
 
+# Load standard ports (single source of truth)
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/ports.env"
+
 COMMAND="${1:-help}"
 RUN_MODE="${EF_RUN_MODE:-development}"
 LOG_DIR="$PROJECT_ROOT/logs"
 PID_DIR="$PROJECT_ROOT/.pids"
 DB_URL="${DATABASE_URL:-postgres://edgefabric:edgefabric@localhost:5432/edgefabric}"
+BUILD_ON_START="${EF_BUILD_ON_START:-true}"
+BUILD_PROFILE="${EF_BUILD_PROFILE:-debug}"
 
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
-# ── Determine binary path ────────────────────────────────────────
-if [[ -f "target/release/ef-api" ]]; then
-  BIN_DIR="target/release"
-elif [[ -f "target/debug/ef-api" ]]; then
-  BIN_DIR="target/debug"
-else
-  BIN_DIR=""
-fi
-
 # ── Helper functions ──────────────────────────────────────────────
+resolve_bin_dir() {
+  if [[ "$BUILD_PROFILE" == "release" ]]; then
+    if [[ -f "target/release/ef-api" || -f "target/release/ef-agent" ]]; then
+      echo "target/release"
+      return
+    fi
+  fi
+
+  if [[ -f "target/debug/ef-api" || -f "target/debug/ef-agent" ]]; then
+    echo "target/debug"
+  elif [[ -f "target/release/ef-api" || -f "target/release/ef-agent" ]]; then
+    echo "target/release"
+  else
+    echo ""
+  fi
+}
+
+build_service_binary() {
+  local pkg="$1"
+
+  if [[ "${BUILD_ON_START,,}" != "true" ]]; then
+    info "Skipping build for $pkg (EF_BUILD_ON_START=$BUILD_ON_START)"
+    return
+  fi
+
+  info "Building $pkg (profile=$BUILD_PROFILE)..."
+  if [[ "$BUILD_PROFILE" == "release" ]]; then
+    cargo build -p "$pkg" --release
+  else
+    cargo build -p "$pkg"
+  fi
+}
+
 wait_for_port() {
   local port="$1" name="$2" timeout="${3:-30}"
   info "Waiting for $name on port $port..."
@@ -106,16 +136,21 @@ deploy_infra() {
   fi
   docker compose up -d postgres redis nats coturn
   echo ""
-  wait_for_port 5432 "PostgreSQL"
-  wait_for_port 6379 "Redis"
-  wait_for_port 4222 "NATS"
-  wait_for_port 3478 "CoTURN" 10 || true   # CoTURN uses UDP, TCP check may fail
+  wait_for_port "$EF_PORT_POSTGRES" "PostgreSQL"
+  wait_for_port "$EF_PORT_REDIS" "Redis"
+  wait_for_port "$EF_PORT_NATS" "NATS"
+  wait_for_port "$EF_PORT_COTURN" "CoTURN" 10 || true   # CoTURN uses UDP, TCP check may fail
   echo ""
   ok "Infrastructure services running"
 }
 
 deploy_api() {
-  if [[ -z "$BIN_DIR" ]]; then
+  build_service_binary "ef-api"
+
+  local bin_dir
+  bin_dir="$(resolve_bin_dir)"
+
+  if [[ -z "$bin_dir" || ! -x "$bin_dir/ef-api" ]]; then
     err "ef-api binary not found. Run: ./scripts/build.sh [--release]"
     exit 1
   fi
@@ -125,18 +160,23 @@ deploy_api() {
 
   info "Starting ef-api (mode=$RUN_MODE)..."
   EF_RUN_MODE="$RUN_MODE" \
-    nohup "$BIN_DIR/ef-api" \
+    nohup "$bin_dir/ef-api" \
     > "$LOG_DIR/ef-api.log" 2>&1 &
   save_pid "ef-api" $!
 
-  wait_for_port 6060 "ef-api HTTP"
+  wait_for_port "$EF_PORT_API_HTTP" "ef-api HTTP"
   info "Logs: $LOG_DIR/ef-api.log"
-  info "Swagger UI: http://127.0.0.1:6060/swagger-ui"
-  info "Health: http://127.0.0.1:6060/health"
+  info "Swagger UI: ${EF_URL_API}/swagger-ui"
+  info "Health: ${EF_URL_API}/health"
 }
 
 deploy_agent() {
-  if [[ -z "$BIN_DIR" ]]; then
+  build_service_binary "ef-agent"
+
+  local bin_dir
+  bin_dir="$(resolve_bin_dir)"
+
+  if [[ -z "$bin_dir" || ! -x "$bin_dir/ef-agent" ]]; then
     err "ef-agent binary not found. Run: ./scripts/build.sh [--release]"
     exit 1
   fi
@@ -147,9 +187,8 @@ deploy_agent() {
   # Default agent config — can be overridden via env vars
   local agent_id="${EF__AGENT__AGENT_ID:-$(hostname | tr '[:upper:]' '[:lower:]')}"
   local region="${EF__AGENT__REGION:-local}"
-  local control_url="${EF__AGENT__CONTROL_PLANE_URL:-http://localhost:6060}"
+  local control_url="${EF__AGENT__CONTROL_PLANE_URL:-$EF_URL_API}"
   local tls_skip="${EF__AGENT__TLS_SKIP_VERIFY:-true}"
-
   info "Starting ef-agent (id=$agent_id, region=$region)..."
   info "  → connecting to: $control_url"
 
@@ -158,7 +197,7 @@ deploy_agent() {
   EF__AGENT__REGION="$region" \
   EF__AGENT__CONTROL_PLANE_URL="$control_url" \
   EF__AGENT__TLS_SKIP_VERIFY="$tls_skip" \
-    nohup "$BIN_DIR/ef-agent" \
+    nohup "$bin_dir/ef-agent" \
     > "$LOG_DIR/ef-agent.log" 2>&1 &
   save_pid "ef-agent" $!
 
@@ -200,17 +239,14 @@ deploy_dashboard() {
   stop_process "ef-dashboard" 2>/dev/null || true
 
   local dash_dir="$PROJECT_ROOT/crates/ef-dashboard"
-  local port="${EF_DASHBOARD_PORT:-9080}"
-  local api_proxy="${EF_DASHBOARD_API_PROXY:-http://127.0.0.1:6060}"
+  local port="${EF_DASHBOARD_PORT:-$EF_PORT_DASHBOARD}"
 
-  info "Starting dashboard (port=$port, proxy→$api_proxy)..."
+  info "Starting dashboard (port=$port, proxy via Trunk.toml)..."
 
   cd "$dash_dir"
   nohup trunk serve \
     --address 0.0.0.0 \
     --port "$port" \
-    --proxy-backend "$api_proxy/api" \
-    --proxy-rewrite /api \
     > "$LOG_DIR/ef-dashboard.log" 2>&1 &
   save_pid "ef-dashboard" $!
   cd "$PROJECT_ROOT"
@@ -236,25 +272,16 @@ show_status() {
 
   echo ""
 
-  # Infrastructure (Docker)
+  # Infrastructure (Docker) — pager disabled
   if command -v docker &>/dev/null; then
-    for svc in postgres redis nats coturn; do
-      state="$(docker compose ps --format '{{.State}}' "$svc" 2>/dev/null || echo "not found")"
-      if [[ "$state" == "running" ]]; then
-        echo -e "  $svc:$(printf '%*s' $((12 - ${#svc})) '') ${GREEN}$state${NC}"
-      else
-        echo -e "  $svc:$(printf '%*s' $((12 - ${#svc})) '') ${RED}$state${NC}"
-      fi
-    done
+    PAGER=cat DOCKER_CLI_HINTS=false docker compose ps --format 'table {{.Service}}\t{{.State}}\t{{.Status}}' 2>/dev/null | cat || true
   fi
 
   echo ""
 
   # Health checks
-  if curl -sf http://localhost:6060/health &>/dev/null; then
-    echo -e "  API health:     ${GREEN}healthy${NC} (http://localhost:6060/health)"
-  elif curl -sf http://localhost:8080/health &>/dev/null; then
-    echo -e "  API health:     ${GREEN}healthy${NC} (http://localhost:8080/health — Docker)"
+  if curl -sf "${EF_URL_API}/health" &>/dev/null; then
+    echo -e "  API health:     ${GREEN}healthy${NC} (${EF_URL_API}/health)"
   else
     echo -e "  API health:     ${RED}unreachable${NC}"
   fi
@@ -287,6 +314,86 @@ unseed_devices() {
   ok "Seed devices removed"
 }
 
+# ── Logs ──────────────────────────────────────────────────────────
+follow_logs() {
+  local svc="${1:-all}"
+  case "$svc" in
+    api|ef-api)         tail -F "$LOG_DIR/ef-api.log" ;;
+    agent|ef-agent)     tail -F "$LOG_DIR/ef-agent.log" ;;
+    dash|ef-dashboard)  tail -F "$LOG_DIR/ef-dashboard.log" ;;
+    all|"")             tail -F "$LOG_DIR"/ef-*.log ;;
+    infra|docker)       PAGER=cat docker compose logs -f --tail=100 ;;
+    *) err "Unknown service for logs: $svc (api|agent|dashboard|infra|all)"; exit 1 ;;
+  esac
+}
+
+# ── Restart ───────────────────────────────────────────────────────
+restart_service() {
+  local svc="${1:-all}"
+  case "$svc" in
+    api|ef-api)         stop_process ef-api;       deploy_api ;;
+    agent|ef-agent)     stop_process ef-agent;     deploy_agent ;;
+    dash|dashboard|ef-dashboard)  stop_process ef-dashboard; deploy_dashboard ;;
+    infra)              docker compose restart postgres redis nats coturn ;;
+    all|"")
+      stop_process ef-dashboard; stop_process ef-agent; stop_process ef-api
+      deploy_infra; deploy_api; deploy_agent; deploy_dashboard
+      ;;
+    *) err "Unknown service for restart: $svc"; exit 1 ;;
+  esac
+}
+
+# ── VeerOS (folded VMs) management ────────────────────────────────
+veeros_bin() {
+  local root="${EF__VEEROS__ROOT_DIR:-/home/vijay/rnd/VeerOS}"
+  if   [[ -x "$root/target/release/fold" ]]; then echo "$root/target/release/fold"
+  elif [[ -x "$root/target/debug/fold"   ]]; then echo "$root/target/debug/fold"
+  else err "fold binary not found under $root/target/{release,debug}"; return 1
+  fi
+}
+
+veeros_cmd() {
+  local sub="${1:-list}"; shift || true
+  local bin; bin="$(veeros_bin)" || exit 1
+  case "$sub" in
+    net)
+      "$SCRIPT_DIR/veeros-net.sh" "${1:-status}"
+      ;;
+    list)       PAGER=cat "$bin" list ;;
+    logs)       PAGER=cat "$bin" logs "$@" ;;
+    stop)       "$bin" stop "$@" ;;
+    rm)         "$bin" rm "$@" ;;
+    stop-all)
+      info "Stopping all running fold VMs..."
+      "$bin" list 2>/dev/null | awk 'NR>1 && $0 ~ /running/ {print $1}' | while read -r vm; do
+        [[ -n "$vm" ]] && { info "  stop $vm"; "$bin" stop "$vm" || true; }
+      done
+      ok "All running fold VMs stopped"
+      ;;
+    clean)
+      info "Removing stopped fold VMs and stale manifests..."
+      "$bin" list 2>/dev/null | awk 'NR>1 && $0 ~ /stopped/ {print $1}' | while read -r vm; do
+        [[ -n "$vm" ]] && { info "  rm $vm"; "$bin" rm "$vm" || true; rm -f "/tmp/edgefabric-${vm}.toml" "/tmp/edgefabric-${vm}.sensor"; }
+      done
+      ok "Stopped fold VMs removed"
+      ;;
+    *) err "Unknown veeros subcommand: $sub (net|list|logs|stop|stop-all|rm|clean)"; exit 1 ;;
+  esac
+}
+
+# ── Database reset (dev only) ─────────────────────────────────────
+reset_db() {
+  warn "This will DROP and recreate the edgefabric database. Dev only."
+  read -r -p "Type 'yes' to confirm: " answer
+  [[ "$answer" == "yes" ]] || { info "Aborted."; return 0; }
+  stop_process ef-api   2>/dev/null || true
+  stop_process ef-agent 2>/dev/null || true
+  PGPASSWORD=edgefabric psql -h localhost -U edgefabric -d postgres -c "DROP DATABASE IF EXISTS edgefabric;"
+  PGPASSWORD=edgefabric psql -h localhost -U edgefabric -d postgres -c "CREATE DATABASE edgefabric OWNER edgefabric;"
+  "$SCRIPT_DIR/migrate.sh"
+  ok "Database reset complete"
+}
+
 # ── Main dispatch ─────────────────────────────────────────────────
 case "$COMMAND" in
   infra)      deploy_infra ;;
@@ -298,32 +405,43 @@ case "$COMMAND" in
   seed)       seed_devices ;;
   unseed)     unseed_devices ;;
   stop)       stop_all ;;
+  restart)    shift || true; restart_service "${1:-all}" ;;
+  logs)       shift || true; follow_logs "${1:-all}" ;;
+  veeros)     shift || true; veeros_cmd "$@" ;;
+  reset-db)   reset_db ;;
   status)     show_status ;;
+  ports)      cat "$SCRIPT_DIR/ports.env" ;;
   help|-h|--help)
     echo "EdgeFabric Deploy Script"
     echo ""
-    echo "Usage: $0 <command>"
+    echo "Usage: $0 <command> [args]"
     echo ""
     echo "Commands:"
-    echo "  infra      Start infrastructure (Postgres, Redis, NATS, CoTURN)"
-    echo "  api        Start infrastructure + API server (native)"
-    echo "  agent      Start the edge agent (native)"
-    echo "  dashboard  Start the dashboard (Trunk dev server)"
-    echo "  all        Start everything (infra + api + agent + dashboard)"
-    echo "  docker    Start full stack via Docker Compose"
-    echo "  seed      Insert demo/seed devices into the database"
-    echo "  unseed    Remove demo/seed devices from the database"
-    echo "  stop      Stop all EdgeFabric services"
-    echo "  status    Show status of all services"
+    echo "  infra              Start infrastructure (Postgres, Redis, NATS, CoTURN)"
+    echo "  api                Start infrastructure + API server (native)"
+    echo "  agent              Start the edge agent (native)"
+    echo "  dashboard          Start the dashboard (Trunk dev server)"
+    echo "  all                Start everything (infra + api + agent + dashboard)"
+    echo "  docker             Start full stack via Docker Compose"
+    echo "  restart <svc>      Restart api|agent|dashboard|infra|all"
+    echo "  logs <svc>         Tail logs for api|agent|dashboard|infra|all"
+    echo "  stop               Stop all EdgeFabric services"
+    echo "  status             Show status of all services"
+    echo "  ports              Print standard port map"
+    echo "  seed|unseed        Insert/remove demo devices"
+    echo "  reset-db           Drop+recreate database and re-run migrations (dev only)"
+    echo "  veeros <sub>       Manage fold VMs: net|list|logs|stop|stop-all|rm|clean"
     echo ""
     echo "Environment:"
     echo "  EF_RUN_MODE                    development|production (default: development)"
     echo "  EF__AGENT__AGENT_ID            Agent identifier (default: hostname)"
     echo "  EF__AGENT__REGION              Agent region (default: local)"
-    echo "  EF__AGENT__CONTROL_PLANE_URL   API endpoint (default: http://localhost:6060)"
+    echo "  EF__AGENT__CONTROL_PLANE_URL   API endpoint (default: \$EF_URL_API)"
     echo "  EF__AGENT__TLS_SKIP_VERIFY     Skip TLS cert verify (default: true for dev)"
-    echo "  EF_DASHBOARD_PORT              Dashboard port (default: 9080)"
-    echo "  EF_DASHBOARD_API_PROXY         API proxy target (default: http://127.0.0.1:6060)"
+    echo "  EF_DASHBOARD_PORT              Dashboard port (default: \$EF_PORT_DASHBOARD)"
+    echo "  EF_DASHBOARD_API_PROXY         API proxy target (default: \$EF_URL_API)"
+    echo ""
+    echo "Standard ports are defined in scripts/ports.env (run '$0 ports' to view)."
     echo ""
     ;;
   *) err "Unknown command: $COMMAND (run '$0 help' for usage)"; exit 1 ;;

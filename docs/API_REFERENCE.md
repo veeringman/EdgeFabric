@@ -337,6 +337,114 @@ service SessionService {
 
 ---
 
+## Virtual IoT & VeerOS Backends
+
+### Backend Registry
+
+**List backends**
+```
+GET /api/v1/devices/virtual-iot/backends
+```
+
+**Create backend** (provisions a VeerOS VM via the local agent or a remote agent)
+```
+POST /api/v1/devices/virtual-iot/backends
+```
+```json
+{
+  "controller_type": "esp32c6",
+  "region": "local",
+  "provider": "veeros-vm",
+  "vm_name": "my-esp32"
+}
+```
+
+**Attach / detach backend**
+```
+POST /api/v1/devices/{id}/virtual-iot/backend/attach
+POST /api/v1/devices/{id}/virtual-iot/backend/detach
+```
+
+**Inject sensor value**
+```
+POST /api/v1/devices/{id}/virtual-iot/sensors
+```
+```json
+{ "sensor": "temperature", "value": "27.5" }
+```
+
+**Shell access (REST info)**
+```
+GET /api/v1/devices/{id}/virtual-iot/shell
+```
+
+**Shell WebSocket bridge**
+```
+GET /api/v1/devices/{id}/virtual-iot/shell/ws
+```
+
+---
+
+## Agent Streaming Server API (port 7070)
+
+Each EdgeFabric agent exposes a local HTTP/WS API directly on port 7070.
+This server starts immediately on agent launch, **independent of control-plane connectivity**.
+
+### VM Lifecycle
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET`    | `/health` | Health check |
+| `GET`    | `/veeros/vms` | List all VMs as JSON |
+| `POST`   | `/veeros/vms` | Create VM |
+| `GET`    | `/veeros/vms/{name}` | VM status |
+| `POST`   | `/veeros/vms/{name}/start` | Start VM |
+| `POST`   | `/veeros/vms/{name}/stop` | Stop VM |
+| `POST`   | `/veeros/vms/{name}/restart` | Restart VM |
+| `GET`    | `/veeros/vms/{name}/config` | VM config map |
+| `GET`    | `/veeros/vms/{name}/shell_info` | Shell host/port/connect command |
+| `POST`   | `/veeros/vms/{name}/sensor` | Inject sensor value |
+| `DELETE` | `/veeros/vms/{name}` | Destroy VM |
+| `GET`    | `/ws/veeros/{name}/shell` | WebSocket shell session |
+
+**Create VM request body:**
+```json
+{
+  "vm_name": "my-esp32",
+  "hostname": "my-esp32",
+  "target": "esp32c6",
+  "net_mode": "nat",
+  "memory_mb": 128
+}
+```
+
+`net_mode` values for `esp32c6` target:
+
+| `net_mode` | Runtime | Platforms | Notes |
+|---|---|---|---|
+| `nat` | `qemu-system-riscv32` | Linux, macOS | Default; requires QEMU |
+| `user` | `veer-vm` binary | macOS (HVF), Linux (KVM) | Rootless, no QEMU needed; build `veer-vm` first |
+| `bridge` | QEMU TAP | Linux only | Requires root; VMs visible on LAN |
+
+**List VMs response:**
+```json
+[
+  {
+    "name": "my-esp32",
+    "target": "esp32c6",
+    "hostname": "my-esp32",
+    "memory": 128,
+    "ssh_port": 2230,
+    "net_mode": "nat",
+    "status": "running",
+    "created": "2026-05-03T10:00:00+05:30",
+    "last_started": "2026-05-03T10:01:00+05:30"
+  }
+]
+```
+
+---
+
 ## Error Codes
 
 | HTTP Status | Code | Description |

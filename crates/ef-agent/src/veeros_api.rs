@@ -35,7 +35,7 @@ pub fn router(cfg: VeerOsConfig) -> Router {
     let state = VeerOsState { cfg: Arc::new(cfg) };
 
     Router::new()
-        .route("/veeros/vms", post(create_vm))
+        .route("/veeros/vms", get(list_vms).post(create_vm))
         .route("/veeros/vms/{name}", get(vm_status).delete(destroy_vm))
         .route("/veeros/vms/{name}/start", post(start_vm))
         .route("/veeros/vms/{name}/stop", post(stop_vm))
@@ -77,6 +77,25 @@ fn map_err(e: ef_core::error::EdgeFabricError) -> (StatusCode, Json<Value>) {
     )
 }
 
+fn map_command_failure(action: &str, out: &ef_control::command::CommandOutput) -> (StatusCode, Json<Value>) {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({
+            "error": format!("veeros-vm {action} failed"),
+            "exit_code": out.exit_code,
+            "stdout": out.stdout,
+            "stderr": out.stderr,
+        })),
+    )
+}
+
+async fn list_vms(
+    State(state): State<VeerOsState>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let vms = VeerOsDriver::list_vms(&state.cfg).await.map_err(map_err)?;
+    Ok(Json(json!(vms)))
+}
+
 async fn create_vm(
     State(state): State<VeerOsState>,
     Json(body): Json<CreateVmRequest>,
@@ -92,6 +111,10 @@ async fn create_vm(
     .await
     .map_err(map_err)?;
 
+    if out.exit_code != 0 {
+        return Err(map_command_failure("create", &out));
+    }
+
     Ok(Json(json!({
         "vm_name": body.vm_name,
         "stdout": out.stdout,
@@ -105,6 +128,9 @@ async fn start_vm(
     Path(name): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let out = VeerOsDriver::start_vm(&state.cfg, &name).await.map_err(map_err)?;
+    if out.exit_code != 0 {
+        return Err(map_command_failure("start", &out));
+    }
     Ok(Json(json!({ "vm_name": name, "stdout": out.stdout, "stderr": out.stderr, "exit_code": out.exit_code })))
 }
 
@@ -113,6 +139,9 @@ async fn stop_vm(
     Path(name): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let out = VeerOsDriver::stop_vm(&state.cfg, &name).await.map_err(map_err)?;
+    if out.exit_code != 0 {
+        return Err(map_command_failure("stop", &out));
+    }
     Ok(Json(json!({ "vm_name": name, "stdout": out.stdout, "stderr": out.stderr, "exit_code": out.exit_code })))
 }
 
@@ -121,6 +150,9 @@ async fn restart_vm(
     Path(name): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let out = VeerOsDriver::restart_vm(&state.cfg, &name).await.map_err(map_err)?;
+    if out.exit_code != 0 {
+        return Err(map_command_failure("restart", &out));
+    }
     Ok(Json(json!({ "vm_name": name, "stdout": out.stdout, "stderr": out.stderr, "exit_code": out.exit_code })))
 }
 
@@ -129,6 +161,9 @@ async fn destroy_vm(
     Path(name): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let out = VeerOsDriver::destroy_vm(&state.cfg, &name).await.map_err(map_err)?;
+    if out.exit_code != 0 {
+        return Err(map_command_failure("destroy", &out));
+    }
     Ok(Json(json!({ "vm_name": name, "stdout": out.stdout, "stderr": out.stderr, "exit_code": out.exit_code })))
 }
 
@@ -172,6 +207,9 @@ async fn inject_sensor(
     let out = VeerOsDriver::sensor_inject(&state.cfg, &name, &body.sensor, &body.value)
         .await
         .map_err(map_err)?;
+    if out.exit_code != 0 {
+        return Err(map_command_failure("sensor inject", &out));
+    }
     Ok(Json(json!({
         "vm_name": name,
         "sensor": body.sensor,

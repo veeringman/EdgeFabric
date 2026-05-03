@@ -149,9 +149,48 @@ deploy_agent() {
   local region="${EF__AGENT__REGION:-local}"
   local control_url="${EF__AGENT__CONTROL_PLANE_URL:-http://localhost:6060}"
   local tls_skip="${EF__AGENT__TLS_SKIP_VERIFY:-true}"
+  local veeros_root="${EF__VEEROS__ROOT_DIR:-}"
+  local veeros_vm_script="${EF__VEEROS__VM_SCRIPT_PATH:-}"
+  local veeros_connect_path="${EF__VEEROS__VEER_CONNECT_PATH:-}"
+  local veeros_target="${EF__VEEROS__DEFAULT_TARGET:-}"
+
+  # macOS convenience: auto-detect a common local VeerOS checkout so agent
+  # VeerOS endpoints work without requiring Linux-style /home/... paths.
+  if [[ "$(uname -s)" == "Darwin" ]] && [[ -z "$veeros_root" ]]; then
+    local mac_veeros_root="$HOME/VeerOS"
+    local mac_vm_script="$mac_veeros_root/scripts/veeros-vm"
+    local mac_connect_path="$mac_veeros_root/target/debug/veer-connect"
+    if [[ -d "$mac_veeros_root" ]] && [[ -x "$mac_vm_script" ]]; then
+      veeros_root="$mac_veeros_root"
+      veeros_vm_script="$mac_vm_script"
+      if [[ -x "$mac_connect_path" ]]; then
+        veeros_connect_path="$mac_connect_path"
+      fi
+      if [[ -z "$veeros_target" ]]; then
+        veeros_target="esp32c6"
+      fi
+      info "Auto-detected VeerOS at $veeros_root"
+    fi
+  fi
 
   info "Starting ef-agent (id=$agent_id, region=$region)..."
   info "  → connecting to: $control_url"
+  if [[ -n "$veeros_vm_script" ]]; then
+    info "  → VeerOS script: $veeros_vm_script"
+  fi
+
+  if [[ -n "$veeros_root" ]]; then
+    export EF__VEEROS__ROOT_DIR="$veeros_root"
+  fi
+  if [[ -n "$veeros_vm_script" ]]; then
+    export EF__VEEROS__VM_SCRIPT_PATH="$veeros_vm_script"
+  fi
+  if [[ -n "$veeros_connect_path" ]]; then
+    export EF__VEEROS__VEER_CONNECT_PATH="$veeros_connect_path"
+  fi
+  if [[ -n "$veeros_target" ]]; then
+    export EF__VEEROS__DEFAULT_TARGET="$veeros_target"
+  fi
 
   EF_RUN_MODE="$RUN_MODE" \
   EF__AGENT__AGENT_ID="$agent_id" \

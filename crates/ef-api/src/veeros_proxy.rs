@@ -46,12 +46,24 @@ fn client() -> Result<reqwest::Client> {
         .context("build reqwest client")
 }
 
-fn parse_command_output(v: &Value) -> CommandOutput {
-    CommandOutput {
+fn parse_command_output(v: &Value) -> Result<CommandOutput> {
+    let out = CommandOutput {
         stdout: v.get("stdout").and_then(Value::as_str).unwrap_or_default().to_string(),
         stderr: v.get("stderr").and_then(Value::as_str).unwrap_or_default().to_string(),
         exit_code: v.get("exit_code").and_then(Value::as_i64).unwrap_or(0) as i32,
+    };
+
+    if out.exit_code != 0 {
+        return Err(anyhow!(
+            "veeros command failed (exit={}): {}{}{}",
+            out.exit_code,
+            out.stderr,
+            if !out.stderr.is_empty() && !out.stdout.is_empty() { " | " } else { "" },
+            out.stdout
+        ));
     }
+
+    Ok(out)
 }
 
 async fn post_json(base: &str, path: &str, body: Value) -> Result<Value> {
@@ -120,22 +132,22 @@ pub async fn create_vm(
         }),
     )
     .await?;
-    Ok(parse_command_output(&v))
+    parse_command_output(&v)
 }
 
 pub async fn start_vm(base: &str, vm_name: &str) -> Result<CommandOutput> {
     let v = post_json(base, &format!("/veeros/vms/{vm_name}/start"), json!({})).await?;
-    Ok(parse_command_output(&v))
+    parse_command_output(&v)
 }
 
 pub async fn stop_vm(base: &str, vm_name: &str) -> Result<CommandOutput> {
     let v = post_json(base, &format!("/veeros/vms/{vm_name}/stop"), json!({})).await?;
-    Ok(parse_command_output(&v))
+    parse_command_output(&v)
 }
 
 pub async fn destroy_vm(base: &str, vm_name: &str) -> Result<CommandOutput> {
     let v = delete_json(base, &format!("/veeros/vms/{vm_name}")).await?;
-    Ok(parse_command_output(&v))
+    parse_command_output(&v)
 }
 
 pub async fn sensor_inject(
@@ -150,7 +162,7 @@ pub async fn sensor_inject(
         json!({ "sensor": sensor, "value": value }),
     )
     .await?;
-    Ok(parse_command_output(&v))
+    parse_command_output(&v)
 }
 
 pub async fn vm_status(base: &str, vm_name: &str) -> Result<String> {

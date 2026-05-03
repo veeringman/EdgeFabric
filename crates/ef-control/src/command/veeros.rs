@@ -116,6 +116,19 @@ impl VeerOsDriver {
         }
     }
 
+    pub async fn list_vms(cfg: &VeerOsConfig) -> Result<Vec<serde_json::Value>> {
+        let output = Self::run_vm_command(cfg, &["list-json"]).await?;
+        if !output.success() {
+            return Err(EdgeFabricError::Internal(format!(
+                "veeros-vm list-json failed: {}",
+                output.stderr
+            )));
+        }
+        let vms: Vec<serde_json::Value> = serde_json::from_str(output.stdout.trim())
+            .map_err(|e| EdgeFabricError::Internal(format!("failed to parse VM list: {e}")))?;
+        Ok(vms)
+    }
+
     pub async fn sensor_inject(
         cfg: &VeerOsConfig,
         vm_name: &str,

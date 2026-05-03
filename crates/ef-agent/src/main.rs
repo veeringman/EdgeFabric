@@ -39,18 +39,6 @@ async fn main() -> Result<()> {
     // ── Shutdown signal ───────────────────────────────────────────
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
-    // ── P8.2 + P8.8 Connect to control plane (with reconnection) ─
-    let cp_client = Arc::new(
-        connect_with_retry(
-            &cfg.agent.control_plane_url,
-            &cfg.agent.agent_id,
-            cfg.agent.reconnect_interval_seconds,
-            cfg.agent.max_reconnect_attempts,
-            cfg.agent.tls_skip_verify,
-        )
-        .await?,
-    );
-
     // ── Shared device registry ────────────────────────────────────
     let registry = Arc::new(DeviceRegistry::new());
 
@@ -64,64 +52,9 @@ async fn main() -> Result<()> {
     };
     tracing::info!(%streaming_url, "Agent streaming URL");
 
-    // ── Detect agent capabilities ──────────────────────────────────
-    let capabilities = detect_capabilities(&cfg);
-    tracing::info!(capabilities = ?capabilities, "Agent capabilities");
-
-    // ── Register this agent with the control plane ────────────────
-    if let Err(e) = cp_client
-        .register_agent(&cfg.agent.region, Some(&streaming_url), &capabilities)
-        .await
-    {
-        tracing::warn!("Agent register failed (will retry on next heartbeat cycle): {e}");
-    }
-
-    // ── P8.3 Device discovery loop ────────────────────────────────
-    let discovery_handle = discovery::spawn_discovery_loop(
-        Arc::clone(&cp_client),
-        Arc::clone(&registry),
-        cfg.agent.agent_id.clone(),
-        cfg.agent.region.clone(),
-        cfg.agent.device_scan_interval_seconds,
-        Some(streaming_url),
-        shutdown_rx.clone(),
-    );
-
-    // ── P8.4 Heartbeat reporter ───────────────────────────────────
-    let heartbeat_handle = heartbeat::spawn_heartbeat_reporter(
-        Arc::clone(&cp_client),
-        Arc::clone(&registry),
-        cfg.agent.agent_id.clone(),
-        cfg.agent.heartbeat_interval_seconds,
-        shutdown_rx.clone(),
-    );
-
-    // ── P8.5 Command executor ─────────────────────────────────────
-    let executor_handle = executor::spawn_command_executor(
-        Arc::clone(&cp_client),
-        Arc::clone(&registry),
-        cfg.agent.heartbeat_interval_seconds, // poll at same rate as heartbeats
-        shutdown_rx.clone(),
-    );
-
-    // ── P8.7 Auto-update ─────────────────────────────────────────
-    let auto_updater = updater::AutoUpdater::new(
-        &cfg.agent.auto_update_url,
-        cfg.agent.auto_update_enabled,
-    );
-    let updater_handle = auto_updater.spawn_update_checker(
-        3600, // check every hour
-        shutdown_rx.clone(),
-    );
-
-    // ── P8.6 Streaming forwarder is available on demand ──────────
-    let _streaming = streaming::StreamingForwarder::new(
-        cfg.streaming.clone(),
-        Arc::clone(&registry),
-    );
-
-    // ── Agent-local streaming HTTP/WS server ──────────────────────
-    let streaming_port = cfg.agent.streaming_port.unwrap_or(7070);
+    // ── Agent-local streaming HTTP/WS server — starts immediately ─
+    // This runs independently of the control-plane connection so the
+    // VeerOS and sensor APIs are available even when offline.
     let veeros_cfg = cfg.veeros.clone();
     tokio::spawn(async move {
         if let Err(e) = streaming_server::start_streaming_server(streaming_port, veeros_cfg).await {
@@ -129,7 +62,82 @@ async fn main() -> Result<()> {
         }
     });
 
-    tracing::info!(streaming_port, "Agent running — all subsystems active");
+    tracing::info!(streaming_port, "Streaming server started");
+
+    // ── P8.6 Streaming forwarder is available on demand ──────────
+    let _streaming = streaming::StreamingForwarder::new(
+        cfg.streaming.clone(),
+        Arc::clone(&registry),
+    );
+
+    // ── P8.2 + P8.8 Connect to control plane (background, retries forever) ─
+    // Heartbeat, discovery, and executor are launched once connected.
+    // The streaming server above continues to operate regardless.
+    let cp_url = cfg.agent.control_plane_url.clone();
+    let agent_id = cfg.agent.agent_id.clone();
+    let region = cfg.agent.region.clone();
+    let reconnect_interval = cfg.agent.reconnect_interval_seconds;
+    let tls_skip = cfg.agent.tls_skip_verify;
+    let hb_interval = cfg.agent.heartbeat_interval_seconds;
+    let scan_interval = cfg.agent.device_scan_interval_seconds;
+    let auto_update_url = cfg.agent.auto_update_url.clone();
+    let auto_update_enabled = cfg.agent.auto_update_enabled;
+    let capabilities = detect_capabilities(&cfg);
+    let streaming_url_bg = streaming_url.clone();
+    let registry_bg = Arc::clone(&registry);
+    let shutdown_rx_bg = shutdown_rx.clone();
+
+    tokio::spawn(async move {
+        // Retry forever until control plane is reachable
+        let cp_client = Arc::new(
+            connect_with_retry(&cp_url, &agent_id, reconnect_interval, 0, tls_skip)
+                .await
+                .expect("connect_with_retry with max_attempts=0 never returns Err"),
+        );
+
+        tracing::info!("Control plane connected — launching subsystems");
+
+        if let Err(e) = cp_client
+            .register_agent(&region, Some(&streaming_url_bg), &capabilities)
+            .await
+        {
+            tracing::warn!("Agent register failed (will retry on next heartbeat cycle): {e}");
+        }
+
+        let discovery_handle = discovery::spawn_discovery_loop(
+            Arc::clone(&cp_client),
+            Arc::clone(&registry_bg),
+            agent_id.clone(),
+            region.clone(),
+            scan_interval,
+            Some(streaming_url_bg),
+            shutdown_rx_bg.clone(),
+        );
+
+        let heartbeat_handle = heartbeat::spawn_heartbeat_reporter(
+            Arc::clone(&cp_client),
+            Arc::clone(&registry_bg),
+            agent_id.clone(),
+            hb_interval,
+            shutdown_rx_bg.clone(),
+        );
+
+        let executor_handle = executor::spawn_command_executor(
+            Arc::clone(&cp_client),
+            Arc::clone(&registry_bg),
+            hb_interval,
+            shutdown_rx_bg.clone(),
+        );
+
+        let auto_updater = updater::AutoUpdater::new(&auto_update_url, auto_update_enabled);
+        let updater_handle = auto_updater.spawn_update_checker(3600, shutdown_rx_bg.clone());
+
+        tracing::info!("All control-plane subsystems active");
+
+        let _ = tokio::join!(discovery_handle, heartbeat_handle, executor_handle, updater_handle);
+    });
+
+    tracing::info!("Agent running — streaming ready, connecting to control plane in background");
 
     // ── P8.8 Wait for shutdown signal ─────────────────────────────
     tokio::signal::ctrl_c().await?;
@@ -138,15 +146,9 @@ async fn main() -> Result<()> {
     // Signal all background tasks to stop
     let _ = shutdown_tx.send(true);
 
-    // Wait for graceful shutdown (with timeout)
+    // Brief wait for graceful shutdown
     let shutdown_timeout = Duration::from_secs(10);
-    let _ = tokio::time::timeout(shutdown_timeout, async {
-        let _ = discovery_handle.await;
-        let _ = heartbeat_handle.await;
-        let _ = executor_handle.await;
-        let _ = updater_handle.await;
-    })
-    .await;
+    let _ = tokio::time::timeout(shutdown_timeout, tokio::time::sleep(shutdown_timeout)).await;
 
     tracing::info!("EdgeFabric Agent shut down gracefully");
     Ok(())

@@ -7,9 +7,11 @@ host = "0.0.0.0"
 jwt_secret = "dev-secret-not-for-production"
 
 [agent]
-control_plane_url = "http://192.168.29.78:6060"
+control_plane_url = "http://localhost:6060"
 tls_skip_verify = true
 device_scan_interval_seconds = 5
+streaming_port = 7070
+max_reconnect_attempts = 3
 
 [logging]
 level = "debug"

@@ -16,7 +16,7 @@ use uuid::Uuid;
 use crate::middleware::auth_extractor::{AppState, AuthContext};
 use crate::middleware::error_response::ApiError;
 
-use ef_control::command::veeros::{VeerOsDriver, VeerOsShellInfo};
+use ef_control::command::{CommandOutput, veeros::{VeerOsDriver, VeerOsShellInfo}};
 use ef_db::repo::device::DeviceRepo;
 use ef_db::repo::virtual_iot_backend::{VirtualIotBackendRepo, VirtualIotBackendRow};
 use ef_db::repo::virtual_iot::VirtualIotConfigRepo;
@@ -42,6 +42,19 @@ fn default_sim_rate() -> i32 { 500 }
 fn default_provider() -> String { "veeros-vm".into() }
 fn default_available_only() -> bool { true }
 fn default_auto_start() -> bool { true }
+
+fn ensure_cmd_ok(action: &str, out: &CommandOutput) -> Result<(), (StatusCode, Json<ApiError>)> {
+    if out.success() {
+        return Ok(());
+    }
+    Err(ApiError::internal(format!(
+        "{action} failed (exit={}): {}{}{}",
+        out.exit_code,
+        out.stderr,
+        if !out.stderr.is_empty() && !out.stdout.is_empty() { " | " } else { "" },
+        out.stdout
+    )))
+}
 
 #[derive(Deserialize)]
 pub struct UpdateVirtualIotConfigRequest {
@@ -258,17 +271,20 @@ pub async fn create_virtual_iot_backend(
         .await
         .map_err(ApiError::from_domain)?
     };
+    ensure_cmd_ok("create_vm", &create_output)?;
 
     let mut status = "available".to_string();
     if body.auto_start {
         if let Some(base) = agent_base_url.as_deref() {
-            crate::veeros_proxy::start_vm(base, &vm_name)
+            let out = crate::veeros_proxy::start_vm(base, &vm_name)
                 .await
                 .map_err(|e| ApiError::internal(format!("Agent start_vm failed: {e}")))?;
+            ensure_cmd_ok("start_vm", &out)?;
         } else {
-            VeerOsDriver::start_vm(&state.veeros, &vm_name)
+            let out = VeerOsDriver::start_vm(&state.veeros, &vm_name)
                 .await
                 .map_err(ApiError::from_domain)?;
+            ensure_cmd_ok("start_vm", &out)?;
         }
         status = "running".to_string();
     }
@@ -1065,13 +1081,15 @@ pub async fn start_virtual_iot_backend(
         .ok_or_else(|| ApiError::bad_request("Backend has no VM binding"))?;
 
     if let Some(base) = maybe_agent_base(&state, &backend).await? {
-        crate::veeros_proxy::start_vm(&base, vm_name)
+        let out = crate::veeros_proxy::start_vm(&base, vm_name)
             .await
             .map_err(|e| ApiError::internal(format!("Agent start_vm failed: {e}")))?;
+        ensure_cmd_ok("start_vm", &out)?;
     } else {
-        VeerOsDriver::start_vm(&state.veeros, vm_name)
+        let out = VeerOsDriver::start_vm(&state.veeros, vm_name)
             .await
             .map_err(ApiError::from_domain)?;
+        ensure_cmd_ok("start_vm", &out)?;
     }
 
     let next_status = if backend.attached_device_id.is_some() { "busy" } else { "available" };
@@ -1107,13 +1125,15 @@ pub async fn stop_virtual_iot_backend(
         .ok_or_else(|| ApiError::bad_request("Backend has no VM binding"))?;
 
     if let Some(base) = maybe_agent_base(&state, &backend).await? {
-        crate::veeros_proxy::stop_vm(&base, vm_name)
+        let out = crate::veeros_proxy::stop_vm(&base, vm_name)
             .await
             .map_err(|e| ApiError::internal(format!("Agent stop_vm failed: {e}")))?;
+        ensure_cmd_ok("stop_vm", &out)?;
     } else {
-        VeerOsDriver::stop_vm(&state.veeros, vm_name)
+        let out = VeerOsDriver::stop_vm(&state.veeros, vm_name)
             .await
             .map_err(ApiError::from_domain)?;
+        ensure_cmd_ok("stop_vm", &out)?;
     }
 
     let next_status = if backend.attached_device_id.is_some() { "busy" } else { "available" };

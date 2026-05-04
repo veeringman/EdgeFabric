@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod audit;
 pub mod device;
+pub mod discovered_host;
 pub mod job;
 pub mod session;
 pub mod tenant;

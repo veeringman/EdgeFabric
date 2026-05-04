@@ -100,6 +100,7 @@ fn adb_path() -> &'static str {
 pub async fn start_streaming_server(
     port: u16,
     veeros_cfg: ef_core::config::VeerOsConfig,
+    host_table: crate::veeros_discovery::HostTable,
 ) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/ws/stream/{*serial}", get(ws_stream_handler))
@@ -107,7 +108,7 @@ pub async fn start_streaming_server(
         .route("/ws/ssh", get(ws_ssh_handler))
             .route("/ws/pty", get(ws_pty_handler))
             .route("/health", get(health))
-        .merge(crate::veeros_api::router(veeros_cfg));
+        .merge(crate::veeros_api::router(veeros_cfg, host_table));
 
     let addr = format!("0.0.0.0:{port}");
     tracing::info!(%addr, "Agent streaming server starting");

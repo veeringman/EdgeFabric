@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use axum::{
     Json, Router,
-    extract::{Path, State, ws::{Message, WebSocket, WebSocketUpgrade}},
+    extract::{Path, Query, State, ws::{Message, WebSocket, WebSocketUpgrade}},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -30,12 +30,13 @@ use tokio::process::Command;
 #[derive(Clone)]
 pub struct VeerOsState {
     pub cfg: Arc<VeerOsConfig>,
+    pub hosts: crate::veeros_discovery::HostTable,
 }
 
 /// Build a router carrying only the VeerOS endpoints. The caller merges
 /// this into the main agent router.
-pub fn router(cfg: VeerOsConfig) -> Router {
-    let state = VeerOsState { cfg: Arc::new(cfg) };
+pub fn router(cfg: VeerOsConfig, hosts: crate::veeros_discovery::HostTable) -> Router {
+    let state = VeerOsState { cfg: Arc::new(cfg), hosts };
 
     Router::new()
         .route("/veeros/vms", get(list_vms).post(create_vm))
@@ -50,6 +51,7 @@ pub fn router(cfg: VeerOsConfig) -> Router {
         .route("/veeros/quantum/backends", get(list_quantum_backends))
         .route("/veeros/quantum/simulate", post(simulate_quantum))
         .route("/veeros/quantum/ibm/run", post(run_quantum_ibm))
+        .route("/veeros/discovery/hosts", get(list_discovery_hosts))
         .route("/ws/veeros/{name}/shell", get(ws_shell))
         .with_state(state)
 }
@@ -477,4 +479,20 @@ async fn handle_shell(socket: WebSocket, state: VeerOsState, vm_name: String) {
         }
         let _ = ws_tx.send(Message::Close(None)).await;
     }
+}
+
+// ── Discovery endpoint ────────────────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+pub struct DiscoveryQuery {
+    #[serde(default)]
+    pub quantum: bool,
+}
+
+pub async fn list_discovery_hosts(
+    State(state): State<VeerOsState>,
+    Query(q): Query<DiscoveryQuery>,
+) -> Json<serde_json::Value> {
+    let hosts = crate::veeros_discovery::list_discovered_hosts(&state.hosts, q.quantum).await;
+    Json(json!({ "hosts": hosts, "count": hosts.len() }))
 }

@@ -582,3 +582,40 @@ pub async fn quantum_ibm_run(agent_id: &str, req: &QIbmRunRequest) -> Result<ser
 pub async fn list_agents() -> Result<AgentsListResponse, String> {
     get::<AgentsListResponse>("/agents").await
 }
+
+// ─── Discovery API types ────────────────────────────────────────────────────
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct DiscoveredHost {
+    pub id: String,
+    pub agent_id: String,
+    pub host_id: String,
+    pub hostname: String,
+    pub ip_address: String,
+    pub port: i32,
+    pub os_version: Option<String>,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    pub quantum_capable: bool,
+    pub quantum_qubits: Option<i32>,
+    #[serde(default)]
+    pub quantum_backends: Vec<String>,
+    pub verified: bool,
+    pub last_seen_at: String,
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct DiscoveryHostsResponse {
+    pub hosts: Vec<DiscoveredHost>,
+    pub count: usize,
+}
+
+/// List all discovered VeerOS hosts. Pass `quantum_only=true` to filter.
+pub async fn fetch_discovered_hosts(quantum_only: bool) -> Result<DiscoveryHostsResponse, String> {
+    let path = if quantum_only {
+        "/discovery/hosts?quantum=true"
+    } else {
+        "/discovery/hosts"
+    };
+    get::<DiscoveryHostsResponse>(path).await
+}

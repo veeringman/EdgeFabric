@@ -12,6 +12,7 @@ mod streaming;
 mod streaming_server;
 mod updater;
 mod veeros_api;
+mod veeros_discovery;
 
 use client::ControlPlaneClient;
 use config::AgentRuntime;
@@ -56,9 +57,19 @@ async fn main() -> Result<()> {
     // This runs independently of the control-plane connection so the
     // VeerOS and sensor APIs are available even when offline.
     let veeros_cfg = cfg.veeros.clone();
+    let host_table = veeros_discovery::new_host_table();
+    let host_table_srv = host_table.clone();
     tokio::spawn(async move {
-        if let Err(e) = streaming_server::start_streaming_server(streaming_port, veeros_cfg).await {
+        if let Err(e) = streaming_server::start_streaming_server(streaming_port, veeros_cfg, host_table_srv).await {
             tracing::error!("Streaming server failed: {e}");
+        }
+    });
+
+    // ── VeerOS host advertisement discovery listener ───────────────
+    let host_table_listener = host_table.clone();
+    tokio::spawn(async move {
+        if let Err(e) = veeros_discovery::start_listener(host_table_listener).await {
+            tracing::warn!("VeerOS discovery listener failed (UDP multicast may be unavailable): {e}");
         }
     });
 

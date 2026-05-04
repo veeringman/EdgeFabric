@@ -1,5 +1,6 @@
 pub mod admin;
 pub mod devices;
+pub mod discovered_hosts;
 pub mod jobs;
 pub mod login;
 pub mod logs;

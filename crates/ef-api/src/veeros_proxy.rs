@@ -204,3 +204,14 @@ pub async fn quantum_ibm_run(base: &str, body: Value) -> Result<Value> {
 pub async fn vm_quantum_info(base: &str, vm_name: &str) -> Result<Value> {
     get_json(base, &format!("/veeros/vms/{vm_name}/quantum")).await
 }
+
+/// List VeerOS hosts discovered by this agent via UDP multicast.
+/// Proxies `GET /veeros/discovery/hosts?quantum=<bool>`.
+pub async fn discovery_hosts(base: &str, quantum_only: bool) -> Result<Value> {
+    let path = if quantum_only {
+        "/veeros/discovery/hosts?quantum=true"
+    } else {
+        "/veeros/discovery/hosts"
+    };
+    get_json(base, path).await
+}

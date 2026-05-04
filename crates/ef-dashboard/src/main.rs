@@ -13,7 +13,8 @@ use leptos_router::{
 
 use components::sidebar::Sidebar;
 use pages::{
-    admin::AdminPage, devices::DevicesPage, jobs::JobsPage, login::LoginPage, logs::LogsPage,
+    admin::AdminPage, devices::DevicesPage, discovered_hosts::DiscoveredHostsPage,
+    jobs::JobsPage, login::LoginPage, logs::LogsPage,
     overview::OverviewPage, quantum::QuantumPage, quantum_accelerators::QuantumAcceleratorsPage,
     quantum_designer::QuantumDesignerPage, quantum_jobs::QuantumJobsPage,
     quantum_results::QuantumResultsPage, sessions::SessionsPage, sessions_live::LiveSessionsPage,
@@ -63,6 +64,7 @@ fn App() -> impl IntoView {
                 <Route path=path!("/quantum/designer") view=move || view! { <AuthGuard><Shell><QuantumDesignerPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/quantum/jobs") view=move || view! { <AuthGuard><Shell><QuantumJobsPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/quantum/results/:id") view=move || view! { <AuthGuard><Shell><QuantumResultsPage/></Shell></AuthGuard> }/>
+                <Route path=path!("/veeros/hosts") view=move || view! { <AuthGuard><Shell><DiscoveredHostsPage/></Shell></AuthGuard> }/>
             </Routes>
         </Router>
     }

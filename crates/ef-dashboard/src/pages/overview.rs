@@ -46,6 +46,15 @@ pub fn OverviewPage() -> impl IntoView {
     let total_jobs = move || {
         jobs.get().as_deref().map(|j| j.total.to_string()).unwrap_or("…".into())
     };
+    let quantum_veeros = move || {
+        devices.get().as_deref()
+            .map(|d| d.devices.iter().filter(|dev| {
+                dev.os == "veeros" && dev.capabilities.as_array()
+                    .map(|a| a.iter().any(|v| v.as_str().map(|s| s.starts_with("quantum")).unwrap_or(false)))
+                    .unwrap_or(false)
+            }).count().to_string())
+            .unwrap_or("…".into())
+    };
 
     view! {
         <h1 style="margin-bottom: 1rem">"Dashboard"</h1>
@@ -55,6 +64,7 @@ pub fn OverviewPage() -> impl IntoView {
             <StatCard label="Available" value=Signal::derive(available_devices) class="success"/>
             <StatCard label="Active Sessions" value=Signal::derive(active_sessions) class="warning"/>
             <StatCard label="Test Jobs" value=Signal::derive(total_jobs)/>
+            <StatCard label="Quantum VeerOS Hosts" value=Signal::derive(quantum_veeros) class="info"/>
         </div>
 
         <div class="grid-2">
@@ -84,9 +94,24 @@ pub fn OverviewPage() -> impl IntoView {
                                     <tbody>
                                         {devs.into_iter().map(|d| {
                                             let status = d.status.clone();
+                                            let is_veeros = d.os == "veeros";
+                                            let caps: Vec<String> = d.capabilities.as_array()
+                                                .map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                                                .unwrap_or_default();
+                                            let is_qpu = caps.iter().any(|c| c == "quantum_hardware");
+                                            let is_qsim = !is_qpu && caps.iter().any(|c| c.starts_with("quantum"));
                                             view! {
                                                 <tr>
-                                                    <td>{d.name}</td>
+                                                    <td>
+                                                        {d.name}
+                                                        {if is_veeros && is_qpu {
+                                                            view! { <span class="badge badge-qpu" style="margin-left:0.4rem;font-size:0.7rem">"QPU"</span> }.into_any()
+                                                        } else if is_veeros && is_qsim {
+                                                            view! { <span class="badge badge-sim" style="margin-left:0.4rem;font-size:0.7rem">"SIM"</span> }.into_any()
+                                                        } else {
+                                                            view! { }.into_any()
+                                                        }}
+                                                    </td>
                                                     <td><DeviceOsIcon os=d.os.clone()/> " " {d.os}</td>
                                                     <td>{d.os_version}</td>
                                                     <td><crate::components::status_badge::StatusBadge status=status/></td>

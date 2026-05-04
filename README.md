@@ -22,6 +22,14 @@ EdgeFabric is a next-generation device cloud platform that enables developers an
 
 Built in **Rust** for performance, safety, and low-level device control.
 
+## Latest Updates (2026-05-04)
+
+- iOS coordinate mapping fixed to use logical points for WebDriverAgent input alignment.
+- iOS model enrichment now maps ProductType values to bezel profiles for accurate device framing.
+- VeerOS host discovery dedupe improved in DB and dashboard merge path.
+- VeerOS shell page updated to xterm-based UX and raw-byte websocket input/output handling.
+- Dashboard auth behavior clarified: device/discovery endpoints require valid JWT or API key.
+
 ---
 
 ## Architecture at a Glance

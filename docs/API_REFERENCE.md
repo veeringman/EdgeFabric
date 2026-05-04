@@ -41,22 +41,61 @@ X-API-Key: <api_key>
 ### Token Exchange
 
 ```http
-POST /auth/token
+POST /api/v1/auth/login
 Content-Type: application/json
 
 {
-  "client_id": "your-client-id",
-  "client_secret": "your-client-secret",
-  "grant_type": "client_credentials"
+  "api_key": "your-api-key"
 }
 ```
 
 **Response:**
 ```json
 {
-  "access_token": "eyJ...",
-  "token_type": "Bearer",
+  "token": "eyJ...",
+  "tenant_id": "a0000000-0000-0000-0000-000000000001",
   "expires_in": 3600
+}
+```
+
+Local development commonly uses `efdev-key-00000000` as the API key.
+
+---
+
+## Discovery API
+
+### List Discovered VeerOS Hosts
+
+```http
+GET /api/v1/discovery/hosts
+Authorization: Bearer <jwt_token>
+```
+
+Optional quantum-only filter:
+
+```http
+GET /api/v1/discovery/hosts?quantum=true
+Authorization: Bearer <jwt_token>
+```
+
+**Response:**
+```json
+{
+  "hosts": [
+    {
+      "id": "...",
+      "agent_id": "...",
+      "host_id": "...",
+      "hostname": "my-node.local",
+      "ip_address": "192.168.29.5",
+      "port": 2323,
+      "capabilities": ["shell", "fold"],
+      "quantum_capable": false,
+      "verified": true,
+      "last_seen_at": "2026-05-04T12:20:25Z"
+    }
+  ],
+  "count": 1
 }
 ```
 
@@ -276,6 +315,19 @@ Once the WebRTC data channel is open, send input events as JSON:
 {"type": "key", "keycode": 4}
 {"type": "text", "value": "hello world"}
 ```
+
+### VeerOS Shell WebSocket
+
+The VeerOS shell endpoint accepts raw terminal bytes over WebSocket.
+
+```http
+GET /api/v1/veeros/shell/ws?host=<host>&port=<port>&agent_id=<agent_id>
+Authorization: Bearer <jwt_token>
+Upgrade: websocket
+```
+
+- Send user keystrokes as raw byte frames (not JSON envelopes).
+- Server may emit both terminal bytes and small JSON status messages.
 
 ---
 

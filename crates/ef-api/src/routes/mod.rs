@@ -4,6 +4,7 @@ pub mod sessions;
 pub mod streaming;
 pub mod agent;
 pub mod virtual_iot;
+pub mod quantum;
 
 use axum::{Json, Router, extract::State, http::StatusCode, routing::{get, post, put}};
 use serde::Deserialize;
@@ -58,6 +59,12 @@ pub fn api_router() -> Router<AppState> {
         .route("/devices/{id}/virtual-iot/sensors", post(virtual_iot::inject_virtual_iot_sensor))
         .route("/devices/{id}/virtual-iot/shell", get(virtual_iot::get_virtual_iot_shell_info))
         .route("/devices/{id}/virtual-iot/shell/ws", get(virtual_iot::virtual_iot_shell_ws))
+        // Quantum
+        .route("/quantum/backends", get(quantum::list_backends))
+        .route("/quantum/agents/{agent_id}/backends", get(quantum::agent_quantum_backends))
+        .route("/quantum/agents/{agent_id}/simulate", post(quantum::simulate_on_agent))
+        .route("/quantum/agents/{agent_id}/ibm/run", post(quantum::ibm_run_on_agent))
+        .route("/quantum/agents/{agent_id}/vms/{vm_name}/quantum", get(quantum::vm_quantum_info))
 }
 
 #[utoipa::path(get, path = "/health", tag = "health",

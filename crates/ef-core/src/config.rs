@@ -96,10 +96,16 @@ pub struct VeerOsConfig {
     pub root_dir: String,
     pub vm_script_path: String,
     pub veer_connect_path: String,
+    #[serde(default = "default_veer_cli_path")]
+    pub veer_cli_path: String,
     pub default_target: String,
     pub default_memory_mb: u32,
     pub default_network_mode: String,
     pub default_region: String,
+}
+
+fn default_veer_cli_path() -> String {
+    "/home/vijay/rnd/VeerOS/target/release/veer".into()
 }
 
 impl Default for VeerOsConfig {
@@ -108,6 +114,7 @@ impl Default for VeerOsConfig {
             root_dir: "/home/vijay/rnd/VeerOS".into(),
             vm_script_path: "/home/vijay/rnd/VeerOS/scripts/veeros-vm".into(),
             veer_connect_path: "/home/vijay/rnd/VeerOS/target/release/veer-connect".into(),
+            veer_cli_path: default_veer_cli_path(),
             default_target: "esp32c6".into(),
             default_memory_mb: 128,
             default_network_mode: "nat".into(),
@@ -200,6 +207,7 @@ format = "pretty"
 root_dir = "/home/vijay/rnd/VeerOS"
 vm_script_path = "/home/vijay/rnd/VeerOS/scripts/veeros-vm"
 veer_connect_path = "/home/vijay/rnd/VeerOS/target/release/veer-connect"
+veer_cli_path = "/home/vijay/rnd/VeerOS/target/release/veer"
 default_target = "esp32c6"
 default_memory_mb = 128
 default_network_mode = "nat"
@@ -211,7 +219,8 @@ default_region = "local"
         assert_eq!(cfg.auth.jwt_secret, "test-secret");
         assert_eq!(cfg.agent.region, "test");
         assert_eq!(cfg.logging.level, "debug");
-    assert_eq!(cfg.veeros.default_target, "esp32c6");
+        assert_eq!(cfg.veeros.default_target, "esp32c6");
+        assert_eq!(cfg.veeros.veer_cli_path, "/home/vijay/rnd/VeerOS/target/release/veer");
     }
 
     #[test]
@@ -270,6 +279,7 @@ format = "json"
 root_dir = "/tmp/veeros"
 vm_script_path = "/tmp/veeros/scripts/veeros-vm"
 veer_connect_path = "/tmp/veeros/target/release/veer-connect"
+veer_cli_path = "/tmp/veeros/target/release/veer"
 default_target = "esp32c6"
 default_memory_mb = 128
 default_network_mode = "nat"

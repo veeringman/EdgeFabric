@@ -54,6 +54,7 @@ format = "json"
 root_dir = "/home/vijay/rnd/VeerOS"
 vm_script_path = "/home/vijay/rnd/VeerOS/scripts/veeros-vm"
 veer_connect_path = "/home/vijay/rnd/VeerOS/target/release/veer-connect"
+veer_cli_path = "/home/vijay/rnd/VeerOS/target/release/veer"
 default_target = "esp32c6"
 default_memory_mb = 128
 default_network_mode = "nat"

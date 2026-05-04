@@ -485,3 +485,100 @@ pub struct DeviceHealth {
 pub struct HealthResponse {
     pub status: String,
 }
+
+// ─── Quantum API types ────────────────────────────────────────────────────────
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct QBackend {
+    pub id: String,
+    pub name: String,
+    pub provider: String,
+    #[serde(rename = "type")]
+    pub backend_type: String,
+    pub qubits: Option<u32>,
+    pub description: String,
+    pub available: bool,
+    #[serde(default)]
+    pub quantum_volume: Option<u32>,
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct QBackendsResponse {
+    pub backends: Vec<QBackend>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct QSimulateRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub program: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub qasm: Option<String>,
+    pub shots: u32,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct QHistogramBin {
+    pub state: String,
+    pub count: u32,
+    pub probability: f64,
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct QSimulateResponse {
+    #[serde(default)]
+    pub histogram: Vec<QHistogramBin>,
+    pub shots: Option<u32>,
+    pub backend: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct QIbmRunRequest {
+    pub token: String,
+    pub instance: String,
+    pub backend: String,
+    pub qasm: String,
+    pub shots: u32,
+    pub histogram: bool,
+    pub endpoint_staging: bool,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct AgentInfo {
+    pub id: String,
+    pub name: Option<String>,
+    pub hostname: Option<String>,
+    pub status: Option<String>,
+    pub streaming_url: Option<String>,
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct AgentsListResponse {
+    pub agents: Vec<AgentInfo>,
+}
+
+/// Fetch the static quantum backends catalog (no agent required).
+pub async fn fetch_quantum_backends() -> Result<QBackendsResponse, String> {
+    get::<QBackendsResponse>("/quantum/backends").await
+}
+
+/// Fetch quantum backends available on a specific agent.
+pub async fn fetch_agent_quantum_backends(agent_id: &str) -> Result<QBackendsResponse, String> {
+    get::<QBackendsResponse>(&format!("/quantum/agents/{agent_id}/backends")).await
+}
+
+/// Run a simulation on a specific agent.
+pub async fn quantum_simulate(agent_id: &str, req: &QSimulateRequest) -> Result<QSimulateResponse, String> {
+    post::<QSimulateRequest, QSimulateResponse>(&format!("/quantum/agents/{agent_id}/simulate"), req).await
+}
+
+/// Submit a circuit to IBM Quantum via a specific agent.
+pub async fn quantum_ibm_run(agent_id: &str, req: &QIbmRunRequest) -> Result<serde_json::Value, String> {
+    post::<QIbmRunRequest, serde_json::Value>(&format!("/quantum/agents/{agent_id}/ibm/run"), req).await
+}
+
+/// List all registered agents.
+pub async fn list_agents() -> Result<AgentsListResponse, String> {
+    get::<AgentsListResponse>("/agents").await
+}

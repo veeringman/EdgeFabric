@@ -15,7 +15,10 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use ef_control::command::veeros::VeerOsDriver;
+use ef_control::command::veeros::{
+    QuantumEndpointVariant, QuantumIbmRunRequest, QuantumProgram, QuantumSimulationRequest,
+    VeerOsDriver,
+};
 use ef_core::config::VeerOsConfig;
 use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
@@ -37,12 +40,16 @@ pub fn router(cfg: VeerOsConfig) -> Router {
     Router::new()
         .route("/veeros/vms", get(list_vms).post(create_vm))
         .route("/veeros/vms/{name}", get(vm_status).delete(destroy_vm))
+        .route("/veeros/vms/{name}/quantum", get(vm_quantum_access))
         .route("/veeros/vms/{name}/start", post(start_vm))
         .route("/veeros/vms/{name}/stop", post(stop_vm))
         .route("/veeros/vms/{name}/restart", post(restart_vm))
         .route("/veeros/vms/{name}/config", get(vm_config))
         .route("/veeros/vms/{name}/shell_info", get(shell_info))
         .route("/veeros/vms/{name}/sensor", post(inject_sensor))
+        .route("/veeros/quantum/backends", get(list_quantum_backends))
+        .route("/veeros/quantum/simulate", post(simulate_quantum))
+        .route("/veeros/quantum/ibm/run", post(run_quantum_ibm))
         .route("/ws/veeros/{name}/shell", get(ws_shell))
         .with_state(state)
 }
@@ -69,6 +76,76 @@ pub struct InjectSensorRequest {
     pub value: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuantumProgramArg {
+    Bell,
+    Ghz3,
+    Qft3,
+}
+
+impl From<QuantumProgramArg> for QuantumProgram {
+    fn from(value: QuantumProgramArg) -> Self {
+        match value {
+            QuantumProgramArg::Bell => QuantumProgram::Bell,
+            QuantumProgramArg::Ghz3 => QuantumProgram::Ghz3,
+            QuantumProgramArg::Qft3 => QuantumProgram::Qft3,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EndpointVariantArg {
+    Default,
+    Staging,
+}
+
+impl From<EndpointVariantArg> for QuantumEndpointVariant {
+    fn from(value: EndpointVariantArg) -> Self {
+        match value {
+            EndpointVariantArg::Default => QuantumEndpointVariant::Default,
+            EndpointVariantArg::Staging => QuantumEndpointVariant::Staging,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct SimulateQuantumRequest {
+    pub program: Option<QuantumProgramArg>,
+    pub qasm: Option<String>,
+    #[serde(default = "default_quantum_shots")]
+    pub shots: u32,
+    pub seed: Option<u64>,
+}
+
+#[derive(Deserialize)]
+pub struct RunQuantumIbmRequest {
+    pub program: Option<QuantumProgramArg>,
+    pub qasm_file: Option<String>,
+    #[serde(default = "default_quantum_shots")]
+    pub shots: u32,
+    #[serde(default = "default_ibm_backend")]
+    pub backend: String,
+    pub token: Option<String>,
+    pub instance: Option<String>,
+    #[serde(default = "default_poll_ms")]
+    pub poll_ms: u64,
+    #[serde(default = "default_timeout_sec")]
+    pub timeout_sec: u64,
+    #[serde(default)]
+    pub histogram: bool,
+    pub endpoint: Option<EndpointVariantArg>,
+    #[serde(default = "default_json_output")]
+    pub json: bool,
+}
+
+fn default_quantum_shots() -> u32 { 1024 }
+fn default_ibm_backend() -> String { "ibm_brisbane".into() }
+fn default_poll_ms() -> u64 { 2_000 }
+fn default_timeout_sec() -> u64 { 900 }
+fn default_json_output() -> bool { true }
+
 fn map_err(e: ef_core::error::EdgeFabricError) -> (StatusCode, Json<Value>) {
     tracing::warn!("VeerOS driver error: {e}");
     (
@@ -82,6 +159,18 @@ fn map_command_failure(action: &str, out: &ef_control::command::CommandOutput) -
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({
             "error": format!("veeros-vm {action} failed"),
+            "exit_code": out.exit_code,
+            "stdout": out.stdout,
+            "stderr": out.stderr,
+        })),
+    )
+}
+
+fn map_process_failure(process: &str, action: &str, out: &ef_control::command::CommandOutput) -> (StatusCode, Json<Value>) {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({
+            "error": format!("{process} {action} failed"),
             "exit_code": out.exit_code,
             "stdout": out.stdout,
             "stderr": out.stderr,
@@ -181,6 +270,79 @@ async fn vm_config(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let config = VeerOsDriver::vm_config(&state.cfg, &name).await.map_err(map_err)?;
     Ok(Json(json!({ "vm_name": name, "config": config })))
+}
+
+async fn vm_quantum_access(
+    State(state): State<VeerOsState>,
+    Path(name): Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let status = VeerOsDriver::vm_status(&state.cfg, &name).await.map_err(map_err)?;
+    let config = VeerOsDriver::vm_config(&state.cfg, &name).await.map_err(map_err)?;
+    Ok(Json(json!({
+        "vm_name": name,
+        "status": status,
+        "target": config.get("target").cloned(),
+        "access_points": {
+            "backends": "/veeros/quantum/backends",
+            "simulate": "/veeros/quantum/simulate",
+            "ibm_run": "/veeros/quantum/ibm/run"
+        }
+    })))
+}
+
+async fn list_quantum_backends(
+    State(state): State<VeerOsState>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    Ok(Json(json!({
+        "backends": VeerOsDriver::quantum_backend_catalog(&state.cfg),
+    })))
+}
+
+async fn simulate_quantum(
+    State(_state): State<VeerOsState>,
+    Json(body): Json<SimulateQuantumRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let req = QuantumSimulationRequest {
+        program: body.program.map(Into::into),
+        qasm: body.qasm,
+        shots: body.shots,
+        seed: body.seed,
+    };
+    let result = VeerOsDriver::simulate_quantum(&req).map_err(map_err)?;
+    Ok(Json(result))
+}
+
+async fn run_quantum_ibm(
+    State(state): State<VeerOsState>,
+    Json(body): Json<RunQuantumIbmRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let req = QuantumIbmRunRequest {
+        program: body.program.map(Into::into),
+        qasm_file: body.qasm_file,
+        shots: body.shots,
+        backend: body.backend,
+        token: body.token,
+        instance: body.instance,
+        poll_ms: body.poll_ms,
+        timeout_sec: body.timeout_sec,
+        histogram: body.histogram,
+        endpoint: body.endpoint.map(Into::into),
+        json: body.json,
+    };
+
+    let out = VeerOsDriver::run_quantum_ibm(&state.cfg, &req).await.map_err(map_err)?;
+    if out.exit_code != 0 {
+        return Err(map_process_failure("veer", "quantum ibm-run", &out));
+    }
+
+    let parsed = serde_json::from_str::<Value>(&out.stdout).unwrap_or_else(|_| {
+        json!({
+            "stdout": out.stdout,
+            "stderr": out.stderr,
+            "exit_code": out.exit_code,
+        })
+    });
+    Ok(Json(parsed))
 }
 
 /// Return the VM's connection info (shell host/port + connect_command).

@@ -1346,6 +1346,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "ef-core",
+ "quantum",
  "reqwest",
  "rumqttc",
  "serde",
@@ -3159,6 +3160,10 @@ dependencies = [
  "web-sys",
  "winapi",
 ]
+
+[[package]]
+name = "quantum"
+version = "0.1.0"
 
 [[package]]
 name = "quinn"

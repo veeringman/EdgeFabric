@@ -178,3 +178,29 @@ pub async fn shell_info(base: &str, vm_name: &str) -> Result<(String, u16, Strin
     let cmd = v.get("connect_command").and_then(Value::as_str).unwrap_or("").to_string();
     Ok((host, port, cmd))
 }
+
+// ─── quantum proxy helpers ────────────────────────────────────────────────────
+
+/// List quantum backends available on this agent.
+/// Proxies `GET /veeros/quantum/backends`.
+pub async fn quantum_list_backends(base: &str) -> Result<Value> {
+    get_json(base, "/veeros/quantum/backends").await
+}
+
+/// Run a quantum simulation on this agent's local VeerOS simulator.
+/// Proxies `POST /veeros/quantum/simulate`.
+pub async fn quantum_simulate(base: &str, body: Value) -> Result<Value> {
+    post_json(base, "/veeros/quantum/simulate", body).await
+}
+
+/// Submit an OpenQASM circuit to IBM Quantum cloud via this agent.
+/// Proxies `POST /veeros/quantum/ibm/run`.
+pub async fn quantum_ibm_run(base: &str, body: Value) -> Result<Value> {
+    post_json(base, "/veeros/quantum/ibm/run", body).await
+}
+
+/// Return quantum access info for a named VM on this agent.
+/// Proxies `GET /veeros/vms/{vm_name}/quantum`.
+pub async fn vm_quantum_info(base: &str, vm_name: &str) -> Result<Value> {
+    get_json(base, &format!("/veeros/vms/{vm_name}/quantum")).await
+}

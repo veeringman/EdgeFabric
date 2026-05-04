@@ -60,6 +60,22 @@ fn NavIcon(name: String) -> impl IntoView {
             </svg>
         }
         .into_any(),
+            "quantum" => view! {
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="8" cy="8" r="2"/>
+                    <circle cx="16" cy="8" r="2"/>
+                    <circle cx="12" cy="16" r="2"/>
+                    <path d="M8 10v4M16 10v4M13 14h-2M12 12v2"/>
+                </svg>
+            }
+            .into_any(),
+            "admin" => view! {
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a2 2 0 0 1-4 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a2 2 0 0 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a2 2 0 0 1 0-4h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2h.1a1 1 0 0 0 .6-.9V4a2 2 0 0 1 4 0v.2a1 1 0 0 0 .6.9h.1a1 1 0 0 0 1.1-.2l.1-.1a2 2 0 0 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1v.1a1 1 0 0 0 .9.6H20a2 2 0 0 1 0 4h-.2a1 1 0 0 0-.9.6z"/>
+                </svg>
+            }
+            .into_any(),
         _ => view! {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="12" cy="12" r="3"/>
@@ -98,6 +114,10 @@ pub fn Sidebar() -> impl IntoView {
                 <A href="/jobs"><span class="nav-icon"><NavIcon name="jobs".to_string()/></span><span>"Test Jobs"</span></A>
                 <A href="/virtual-iot/new"><span class="nav-icon"><NavIcon name="iot".to_string()/></span><span>"IoT Designer"</span></A>
                 <A href="/virtual-iot/backends"><span class="nav-icon"><NavIcon name="iot".to_string()/></span><span>"IoT Backends"</span></A>
+                <A href="/quantum"><span class="nav-icon"><NavIcon name="quantum".to_string()/></span><span>"Quantum"</span></A>
+                <A href="/quantum/accelerators"><span class="nav-icon"><NavIcon name="quantum".to_string()/></span><span>"Accelerators"</span></A>
+                <A href="/quantum/designer"><span class="nav-icon"><NavIcon name="quantum".to_string()/></span><span>"Circuit Designer"</span></A>
+                <A href="/quantum/jobs"><span class="nav-icon"><NavIcon name="quantum".to_string()/></span><span>"Jobs"</span></A>
                 <A href="/logs"><span class="nav-icon"><NavIcon name="logs".to_string()/></span><span>"Logs"</span></A>
                 <A href="/admin"><span class="nav-icon"><NavIcon name="admin".to_string()/></span><span>"Admin"</span></A>
             </nav>

@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>logFormatVersion</key>
+	<integer>12</integer>
+	<key>logs</key>
+	<dict>
+		<key>6D809BE2-A041-46AB-9FEE-0D52B2C7FF78</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>6D809BE2-A041-46AB-9FEE-0D52B2C7FF78.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>E</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>2</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>0</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>WebDriverAgent project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>WebDriverAgentRunner</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Testing project WebDriverAgent with scheme WebDriverAgentRunner</string>
+			<key>timeStartedRecording</key>
+			<real>799348224.15058601</real>
+			<key>timeStoppedRecording</key>
+			<real>799348226.19774103</real>
+			<key>title</key>
+			<string>Testing project WebDriverAgent with scheme WebDriverAgentRunner</string>
+			<key>uniqueIdentifier</key>
+			<string>6D809BE2-A041-46AB-9FEE-0D52B2C7FF78</string>
+		</dict>
+		<key>B2CC4046-DBFE-48AD-BA27-48FFD6C4B415</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>B2CC4046-DBFE-48AD-BA27-48FFD6C4B415.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>E</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>4</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>0</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>WebDriverAgent project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>WebDriverAgentRunner</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Testing project WebDriverAgent with scheme WebDriverAgentRunner</string>
+			<key>timeStartedRecording</key>
+			<real>799348288.24899399</real>
+			<key>timeStoppedRecording</key>
+			<real>799348292.17614996</real>
+			<key>title</key>
+			<string>Testing project WebDriverAgent with scheme WebDriverAgentRunner</string>
+			<key>uniqueIdentifier</key>
+			<string>B2CC4046-DBFE-48AD-BA27-48FFD6C4B415</string>
+		</dict>
+	</dict>
+</dict>
+</plist>

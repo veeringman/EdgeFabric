@@ -4,6 +4,7 @@ use leptos::prelude::*;
 pub fn StatusBadge(#[prop(into)] status: String) -> impl IntoView {
     let class = match status.to_lowercase().as_str() {
         "available" | "idle" => "badge available",
+        "online" | "connected" => "badge available",
         "busy" | "in_use" | "allocated" => "badge busy",
         "offline" | "maintenance" => "badge offline",
         "active" => "badge active",

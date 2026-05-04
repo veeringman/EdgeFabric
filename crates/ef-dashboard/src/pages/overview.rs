@@ -1,6 +1,6 @@
 use leptos::prelude::*;
 
-use crate::api::{self, DeviceListResponse, JobListResponse, SessionListResponse};
+use crate::api::{self, JobListResponse, SessionListResponse};
 use crate::components::device_icon::DeviceOsIcon;
 use crate::components::stat_card::StatCard;
 
@@ -19,7 +19,7 @@ pub fn OverviewPage() -> impl IntoView {
 
     let devices = LocalResource::new(move || {
         let _ = refresh.get();
-        async move { api::get::<DeviceListResponse>("/devices").await.unwrap_or_default() }
+        async move { api::fetch_all_devices().await }
     });
     let sessions = LocalResource::new(move || {
         let _ = refresh.get();
@@ -35,7 +35,7 @@ pub fn OverviewPage() -> impl IntoView {
     };
     let available_devices = move || {
         devices.get().as_deref()
-            .map(|d| d.devices.iter().filter(|dev| dev.status == "available").count().to_string())
+            .map(|d| d.devices.iter().filter(|dev| dev.status == "available" || dev.status == "online").count().to_string())
             .unwrap_or("…".into())
     };
     let active_sessions = move || {

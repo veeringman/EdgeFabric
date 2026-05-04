@@ -610,6 +610,57 @@ pub struct DiscoveryHostsResponse {
     pub count: usize,
 }
 
+/// Convert a discovered VeerOS host into the common `Device` shape so it can
+/// be merged into any page that already handles `Device` lists.
+pub fn veeros_host_to_device(h: &DiscoveredHost) -> Device {
+    use serde_json::json;
+    let status = {
+        // last_seen_at is an ISO-8601 string; treat hosts seen within 5 min as online
+        let online = js_sys::Date::new_0().get_time() / 1000.0
+            - chrono_ts_to_secs(&h.last_seen_at) as f64;
+        if online < 300.0 { "online" } else { "offline" }
+    };
+    let mut caps = h.capabilities.clone();
+    // Encode IP and port so callers can recover them without extra fields
+    caps.push(format!("veeros_ip:{}", h.ip_address));
+    caps.push(format!("veeros_port:{}", h.port));
+    if h.verified { caps.push("veeros_verified".into()); }
+
+    Device {
+        id: h.id.clone(),
+        name: h.hostname.clone(),
+        serial: Some(format!("{}:{}", h.ip_address, h.port)),
+        os: "veeros".into(),
+        os_version: h.os_version.clone().unwrap_or_else(|| "VeerOS".into()),
+        kind: "veeros_host".into(),
+        status: status.into(),
+        region: "VeerOS".into(),
+        capabilities: json!(caps),
+        last_heartbeat: Some(h.last_seen_at.clone()),
+        created_at: None,
+    }
+}
+
+/// Parse an ISO-8601 timestamp string to Unix seconds (WASM-compatible).
+fn chrono_ts_to_secs(ts: &str) -> i64 {
+    // Attempt rough parse: "2026-05-04T12:34:56Z" → seconds since epoch
+    js_sys::Date::parse(ts) as i64 / 1000
+}
+
+/// Fetch regular devices AND discovered VeerOS hosts and return a merged list.
+pub async fn fetch_all_devices() -> DeviceListResponse {
+    let reg = get::<DeviceListResponse>("/devices").await.unwrap_or_default();
+    let disc = fetch_discovered_hosts(false).await;
+    let mut devices = reg.devices;
+    if let Ok(d) = disc {
+        for h in &d.hosts {
+            devices.push(veeros_host_to_device(h));
+        }
+    }
+    let total = devices.len();
+    DeviceListResponse { devices, total }
+}
+
 /// List all discovered VeerOS hosts. Pass `quantum_only=true` to filter.
 pub async fn fetch_discovered_hosts(quantum_only: bool) -> Result<DiscoveryHostsResponse, String> {
     let path = if quantum_only {

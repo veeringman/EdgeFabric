@@ -1,6 +1,6 @@
 use leptos::prelude::*;
 
-use crate::api::{self, Device, DeviceListResponse};
+use crate::api::{self, Device};
 use crate::components::device_icon::DeviceOsIcon;
 use crate::components::status_badge::StatusBadge;
 
@@ -21,9 +21,7 @@ pub fn DevicesPage() -> impl IntoView {
 
     let devices = LocalResource::new(move || {
         let _ = refresh.get();
-        async move {
-            api::get::<DeviceListResponse>("/devices").await.unwrap_or_default()
-        }
+        async move { api::fetch_all_devices().await }
     });
 
     let filtered = move || {
@@ -53,6 +51,7 @@ pub fn DevicesPage() -> impl IntoView {
                     <option value="ios">"iOS"</option>
                     <option value="iot">"IoT"</option>
                     <option value="virtual_iot">"Virtual IoT"</option>
+                    <option value="veeros">"VeerOS"</option>
                 </select>
             </div>
             <div class="form-group">
@@ -103,10 +102,21 @@ fn DeviceTable(devices: Vec<Device>) -> impl IntoView {
                     {devices.into_iter().map(|d| {
                         let status = d.status.clone();
                         let is_virtual_iot = d.os == "virtual_iot";
+                        let is_veeros = d.os == "veeros";
                         let edit_link = format!("/virtual-iot/edit?edit={}", d.id);
+                        // For VeerOS hosts, serial holds "ip:port" — build a shell URL
+                        let shell_url = if is_veeros {
+                            d.serial.as_deref()
+                                .map(|s| format!("ssh://{s}"))
+                                .unwrap_or_default()
+                        } else { String::new() };
                         view! {
                             <tr>
-                                <td><strong>{if is_virtual_iot { view! { <a href={edit_link.clone()} title="Edit Virtual IoT config">{d.name.clone()}</a> }.into_any() } else { view! { {d.name.clone()} }.into_any() }}</strong></td>
+                                <td><strong>{
+                                    if is_virtual_iot { view! { <a href={edit_link.clone()} title="Edit Virtual IoT config">{d.name.clone()}</a> }.into_any() }
+                                    else if is_veeros { view! { <a href={shell_url.clone()} target="_blank" title="Open VeerOS Shell">{d.name.clone()} " 🖥"</a> }.into_any() }
+                                    else { view! { {d.name.clone()} }.into_any() }
+                                }</strong></td>
                                 <td class="mono truncate">{d.serial.unwrap_or_else(|| "—".into())}</td>
                                 <td><DeviceOsIcon os=d.os.clone()/> " " {d.os.clone()}</td>
                                 <td>{d.os_version}</td>

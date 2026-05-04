@@ -5,7 +5,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use crate::api::{
-    self, DeviceListResponse, SensorInjectRequest, VirtualIotConfigResponse,
+    self, SensorInjectRequest, VirtualIotConfigResponse,
     VirtualIotEventDefinition, VirtualIotSensorLogEntry,
 };
 use crate::board_config;
@@ -161,11 +161,7 @@ pub fn LiveSessionsPage() -> impl IntoView {
 
     let devices = LocalResource::new(move || {
         let _ = refresh.get();
-        async move {
-            api::get::<DeviceListResponse>("/devices")
-                .await
-                .unwrap_or_default()
-        }
+        async move { api::fetch_all_devices().await }
     });
 
     view! {
@@ -195,7 +191,7 @@ pub fn LiveSessionsPage() -> impl IntoView {
                         <Transition fallback=move || view! { <div class="loading">"Loading…"</div> }>
                             {move || devices.get().as_deref().map(|data| {
                                 let streamable: Vec<_> = data.devices.iter()
-                                    .filter(|d| d.status == "available" || d.status == "busy")
+                                    .filter(|d| d.status == "available" || d.status == "busy" || (d.os == "veeros" && d.status == "online"))
                                     .cloned()
                                     .collect();
                                 if streamable.is_empty() {
@@ -207,6 +203,11 @@ pub fn LiveSessionsPage() -> impl IntoView {
                                             let caps: Vec<String> = d.capabilities.as_array()
                                                 .map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
                                                 .unwrap_or_default();
+                                            let is_veeros = d.os == "veeros";
+                                            // For VeerOS, serial = "ip:port" — build an ssh:// URL
+                                            let veeros_shell_url = if is_veeros {
+                                                d.serial.as_deref().map(|s| format!("ssh://{s}")).unwrap_or_default()
+                                            } else { String::new() };
                                             let sel = SelectedDevice {
                                                 id: d.id.clone(),
                                                 name: d.name.clone(),
@@ -221,20 +222,36 @@ pub fn LiveSessionsPage() -> impl IntoView {
                                                 else if d.os == "iot" { "IoT".to_string() }
                                                 else if d.os == "ssh" { "SSH".to_string() }
                                                 else if d.os == "virtual_iot" { "Virtual IoT".to_string() }
+                                                else if d.os == "veeros" { "VeerOS".to_string() }
                                                 else { d.os.clone() };
                                             let status = d.status.clone();
-                                            view! {
-                                                <div class="device-card" on:click=move |_| {
-                                                    set_selected_device.set(Some(sel.clone()));
-                                                }>
-                                                    <div class="device-card-icon"><DeviceOsIcon os=d.os.clone() class="os-icon-lg"/></div>
-                                                    <div class="device-card-name">{d.name.clone()}</div>
-                                                    <div class="device-card-info">
-                                                        {format!("{} {}", os_label, d.os_version)}
+                                            if is_veeros {
+                                                // VeerOS hosts: clicking opens SSH shell URL rather than the stream viewer
+                                                view! {
+                                                    <a href={veeros_shell_url} target="_blank" style="text-decoration:none">
+                                                        <div class="device-card device-card--veeros">
+                                                            <div class="device-card-icon"><DeviceOsIcon os="veeros".to_string() class="os-icon-lg"/></div>
+                                                            <div class="device-card-name">{d.name.clone()}</div>
+                                                            <div class="device-card-info">{format!("{} {}", os_label, d.os_version)}</div>
+                                                            <div class="device-card-serial">{d.serial.clone().unwrap_or_default()}</div>
+                                                            <StatusBadge status=status/>
+                                                        </div>
+                                                    </a>
+                                                }.into_any()
+                                            } else {
+                                                view! {
+                                                    <div class="device-card" on:click=move |_| {
+                                                        set_selected_device.set(Some(sel.clone()));
+                                                    }>
+                                                        <div class="device-card-icon"><DeviceOsIcon os=d.os.clone() class="os-icon-lg"/></div>
+                                                        <div class="device-card-name">{d.name.clone()}</div>
+                                                        <div class="device-card-info">
+                                                            {format!("{} {}", os_label, d.os_version)}
+                                                        </div>
+                                                        <div class="device-card-serial">{d.serial.clone().unwrap_or_default()}</div>
+                                                        <StatusBadge status=status/>
                                                     </div>
-                                                    <div class="device-card-serial">{d.serial.clone().unwrap_or_default()}</div>
-                                                    <StatusBadge status=status/>
-                                                </div>
+                                                }.into_any()
                                             }
                                         }).collect::<Vec<_>>()}
                                     </div>

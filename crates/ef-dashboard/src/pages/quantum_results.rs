@@ -1,28 +1,34 @@
 use leptos::prelude::*;
 use leptos_router::hooks::use_params_map;
+use gloo_storage::Storage as _;
 
 /// Quantum job results page.
 /// Route: /quantum/results/:id
-///
-/// The `:id` param can be a real job UUID (future: fetch from API) or
-/// "latest" to show the most recently run result stored in the page session.
-/// For now we read results from localStorage (written by the designer on run).
 #[component]
 pub fn QuantumResultsPage() -> impl IntoView {
     let params = use_params_map();
-    let job_id = move || {
-        params.get().get("id").cloned().unwrap_or_else(|| "latest".to_string())
-    };
+    let job_id = Signal::derive(move || {
+        params.read().get("id").unwrap_or("latest".to_string())
+    });
 
     // Load result from localStorage (key: "ef_quantum_last_result")
-    let stored_result = move || {
+    let (result_data, set_result_data) = signal(
         gloo_storage::LocalStorage::get::<serde_json::Value>("ef_quantum_last_result").ok()
-    };
+    );
 
-    // Derive display data reactively from job_id + localStorage
-    let result_data = Signal::derive(move || {
-        let id = job_id();
-        stored_result().map(|v| (id, v))
+    // Reload when job_id changes
+    Effect::new(move || {
+        let _ = job_id.get(); // track
+        set_result_data.set(
+            gloo_storage::LocalStorage::get::<serde_json::Value>("ef_quantum_last_result").ok()
+        );
+    });
+
+    let raw_json = Signal::derive(move || {
+        result_data.get()
+            .as_ref()
+            .and_then(|v| serde_json::to_string_pretty(v).ok())
+            .unwrap_or_default()
     });
 
     view! {
@@ -30,18 +36,16 @@ pub fn QuantumResultsPage() -> impl IntoView {
             <div class="page-header">
                 <div>
                     <h1>"Quantum Results"</h1>
-                    <p>"Measurement histogram and raw output for job " <code>{move || job_id()}</code></p>
+                    <p>"Measurement histogram for job " <code>{move || job_id.get()}</code></p>
                 </div>
                 <div class="header-actions">
                     <button class="secondary-btn"
                         on:click=move |_| {
-                            // Export JSON — copy raw result to clipboard
-                            if let Some(v) = stored_result() {
-                                let text = serde_json::to_string_pretty(&v).unwrap_or_default();
-                                if let Some(window) = web_sys::window() {
-                                    let _ = window.navigator().clipboard().write_text(&text);
-                                }
-                            }
+                            // Copy raw JSON to clipboard via js_sys::eval
+                            let text = raw_json.get();
+                            let escaped = text.replace('\\', "\\\\").replace('`', "\\`").replace('$', "\\$");
+                            let script = format!("(function(){{var t=document.createElement('textarea');t.value=`{}`;document.body.appendChild(t);t.select();document.execCommand('copy');document.body.removeChild(t);}})()", escaped);
+                            let _ = js_sys::eval(&script);
                         }>
                         "Copy JSON"
                     </button>
@@ -51,15 +55,14 @@ pub fn QuantumResultsPage() -> impl IntoView {
             {move || match result_data.get() {
                 None => view! {
                     <div class="empty-state">
-                        <p>"No result available for this job."</p>
+                        <p>"No result available."</p>
                         <p>"Run a circuit in the "
                             <a href="/quantum/designer">"Circuit Designer"</a>
                             " to see results here."
                         </p>
                     </div>
                 }.into_any(),
-                Some((_id, data)) => {
-                    // Parse histogram from stored result JSON
+                Some(data) => {
                     let backend = data.get("backend").and_then(|v| v.as_str())
                         .unwrap_or("simulator").to_string();
                     let shots = data.get("shots").and_then(|v| v.as_u64()).unwrap_or(1024);
@@ -182,24 +185,11 @@ pub fn QuantumResultsPage() -> impl IntoView {
                     padding: 1.5rem;
                 }
 
-                .results-panel h2 {
-                    margin: 0 0 1rem;
-                    color: var(--text-primary);
-                    font-size: 1rem;
-                }
+                .results-panel h2 { margin: 0 0 1rem; color: var(--text-primary); font-size: 1rem; }
 
-                .histogram-list {
-                    display: flex;
-                    flex-direction: column;
-                    gap: 0.65rem;
-                }
+                .histogram-list { display: flex; flex-direction: column; gap: 0.65rem; }
 
-                .histogram-row {
-                    display: flex;
-                    align-items: center;
-                    gap: 0.75rem;
-                    font-size: 0.85rem;
-                }
+                .histogram-row { display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; }
 
                 .bitstring {
                     font-family: monospace;
@@ -226,11 +216,7 @@ pub fn QuantumResultsPage() -> impl IntoView {
                     transition: width 0.4s ease;
                 }
 
-                .bar-count {
-                    color: var(--text-secondary);
-                    min-width: 100px;
-                    text-align: right;
-                }
+                .bar-count { color: var(--text-secondary); min-width: 100px; text-align: right; }
 
                 .result-code {
                     background: hsl(220, 20%, 8%);
@@ -240,6 +226,7 @@ pub fn QuantumResultsPage() -> impl IntoView {
                     overflow-x: auto;
                     font-size: 0.82rem;
                     line-height: 1.6;
+                    margin: 0;
                 }
 
                 .empty-state {

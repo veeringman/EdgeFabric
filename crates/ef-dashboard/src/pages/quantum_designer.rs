@@ -1,4 +1,5 @@
 use leptos::prelude::*;
+use gloo_storage::Storage as _;
 use serde_json::json;
 
 use crate::api::{self, QSimulateRequest, QSimulateResponse};
@@ -14,9 +15,8 @@ pub fn QuantumDesignerPage() -> impl IntoView {
     let (agent_id, set_agent_id) = signal(String::new());
 
     // Fetch agents list to populate agent picker
-    let agents = Resource::new(
-        || (),
-        |_| async move { api::list_agents().await },
+    let agents = LocalResource::new(
+        || async move { api::list_agents().await },
     );
 
     // Run action — submits circuit to the selected agent's simulator
@@ -36,7 +36,7 @@ pub fn QuantumDesignerPage() -> impl IntoView {
         let (prog, qasm_src) = if current_program == "custom" {
             (None, Some(current_qasm))
         } else {
-            (Some(current_program), None)
+            (Some(current_program.clone()), None)
         };
 
         is_running.set(true);
@@ -48,6 +48,7 @@ pub fn QuantumDesignerPage() -> impl IntoView {
             shots: 1024,
         };
 
+        let prog_label = current_program.clone();
         wasm_bindgen_futures::spawn_local(async move {
             let result = api::quantum_simulate(&current_agent, &req).await;
 
@@ -70,7 +71,7 @@ pub fn QuantumDesignerPage() -> impl IntoView {
                     gloo_storage::LocalStorage::get("ef_quantum_jobs").unwrap_or_default();
                 log.push(json!({
                     "id": job_id,
-                    "circuit": if current_program == "custom" { "Custom QASM" } else { &current_program },
+                    "circuit": if prog_label == "custom" { "Custom QASM" } else { prog_label.as_str() },
                     "status": "Completed",
                     "backend": resp.backend.as_deref().unwrap_or("simulator"),
                     "shots": resp.shots.unwrap_or(1024),
@@ -169,7 +170,7 @@ pub fn QuantumDesignerPage() -> impl IntoView {
                         <Suspense fallback=move || view! { <select disabled><option>"Loading..."</option></select> }>
                             {move || {
                                 agents.get().map(|res| {
-                                    let list = res.unwrap_or_default().agents;
+                                    let list = (*res).clone().unwrap_or_default().agents;
                                     view! {
                                         <select on:change=move |ev| set_agent_id.set(event_target_value(&ev))>
                                             <option value="">"-- select agent --"</option>

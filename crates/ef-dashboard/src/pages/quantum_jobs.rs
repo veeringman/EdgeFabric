@@ -1,7 +1,7 @@
 use leptos::prelude::*;
 use leptos_router::components::A;
+use gloo_storage::Storage as _;
 
-/// A submitted quantum job entry (stored in-session or loaded from API).
 #[derive(Clone, Debug, PartialEq)]
 struct QJob {
     id: String,
@@ -11,29 +11,27 @@ struct QJob {
     shots: u32,
 }
 
+fn load_jobs() -> Vec<QJob> {
+    gloo_storage::LocalStorage::get::<Vec<serde_json::Value>>("ef_quantum_jobs")
+        .ok()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|v| {
+            Some(QJob {
+                id:      v.get("id")?.as_str()?.to_string(),
+                circuit: v.get("circuit").and_then(|x| x.as_str()).unwrap_or("Custom").to_string(),
+                status:  v.get("status").and_then(|x| x.as_str()).unwrap_or("Completed").to_string(),
+                backend: v.get("backend").and_then(|x| x.as_str()).unwrap_or("simulator").to_string(),
+                shots:   v.get("shots").and_then(|x| x.as_u64()).unwrap_or(1024) as u32,
+            })
+        })
+        .collect()
+}
+
 #[component]
 pub fn QuantumJobsPage() -> impl IntoView {
     let (filter, set_filter) = signal("All".to_string());
-
-    // Jobs list: can be seeded from server in the future, for now we track
-    // what has been submitted this session plus any jobs stored in localStorage.
-    let (jobs, set_jobs) = signal({
-        // Load persisted job log from localStorage
-        let stored: Vec<QJob> = gloo_storage::LocalStorage::get::<Vec<serde_json::Value>>("ef_quantum_jobs")
-            .ok()
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|v| {
-                Some(QJob {
-                    id:      v.get("id")?.as_str()?.to_string(),
-                    circuit: v.get("circuit").and_then(|x| x.as_str()).unwrap_or("Custom").to_string(),
-                    status:  v.get("status").and_then(|x| x.as_str()).unwrap_or("Completed").to_string(),
-                    backend: v.get("backend").and_then(|x| x.as_str()).unwrap_or("simulator").to_string(),
-                    shots:   v.get("shots").and_then(|x| x.as_u64()).unwrap_or(1024) as u32,
-                })
-            })
-            .collect()
-    });
+    let jobs: RwSignal<Vec<QJob>> = RwSignal::new(load_jobs());
 
     let filtered = Signal::derive(move || {
         let f = filter.get();
@@ -66,9 +64,15 @@ pub fn QuantumJobsPage() -> impl IntoView {
                             </button>
                         }
                     }).collect::<Vec<_>>()}
+                    <button class="filter-btn refresh-btn"
+                        on:click=move |_| jobs.set(load_jobs())>
+                        "Refresh"
+                    </button>
                     <span class="job-count">
-                        {move || format!("{} job{}", filtered.get().len(),
-                            if filtered.get().len() == 1 { "" } else { "s" })}
+                        {move || {
+                            let n = filtered.get().len();
+                            format!("{n} job{}", if n == 1 { "" } else { "s" })
+                        }}
                     </span>
                 </div>
 
@@ -169,6 +173,8 @@ pub fn QuantumJobsPage() -> impl IntoView {
                     color: white;
                     border-color: var(--accent-color);
                 }
+
+                .refresh-btn { margin-left: 0.5rem; }
 
                 .job-count {
                     margin-left: auto;

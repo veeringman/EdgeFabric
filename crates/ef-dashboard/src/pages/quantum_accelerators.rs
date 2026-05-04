@@ -5,9 +5,8 @@ use crate::api::{self, QBackend};
 #[component]
 pub fn QuantumAcceleratorsPage() -> impl IntoView {
     // Fetch catalog backends from real API
-    let backends = Resource::new(
-        || (),
-        |_| async move { api::fetch_quantum_backends().await },
+    let backends = LocalResource::new(
+        || async move { api::fetch_quantum_backends().await },
     );
 
     // Local custom backends added by user (stored client-side for now)
@@ -88,7 +87,7 @@ pub fn QuantumAcceleratorsPage() -> impl IntoView {
                 <h2>"Platform Backends"</h2>
                 <Suspense fallback=move || view! { <p class="loading">"Loading backends..."</p> }>
                     {move || {
-                        backends.get().map(|res| match res {
+                        backends.get().map(|res| match (*res).clone() {
                             Err(e) => view! {
                                 <p class="error-msg">"Error: " {e}</p>
                             }.into_any(),
@@ -125,12 +124,12 @@ pub fn QuantumAcceleratorsPage() -> impl IntoView {
                                             <span>"Max Qubits"</span>
                                             <strong>{b.max_qubits}</strong>
                                         </div>
-                                        {b.endpoint.clone().filter(|s| !s.is_empty()).map(|ep| view! {
+                                        {if b.endpoint.is_empty() { None } else { Some(view! {
                                             <div>
                                                 <span>"Endpoint"</span>
-                                                <strong class="mono">{ep}</strong>
+                                                <strong class="mono">{b.endpoint.clone()}</strong>
                                             </div>
-                                        })}
+                                        })}}
                                     </div>
                                     <div class="card-actions">
                                         <button class="danger-btn" on:click=move |_| {

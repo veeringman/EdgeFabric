@@ -7,17 +7,16 @@ use crate::components::stat_card::StatCard;
 #[component]
 pub fn QuantumPage() -> impl IntoView {
     // Fetch backend catalog from real API
-    let backends = Resource::new(
-        || (),
-        |_| async move { api::fetch_quantum_backends().await },
+    let backends = LocalResource::new(
+        || async move { api::fetch_quantum_backends().await },
     );
 
     // Derived stats from backend data
     let total_backends = Signal::derive(move || {
-        backends.get().and_then(|r| r.ok()).map(|r| r.backends.len()).unwrap_or(0).to_string()
+        backends.get().and_then(|r| (*r).clone().ok()).map(|r| r.backends.len()).unwrap_or(0).to_string()
     });
     let available_backends = Signal::derive(move || {
-        backends.get().and_then(|r| r.ok())
+        backends.get().and_then(|r| (*r).clone().ok())
             .map(|r| r.backends.iter().filter(|b| b.available).count())
             .unwrap_or(0)
             .to_string()
@@ -73,7 +72,7 @@ pub fn QuantumPage() -> impl IntoView {
                 </div>
                 <Suspense fallback=move || view! { <p class="loading">"Loading backends..."</p> }>
                     {move || {
-                        backends.get().map(|res| match res {
+                        backends.get().map(|res| match (*res).clone() {
                             Err(e) => view! {
                                 <p class="error-msg">"Failed to load backends: " {e}</p>
                             }.into_any(),

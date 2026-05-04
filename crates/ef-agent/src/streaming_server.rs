@@ -145,9 +145,14 @@ async fn handle_stream(socket: WebSocket, serial: String) {
     let os = detect_device_os(&serial).await;
     tracing::info!(%serial, %os, "Starting capture stream");
 
-    let _ = ws_tx.send(Message::Text(
-        json!({"type": "stream_ready", "serial": &serial, "os": &os}).to_string().into()
-    )).await;
+    // Resolve device resolution for coordinate mapping in the dashboard
+    let resolution = get_device_resolution_for_os(&serial, &os).await;
+    let stream_ready = if let Some([w, h]) = resolution {
+        json!({"type": "stream_ready", "serial": &serial, "os": &os, "resolution": [w, h]})
+    } else {
+        json!({"type": "stream_ready", "serial": &serial, "os": &os})
+    };
+    let _ = ws_tx.send(Message::Text(stream_ready.to_string().into())).await;
 
     // IoT devices: stream serial console as text, not screenshots
     if os == "iot" {
@@ -414,6 +419,75 @@ async fn handle_logs(socket: WebSocket, serial: String) {
 
 // ── Capture functions (Android + iOS) ─────────────────────────────
 
+/// Returns [width, height] in logical device pixels for coordinate mapping.
+/// For iOS: queries WDA /status which includes device screen info, or falls back to ideviceinfo.
+/// For Android: queries adb shell wm size.
+async fn get_device_resolution_for_os(serial: &str, os: &str) -> Option<[u32; 2]> {
+    match os {
+        #[cfg(target_os = "macos")]
+        "ios" => {
+            // Try WDA status first (already running for screenshots)
+            if let Ok(resp) = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(3))
+                .build().ok()?
+                .get("http://127.0.0.1:8100/wda/screen")
+                .send().await
+            {
+                if let Ok(body) = resp.json::<serde_json::Value>().await {
+                    let val = &body["value"];
+                    // WDA actions use logical points — send logical resolution so dashboard
+                    // maps clicks to the same coordinate space WDA expects.
+                    let w = val["screenSize"]["width"].as_f64()
+                        .or_else(|| val["width"].as_f64())?;
+                    let h = val["screenSize"]["height"].as_f64()
+                        .or_else(|| val["height"].as_f64())?;
+                    return Some([w as u32, h as u32]);
+                }
+            }
+            // Fallback: ideviceinfo — use RenderedDisplayWidth/Height (logical points)
+            // rather than PixelWidth/Height (physical pixels), matching WDA coordinate space.
+            let out = tokio::process::Command::new(ideviceinfo_path())
+                .args(["-u", serial])
+                .output().await.ok()?;
+            let text = String::from_utf8_lossy(&out.stdout);
+            let w = text.lines()
+                .find(|l| l.contains("RenderedDisplayWidth:"))
+                .or_else(|| text.lines().find(|l| l.contains("PixelWidth:")))
+                .and_then(|l| l.split(':').nth(1))
+                .and_then(|v| v.trim().parse::<u32>().ok())?;
+            let h = text.lines()
+                .find(|l| l.contains("RenderedDisplayHeight:"))
+                .or_else(|| text.lines().find(|l| l.contains("PixelHeight:")))
+                .and_then(|l| l.split(':').nth(1))
+                .and_then(|v| v.trim().parse::<u32>().ok())?;
+            // Divide by scale to get logical points
+            let scale = text.lines()
+                .find(|l| l.contains("PointsPerPixel:"))
+                .and_then(|l| l.split(':').nth(1))
+                .and_then(|v| v.trim().parse::<f64>().ok())
+                .map(|ppx| 1.0 / ppx)
+                .unwrap_or(3.0);
+            Some([(w as f64 / scale) as u32, (h as f64 / scale) as u32])
+        }
+        "android" => {
+            let out = tokio::process::Command::new(adb_path())
+                .args(["-s", serial, "shell", "wm", "size"])
+                .output().await.ok()?;
+            let s = String::from_utf8_lossy(&out.stdout);
+            // "Physical size: 1080x2340"
+            let size_part = s.lines()
+                .find(|l| l.contains("Physical size"))
+                .or_else(|| s.lines().next())?;
+            let dims = size_part.split(':').nth(1)?.trim();
+            let mut parts = dims.split('x');
+            let w = parts.next()?.trim().parse::<u32>().ok()?;
+            let h = parts.next()?.trim().parse::<u32>().ok()?;
+            Some([w, h])
+        }
+        _ => None,
+    }
+}
+
 async fn capture_frame(serial: &str, os: &str, ios_tmp: &str) -> anyhow::Result<Vec<u8>> {
     match os {
         #[cfg(target_os = "macos")]
@@ -581,6 +655,155 @@ async fn capture_ios_via_wda() -> anyhow::Result<Vec<u8>> {
     Ok(png)
 }
 
+// ── WDA input helpers (iOS 17+ real device via WebDriverAgent) ────
+
+/// Cached WDA session ID. WDA sessions persist until WDA is restarted.
+#[cfg(target_os = "macos")]
+static WDA_SESSION: OnceLock<tokio::sync::Mutex<Option<String>>> = OnceLock::new();
+
+#[cfg(target_os = "macos")]
+fn wda_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .expect("reqwest client")
+}
+
+/// Get or create a WDA session, returning the session ID string.
+#[cfg(target_os = "macos")]
+async fn get_wda_session() -> anyhow::Result<String> {
+    let mutex = WDA_SESSION.get_or_init(|| tokio::sync::Mutex::new(None));
+    let mut guard = mutex.lock().await;
+
+    // Validate existing session
+    if let Some(ref id) = *guard {
+        let ok = wda_client()
+            .get(format!("http://127.0.0.1:8100/session/{id}"))
+            .send()
+            .await
+            .map(|r| r.status().is_success())
+            .unwrap_or(false);
+        if ok {
+            return Ok(id.clone());
+        }
+        *guard = None;
+    }
+
+    // Create new session
+    let resp = wda_client()
+        .post("http://127.0.0.1:8100/session")
+        .json(&serde_json::json!({"capabilities": {"alwaysMatch": {}}}))
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        anyhow::bail!("WDA create session failed: {}", resp.status());
+    }
+
+    let body: serde_json::Value = resp.json().await?;
+    let id = body["sessionId"]
+        .as_str()
+        .or_else(|| body["value"]["sessionId"].as_str())
+        .ok_or_else(|| anyhow::anyhow!("WDA session response missing sessionId"))?
+        .to_string();
+
+    tracing::info!(%id, "Created WDA session");
+    *guard = Some(id.clone());
+    Ok(id)
+}
+
+/// POST W3C pointer actions to WDA session.
+#[cfg(target_os = "macos")]
+async fn wda_actions(actions: serde_json::Value) -> anyhow::Result<()> {
+    let id = get_wda_session().await?;
+    let resp = wda_client()
+        .post(format!("http://127.0.0.1:8100/session/{id}/actions"))
+        .json(&serde_json::json!({"actions": actions}))
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        // Invalidate session on failure so next call recreates it
+        if let Some(mutex) = WDA_SESSION.get() {
+            *mutex.lock().await = None;
+        }
+        anyhow::bail!("WDA actions failed: {}", resp.status());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+async fn wda_tap(x: f64, y: f64) -> anyhow::Result<()> {
+    wda_actions(serde_json::json!([{
+        "type": "pointer",
+        "id": "finger1",
+        "parameters": {"pointerType": "touch"},
+        "actions": [
+            {"type": "pointerMove", "duration": 0, "x": x as i64, "y": y as i64},
+            {"type": "pointerDown", "button": 0},
+            {"type": "pause", "duration": 80},
+            {"type": "pointerUp", "button": 0}
+        ]
+    }])).await
+}
+
+#[cfg(target_os = "macos")]
+async fn wda_long_press(x: f64, y: f64, duration_ms: u64) -> anyhow::Result<()> {
+    wda_actions(serde_json::json!([{
+        "type": "pointer",
+        "id": "finger1",
+        "parameters": {"pointerType": "touch"},
+        "actions": [
+            {"type": "pointerMove", "duration": 0, "x": x as i64, "y": y as i64},
+            {"type": "pointerDown", "button": 0},
+            {"type": "pause", "duration": duration_ms},
+            {"type": "pointerUp", "button": 0}
+        ]
+    }])).await
+}
+
+#[cfg(target_os = "macos")]
+async fn wda_swipe(x1: f64, y1: f64, x2: f64, y2: f64, duration_ms: u64) -> anyhow::Result<()> {
+    wda_actions(serde_json::json!([{
+        "type": "pointer",
+        "id": "finger1",
+        "parameters": {"pointerType": "touch"},
+        "actions": [
+            {"type": "pointerMove", "duration": 0, "x": x1 as i64, "y": y1 as i64},
+            {"type": "pointerDown", "button": 0},
+            {"type": "pointerMove", "duration": duration_ms, "x": x2 as i64, "y": y2 as i64},
+            {"type": "pointerUp", "button": 0}
+        ]
+    }])).await
+}
+
+#[cfg(target_os = "macos")]
+async fn wda_text(text: &str) -> anyhow::Result<()> {
+    let id = get_wda_session().await?;
+    let chars: Vec<&str> = std::iter::once(text).collect();
+    let resp = wda_client()
+        .post(format!("http://127.0.0.1:8100/session/{id}/keys"))
+        .json(&serde_json::json!({"value": chars}))
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        anyhow::bail!("WDA keys failed: {}", resp.status());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+async fn wda_home() -> anyhow::Result<()> {
+    let resp = wda_client()
+        .post("http://127.0.0.1:8100/wda/homescreen")
+        .json(&serde_json::json!({}))
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        anyhow::bail!("WDA homescreen failed: {}", resp.status());
+    }
+    Ok(())
+}
+
 // ── Input handling ────────────────────────────────────────────────
 
 async fn handle_input_event(serial: &str, os: &str, event_json: &str) {
@@ -662,17 +885,46 @@ async fn handle_input_event(serial: &str, os: &str, event_json: &str) {
         }
         #[cfg(target_os = "macos")]
         "ios" => {
-            tracing::info!(%serial, %etype, "iOS input event");
+            tracing::info!(%serial, %etype, "iOS input event via WDA");
             match etype {
                 "home" => {
-                    // Simulate home press via Instruments protocol (DDI must be mounted)
-                    // Fallback: use idevicediagnostics to trigger diagnostics that returns to home
-                    let _ = tokio::process::Command::new("idevicediagnostics")
-                        .args(["-u", serial, "diagnostics", "HomeDiagnostics"])
-                        .stderr(Stdio::null())
-                        .stdout(Stdio::null())
-                        .status()
-                        .await;
+                    if let Err(e) = wda_home().await {
+                        tracing::warn!(%serial, %e, "WDA home failed, falling back to idevicediagnostics");
+                        let _ = tokio::process::Command::new("idevicediagnostics")
+                            .args(["-u", serial, "diagnostics", "HomeDiagnostics"])
+                            .stderr(Stdio::null()).stdout(Stdio::null()).status().await;
+                    }
+                }
+                "tap" => {
+                    let x = event["x"].as_f64().unwrap_or(0.0);
+                    let y = event["y"].as_f64().unwrap_or(0.0);
+                    if let Err(e) = wda_tap(x, y).await {
+                        tracing::warn!(%serial, %e, "WDA tap failed");
+                    }
+                }
+                "long_press" => {
+                    let x = event["x"].as_f64().unwrap_or(0.0);
+                    let y = event["y"].as_f64().unwrap_or(0.0);
+                    let dur = event["duration"].as_u64().unwrap_or(800);
+                    if let Err(e) = wda_long_press(x, y, dur).await {
+                        tracing::warn!(%serial, %e, "WDA long_press failed");
+                    }
+                }
+                "swipe" | "drag" => {
+                    let x1 = event["x1"].as_f64().unwrap_or(0.0);
+                    let y1 = event["y1"].as_f64().unwrap_or(0.0);
+                    let x2 = event["x2"].as_f64().unwrap_or(0.0);
+                    let y2 = event["y2"].as_f64().unwrap_or(0.0);
+                    let dur = event["duration"].as_u64().unwrap_or(400);
+                    if let Err(e) = wda_swipe(x1, y1, x2, y2, dur).await {
+                        tracing::warn!(%serial, %e, "WDA swipe failed");
+                    }
+                }
+                "text" => {
+                    let text = event["text"].as_str().unwrap_or("");
+                    if let Err(e) = wda_text(text).await {
+                        tracing::warn!(%serial, %e, "WDA text input failed");
+                    }
                 }
                 "key" => {
                     let code = event.get("keycode").and_then(|v| v.as_str()).unwrap_or("");
@@ -680,20 +932,23 @@ async fn handle_input_event(serial: &str, os: &str, event_json: &str) {
                         "KEYCODE_POWER" => {
                             let _ = tokio::process::Command::new("idevicediagnostics")
                                 .args(["-u", serial, "sleep"])
-                                .stderr(Stdio::null())
-                                .stdout(Stdio::null())
-                                .status()
-                                .await;
+                                .stderr(Stdio::null()).stdout(Stdio::null()).status().await;
+                        }
+                        "KEYCODE_DEL" | "KEYCODE_BACKSPACE" => {
+                            // Send Unicode delete character
+                            if let Err(e) = wda_text("\u{E003}").await {
+                                tracing::warn!(%serial, %e, "WDA backspace failed");
+                            }
+                        }
+                        "KEYCODE_ENTER" => {
+                            if let Err(e) = wda_text("\n").await {
+                                tracing::warn!(%serial, %e, "WDA enter failed");
+                            }
                         }
                         _ => {
-                            tracing::debug!(%serial, %code, "iOS key event not supported without WDA");
+                            tracing::debug!(%serial, %code, "iOS key event not mapped");
                         }
                     }
-                }
-                "tap" | "swipe" => {
-                    // Touch input requires WebDriverAgent (Xcode/XCTest)
-                    // or pymobiledevice3 DVT (iOS 16+ only)
-                    tracing::debug!(%serial, %etype, "iOS touch input requires WDA — not available");
                 }
                 _ => {
                     tracing::debug!(%serial, %etype, "iOS input event not supported");

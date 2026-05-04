@@ -18,8 +18,8 @@ use pages::{
     overview::OverviewPage, quantum::QuantumPage, quantum_accelerators::QuantumAcceleratorsPage,
     quantum_designer::QuantumDesignerPage, quantum_jobs::QuantumJobsPage,
     quantum_results::QuantumResultsPage, sessions::SessionsPage, sessions_live::LiveSessionsPage,
-    virtual_iot_backends::VirtualIotBackendsPage, virtual_iot_designer::VirtualIotDesignerPage,
-    virtual_iot_shell::VirtualIotShellPage,
+    veeros_shell::VeerosShellPage, virtual_iot_backends::VirtualIotBackendsPage,
+    virtual_iot_designer::VirtualIotDesignerPage, virtual_iot_shell::VirtualIotShellPage,
 };
 
 /// Global signal for mobile sidebar open/close.
@@ -59,6 +59,7 @@ fn App() -> impl IntoView {
                 <Route path=path!("/virtual-iot/new") view=move || view! { <AuthGuard><Shell><VirtualIotDesignerPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/virtual-iot/edit") view=move || view! { <AuthGuard><Shell><VirtualIotDesignerPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/virtual-iot/shell") view=move || view! { <AuthGuard><Shell><VirtualIotShellPage/></Shell></AuthGuard> }/>
+                <Route path=path!("/veeros/shell") view=move || view! { <AuthGuard><Shell><VeerosShellPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/quantum") view=move || view! { <AuthGuard><Shell><QuantumPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/quantum/accelerators") view=move || view! { <AuthGuard><Shell><QuantumAcceleratorsPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/quantum/designer") view=move || view! { <AuthGuard><Shell><QuantumDesignerPage/></Shell></AuthGuard> }/>

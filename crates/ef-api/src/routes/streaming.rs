@@ -11,7 +11,7 @@
 
 use axum::{
     extract::{
-        Path, State,
+        Path, Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     response::IntoResponse,
@@ -106,6 +106,62 @@ pub async fn ws_stream_handler(
     ws.on_upgrade(move |socket| handle_stream(socket, session_id, state))
 }
 
+#[derive(Deserialize, Debug, Clone)]
+pub struct VeerosShellQuery {
+    pub host: String,
+    pub port: Option<u16>,
+    pub agent_id: Option<Uuid>,
+}
+
+/// Open a VeerOS host shell directly in-browser (xterm.js) using host/port.
+/// If `agent_id` is provided and that agent has a streaming URL, the shell is
+/// proxied through the agent's `/ws/ssh` endpoint.
+pub async fn ws_veeros_shell_handler(
+    ws: WebSocketUpgrade,
+    Query(query): Query<VeerosShellQuery>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_veeros_shell(socket, query, state))
+}
+
+async fn handle_veeros_shell(socket: WebSocket, query: VeerosShellQuery, state: AppState) {
+    let (mut ws_tx, ws_rx) = socket.split();
+    let req_id = Uuid::nil();
+    let host = query.host;
+    let port = query.port.unwrap_or(22);
+
+    if let Some(agent_id) = query.agent_id {
+        if let Ok(Some(agent)) = ef_db::repo::agent::AgentRepo::find_by_id(&state.pool, agent_id).await {
+            if let Some(ref streaming_url) = agent.streaming_url {
+                let agent_ws_url = format!(
+                    "{}/ws/ssh?host={}&port={}",
+                    streaming_url.trim_end_matches('/'),
+                    host,
+                    port
+                )
+                .replace("http://", "ws://")
+                .replace("https://", "wss://");
+
+                tracing::info!(%agent_id, %agent_ws_url, "Proxying VeerOS shell via remote agent");
+                proxy_ws_to_agent(ws_tx, ws_rx, &agent_ws_url, req_id).await;
+                return;
+            }
+        }
+    }
+
+    tracing::info!(%host, %port, "Starting local VeerOS SSH terminal session");
+    let _ = ws_tx.send(Message::Text(
+        serde_json::json!({
+            "type": "shell_ready",
+            "host": host,
+            "port": port,
+            "backend": "veeros_host",
+        }).to_string().into()
+    )).await;
+
+    run_ssh_session(ws_tx, ws_rx, None, &host, port, req_id).await;
+}
+
 #[derive(Deserialize)]
 struct WsMessage {
     #[serde(rename = "type")]
@@ -146,8 +202,8 @@ async fn handle_stream(socket: WebSocket, id: Uuid, state: AppState) {
     if let Some(agent_id) = device.agent_id {
         if let Ok(Some(agent)) = ef_db::repo::agent::AgentRepo::find_by_id(&state.pool, agent_id).await {
             if let Some(ref streaming_url) = agent.streaming_url {
-                // SSH devices: proxy to agent's SSH endpoint with host/port query params
-                if device.os == "ssh" {
+                // SSH-like terminal devices: proxy to agent's SSH endpoint with host/port query params
+                if device.os == "ssh" || device.os == "veeros" {
                         // Devices with local_pty capability: spawn a direct PTY on the agent
                         // (the agent IS the host machine — no SSH credentials needed).
                         if device.capabilities.contains(&"local_pty".to_string()) {
@@ -190,8 +246,8 @@ async fn handle_stream(socket: WebSocket, id: Uuid, state: AppState) {
 
     // Local device — run capture directly
 
-    // SSH devices: run SSH session locally (agent on this machine)
-    if device.os == "ssh" {
+    // SSH-like devices: run SSH session locally (agent on this machine)
+    if device.os == "ssh" || device.os == "veeros" {
         let (username, host, port) = match parse_ssh_target(&serial) {
             Some(hp) => hp,
             None => {
@@ -201,13 +257,14 @@ async fn handle_stream(socket: WebSocket, id: Uuid, state: AppState) {
                 return;
             }
         };
+        let device_type = if device.os == "veeros" { "veeros" } else { "ssh" };
         tracing::info!(%id, serial = %serial, %host, port, "Starting local SSH terminal session");
         let _ = ws_tx.send(Message::Text(
             serde_json::json!({
                 "type": "stream_ready",
                 "device_id": id,
                 "serial": serial,
-                "device_type": "ssh",
+                "device_type": device_type,
             }).to_string().into()
         )).await;
         run_ssh_session(ws_tx, ws_rx, username.as_deref(), &host, port, id).await;

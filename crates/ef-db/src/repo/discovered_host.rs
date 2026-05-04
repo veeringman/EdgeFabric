@@ -78,6 +78,8 @@ impl DiscoveredHostRepo {
     }
 
     /// List all discovered hosts, optionally filtered to quantum-capable only.
+    /// When the same host_id is reported by multiple agents, only the most
+    /// recently seen record is returned (deduplicated by host_id).
     pub async fn list(
         pool: &PgPool,
         agent_id: Option<Uuid>,
@@ -85,10 +87,11 @@ impl DiscoveredHostRepo {
     ) -> Result<Vec<DiscoveredHostRow>, sqlx::Error> {
         sqlx::query_as::<_, DiscoveredHostRow>(
             r#"
-            SELECT * FROM discovered_hosts
+            SELECT DISTINCT ON (host_id) *
+            FROM discovered_hosts
             WHERE ($1::uuid IS NULL OR agent_id = $1)
               AND ($2 = FALSE OR quantum_capable = TRUE)
-            ORDER BY last_seen_at DESC
+            ORDER BY host_id, last_seen_at DESC
             "#,
         )
         .bind(agent_id)

@@ -164,7 +164,12 @@ impl DeviceDiscovery {
         for device in &mut devices {
             if let Some(ref udid) = device.serial {
                 if let Some(model) = query_ios_model(udid).await {
+                    // Add ProductType: capability for backend use
                     device.capabilities.push(format!("model:{model}"));
+                    // Add bezel: capability so the dashboard auto-selects the right frame
+                    if let Some(bezel) = product_type_to_bezel(&model) {
+                        device.capabilities.push(format!("bezel:{bezel}"));
+                    }
                 }
             }
         }
@@ -710,6 +715,89 @@ async fn query_ios_model(udid: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Map Apple ProductType identifier to a dashboard bezel style string.
+/// ProductType follows the pattern iPhone{major},{minor} / iPad{major},{minor}.
+fn product_type_to_bezel(pt: &str) -> Option<&'static str> {
+    // See: https://www.theiphonewiki.com/wiki/Models
+    match pt {
+        // ── iPhone ──────────────────────────────────────────────────
+        // iPhone 3G / 3GS
+        "iPhone1,2" | "iPhone2,1" => Some("iphone-3g"),
+        // iPhone 4 / 4S
+        "iPhone3,1" | "iPhone3,2" | "iPhone3,3" | "iPhone4,1" => Some("iphone-4"),
+        // iPhone 5 / 5c / 5s / SE 1st gen
+        "iPhone5,1" | "iPhone5,2" | "iPhone5,3" | "iPhone5,4"
+        | "iPhone6,1" | "iPhone6,2" | "iPhone8,4" => Some("iphone-5"),
+        // iPhone 6 / 6 Plus / 6s / 6s Plus / 7 / 7 Plus / 8 / 8 Plus / SE 2nd/3rd gen
+        "iPhone7,1" | "iPhone7,2" | "iPhone8,1" | "iPhone8,2"
+        | "iPhone9,1" | "iPhone9,2" | "iPhone9,3" | "iPhone9,4"
+        | "iPhone10,1" | "iPhone10,2" | "iPhone10,4" | "iPhone10,5"
+        | "iPhone12,8" | "iPhone14,6" => Some("iphone-classic"),
+        // iPhone X / XS / XS Max / XR / 11 / 11 Pro / 11 Pro Max
+        "iPhone10,3" | "iPhone10,6"
+        | "iPhone11,2" | "iPhone11,4" | "iPhone11,6" | "iPhone11,8"
+        | "iPhone12,1" | "iPhone12,3" | "iPhone12,5" => Some("iphone-notch"),
+        // iPhone 12 mini / 13 mini
+        "iPhone13,1" | "iPhone14,4" => Some("iphone-mini"),
+        // iPhone 12 / 12 Pro / 12 Pro Max / 13 / 13 Pro / 13 Pro Max
+        "iPhone13,2" | "iPhone13,3" | "iPhone13,4"
+        | "iPhone14,2" | "iPhone14,3" | "iPhone14,5" => Some("iphone-modern"),
+        // iPhone 14 / 14 Plus (no dynamic island)
+        "iPhone14,7" | "iPhone14,8" => Some("iphone-modern"),
+        // iPhone 14 Pro / 14 Pro Max / 15 / 15 Plus / 15 Pro / 15 Pro Max
+        // 16 / 16 Plus / 16 Pro / 16 Pro Max and newer → dynamic island
+        "iPhone15,2" | "iPhone15,3"
+        | "iPhone15,4" | "iPhone15,5"
+        | "iPhone16,1" | "iPhone16,2"
+        | "iPhone17,1" | "iPhone17,2" | "iPhone17,3" | "iPhone17,4"
+        | "iPhone17,5" => Some("iphone-island"),
+
+        // ── iPad mini ───────────────────────────────────────────────
+        "iPad2,5" | "iPad2,6" | "iPad2,7"   // mini 1
+        | "iPad4,4" | "iPad4,5" | "iPad4,6" // mini 2
+        | "iPad4,7" | "iPad4,8" | "iPad4,9" // mini 3
+        | "iPad5,1" | "iPad5,2"             // mini 4
+        | "iPad11,1" | "iPad11,2"           // mini 5
+            => Some("ipad-mini-classic"),
+        "iPad14,1" | "iPad14,2"             // mini 6
+        | "iPad16,1" | "iPad16,2"           // mini 7
+            => Some("ipad-mini-modern"),
+
+        // ── iPad Pro ────────────────────────────────────────────────
+        "iPad6,3" | "iPad6,4"               // iPad Pro 9.7"
+        | "iPad6,7" | "iPad6,8"             // iPad Pro 12.9" 1st gen
+        | "iPad7,1" | "iPad7,2"             // iPad Pro 12.9" 2nd gen
+        | "iPad7,3" | "iPad7,4"             // iPad Pro 10.5"
+            => Some("ipad-pro-classic"),
+        "iPad8,1" | "iPad8,2" | "iPad8,3" | "iPad8,4"   // iPad Pro 11" 1st gen
+        | "iPad8,9" | "iPad8,10"                          // iPad Pro 11" 2nd gen
+        | "iPad8,5" | "iPad8,6" | "iPad8,7" | "iPad8,8" // iPad Pro 12.9" 3rd gen
+        | "iPad8,11" | "iPad8,12"                        // iPad Pro 12.9" 4th gen
+            => Some("ipad-pro-10"),
+        "iPad13,4" | "iPad13,5" | "iPad13,6" | "iPad13,7"  // iPad Pro 11" 3rd gen
+        | "iPad13,8" | "iPad13,9" | "iPad13,10" | "iPad13,11" // iPad Pro 12.9" 5th gen
+            => Some("ipad-pro-11"),
+        "iPad14,3" | "iPad14,4"             // iPad Pro 11" 4th gen (M2)
+        | "iPad14,5" | "iPad14,6"           // iPad Pro 12.9" 6th gen (M2)
+            => Some("ipad-pro-12"),
+        "iPad16,3" | "iPad16,4"             // iPad Pro 11" M4
+        | "iPad16,5" | "iPad16,6"           // iPad Pro 13" M4
+            => Some("ipad-pro-m4"),
+
+        // ── iPad Air ────────────────────────────────────────────────
+        "iPad13,1" | "iPad13,2"             // iPad Air 4
+        | "iPad13,16" | "iPad13,17"         // iPad Air 5
+        | "iPad14,8" | "iPad14,9"           // iPad Air 11" M2
+        | "iPad14,10" | "iPad14,11"         // iPad Air 13" M2
+            => Some("ipad-air"),
+
+        // ── iPad (standard) ─────────────────────────────────────────
+        _ if pt.starts_with("iPad") => Some("ipad-classic"),
+
+        _ => None,
+    }
 }
 
 /// Parse `xcrun xctrace list devices` output.

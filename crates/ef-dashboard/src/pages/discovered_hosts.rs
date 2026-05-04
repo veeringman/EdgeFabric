@@ -252,7 +252,11 @@ pub fn DiscoveredHostsPage() -> impl IntoView {
 
 #[component]
 fn HostCard(host: DiscoveredHost) -> impl IntoView {
-    let shell_url = format!("http://{}:{}", host.ip_address, host.port);
+    // Open VeerOS shell inside the dashboard (xterm + WS), routed via API.
+    let shell_url = format!(
+        "/veeros/shell?host={}&port={}&agent_id={}",
+        host.ip_address, host.port, host.agent_id
+    );
     let quantum_capable = host.quantum_capable;
     let has_qpu = host.capabilities.iter().any(|c| c == "quantum_hardware");
     let hostname = host.hostname.clone();

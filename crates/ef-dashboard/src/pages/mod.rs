@@ -12,6 +12,7 @@ pub mod quantum_jobs;
 pub mod quantum_results;
 pub mod sessions;
 pub mod sessions_live;
+pub mod veeros_shell;
 pub mod virtual_iot_backends;
 pub mod virtual_iot_designer;
 pub mod virtual_iot_shell;

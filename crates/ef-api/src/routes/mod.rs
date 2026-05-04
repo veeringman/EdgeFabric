@@ -40,6 +40,8 @@ pub fn api_router() -> Router<AppState> {
         .route("/stream/{session_id}", get(streaming::ws_stream_handler))
         // Also allow streaming by device_id directly
         .route("/devices/{id}/stream", get(streaming::ws_stream_handler))
+        // VeerOS shell terminal (xterm.js over WS)
+        .route("/veeros/shell/ws", get(streaming::ws_veeros_shell_handler))
         // Device log streaming (WebSocket logcat)
         .route("/devices/{id}/logs", get(streaming::ws_logs_handler))
         // Agent endpoints (device registration, heartbeat, command polling)

@@ -204,9 +204,24 @@ pub fn LiveSessionsPage() -> impl IntoView {
                                                 .map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
                                                 .unwrap_or_default();
                                             let is_veeros = d.os == "veeros";
-                                            // For VeerOS, serial = "ip:port" — build an ssh:// URL
+                                            // For VeerOS, open in-dashboard shell (xterm + WS).
                                             let veeros_shell_url = if is_veeros {
-                                                d.serial.as_deref().map(|s| format!("ssh://{s}")).unwrap_or_default()
+                                                let ip_from_caps = caps.iter().find_map(|c| c.strip_prefix("veeros_ip:").map(str::to_string));
+                                                let port_from_caps = caps.iter().find_map(|c| c.strip_prefix("veeros_port:").map(str::to_string));
+                                                let agent_from_caps = caps.iter().find_map(|c| c.strip_prefix("veeros_agent_id:").map(str::to_string));
+
+                                                let (fallback_ip, fallback_port) = d.serial.as_deref()
+                                                    .and_then(|s| s.rsplit_once(':'))
+                                                    .map(|(h, p)| (h.to_string(), p.to_string()))
+                                                    .unwrap_or_else(|| ("127.0.0.1".to_string(), "22".to_string()));
+
+                                                let host = ip_from_caps.unwrap_or(fallback_ip);
+                                                let port = port_from_caps.unwrap_or(fallback_port);
+                                                let mut href = format!("/veeros/shell?host={host}&port={port}");
+                                                if let Some(agent_id) = agent_from_caps {
+                                                    href.push_str(&format!("&agent_id={agent_id}"));
+                                                }
+                                                href
                                             } else { String::new() };
                                             let sel = SelectedDevice {
                                                 id: d.id.clone(),
@@ -226,7 +241,7 @@ pub fn LiveSessionsPage() -> impl IntoView {
                                                 else { d.os.clone() };
                                             let status = d.status.clone();
                                             if is_veeros {
-                                                // VeerOS hosts: clicking opens SSH shell URL rather than the stream viewer
+                                                // VeerOS hosts: clicking opens the in-dashboard shell terminal.
                                                 view! {
                                                     <a href={veeros_shell_url} target="_blank" style="text-decoration:none">
                                                         <div class="device-card device-card--veeros">

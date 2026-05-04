@@ -1,6 +1,6 @@
 use gloo_net::http::Request;
 use gloo_storage::Storage;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::{DeserializeOwned, Deserializer}};
 
 /// Build API base URL from the browser's current hostname (port 6060).
 fn base_url() -> String {
@@ -523,9 +523,68 @@ pub struct QHistogramBin {
     pub probability: f64,
 }
 
+/// Accept both histogram payload shapes:
+/// - array: [{ state, count, probability }, ...]
+/// - map:   { "00": 70, "11": 58 }
+fn deserialize_histogram_bins<'de, D>(deserializer: D) -> Result<Vec<QHistogramBin>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+
+    match value {
+        serde_json::Value::Array(items) => {
+            let mut bins = Vec::new();
+            for item in items {
+                if let serde_json::Value::Object(obj) = item {
+                    let state = obj
+                        .get("state")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+                    let count = obj
+                        .get("count")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0) as u32;
+                    let probability = obj
+                        .get("probability")
+                        .and_then(serde_json::Value::as_f64)
+                        .unwrap_or(0.0);
+
+                    if !state.is_empty() {
+                        bins.push(QHistogramBin { state, count, probability });
+                    }
+                }
+            }
+            Ok(bins)
+        }
+        serde_json::Value::Object(map) => {
+            let total: u64 = map.values().filter_map(serde_json::Value::as_u64).sum();
+            let denom = if total == 0 { 1.0 } else { total as f64 };
+
+            let mut bins: Vec<QHistogramBin> = map
+                .into_iter()
+                .filter_map(|(state, v)| {
+                    let count = v.as_u64()? as u32;
+                    Some(QHistogramBin {
+                        state,
+                        count,
+                        probability: (count as f64) / denom,
+                    })
+                })
+                .collect();
+
+            // Keep display stable and easier to read in UI.
+            bins.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.state.cmp(&b.state)));
+            Ok(bins)
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
 #[derive(Deserialize, Clone, Debug, Default)]
 pub struct QSimulateResponse {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_histogram_bins")]
     pub histogram: Vec<QHistogramBin>,
     pub shots: Option<u32>,
     pub backend: Option<String>,
@@ -621,9 +680,10 @@ pub fn veeros_host_to_device(h: &DiscoveredHost) -> Device {
         if online < 300.0 { "online" } else { "offline" }
     };
     let mut caps = h.capabilities.clone();
-    // Encode IP and port so callers can recover them without extra fields
+    // Encode shell routing metadata in capabilities so any page can build an in-browser shell link.
     caps.push(format!("veeros_ip:{}", h.ip_address));
     caps.push(format!("veeros_port:{}", h.port));
+    caps.push(format!("veeros_agent_id:{}", h.agent_id));
     if h.verified { caps.push("veeros_verified".into()); }
 
     Device {
@@ -653,8 +713,17 @@ pub async fn fetch_all_devices() -> DeviceListResponse {
     let disc = fetch_discovered_hosts(false).await;
     let mut devices = reg.devices;
     if let Ok(d) = disc {
+        // Avoid duplicates: skip any VeerOS host whose serial (ip:port) already
+        // appears in the registered device list.
+        let existing_serials: std::collections::HashSet<String> = devices
+            .iter()
+            .filter_map(|d| d.serial.clone())
+            .collect();
         for h in &d.hosts {
-            devices.push(veeros_host_to_device(h));
+            let serial = format!("{}:{}", h.ip_address, h.port);
+            if !existing_serials.contains(&serial) {
+                devices.push(veeros_host_to_device(h));
+            }
         }
     }
     let total = devices.len();

@@ -3,9 +3,12 @@
 #
 # Usage:
 #   ./scripts/deploy.sh infra          # start Postgres, Redis, NATS, CoTURN
+#   ./scripts/deploy.sh infra-local    # start infra from local host services/binaries
+#   ./scripts/deploy.sh infra-stop     # stop infra services only
 #   ./scripts/deploy.sh api            # start API server (native)
 #   ./scripts/deploy.sh agent          # start agent (native)
 #   ./scripts/deploy.sh all            # infra + api + agent
+#   ./scripts/deploy.sh all-local      # local infra + api + agent + dashboard
 #   ./scripts/deploy.sh docker         # full stack via docker compose
 #   ./scripts/deploy.sh stop           # stop all services
 #   ./scripts/deploy.sh status         # check health of all services
@@ -28,20 +31,45 @@ cd "$PROJECT_ROOT"
 
 COMMAND="${1:-help}"
 RUN_MODE="${EF_RUN_MODE:-development}"
+INFRA_MODE="${EF_INFRA_MODE:-docker}"
+BIN_PROFILE="${EF_BIN_PROFILE:-auto}"
 LOG_DIR="$PROJECT_ROOT/logs"
 PID_DIR="$PROJECT_ROOT/.pids"
 DB_URL="${DATABASE_URL:-postgres://edgefabric:edgefabric@localhost:5432/edgefabric}"
+LOCAL_INFRA_BREW_FILE="$PID_DIR/local-infra.brew"
 
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
 # ── Determine binary path ────────────────────────────────────────
-if [[ -f "target/release/ef-api" ]]; then
-  BIN_DIR="target/release"
-elif [[ -f "target/debug/ef-api" ]]; then
-  BIN_DIR="target/debug"
-else
-  BIN_DIR=""
-fi
+resolve_bin_dir() {
+  case "$BIN_PROFILE" in
+    debug)
+      [[ -f "target/debug/ef-api" ]] && { echo "target/debug"; return 0; }
+      ;;
+    release)
+      [[ -f "target/release/ef-api" ]] && { echo "target/release"; return 0; }
+      ;;
+    auto)
+      # In development mode prefer debug to avoid stale release binaries
+      # compiled against older embedded SQLx migrations.
+      if [[ "$RUN_MODE" == "development" ]]; then
+        [[ -f "target/debug/ef-api" ]] && { echo "target/debug"; return 0; }
+        [[ -f "target/release/ef-api" ]] && { echo "target/release"; return 0; }
+      else
+        [[ -f "target/release/ef-api" ]] && { echo "target/release"; return 0; }
+        [[ -f "target/debug/ef-api" ]] && { echo "target/debug"; return 0; }
+      fi
+      ;;
+    *)
+      err "Invalid EF_BIN_PROFILE='$BIN_PROFILE' (use auto|debug|release)"
+      exit 1
+      ;;
+  esac
+
+  echo ""
+}
+
+BIN_DIR="$(resolve_bin_dir)"
 
 # ── Helper functions ──────────────────────────────────────────────
 wait_for_port() {
@@ -94,6 +122,135 @@ stop_process() {
     warn "$name is not running"
     rm -f "$PID_DIR/$name.pid"
   fi
+}
+
+port_open() {
+  local port="$1"
+  nc -z localhost "$port" 2>/dev/null || (echo >/dev/tcp/localhost/"$port") 2>/dev/null
+}
+
+mark_brew_service_started() {
+  local svc="$1"
+  touch "$LOCAL_INFRA_BREW_FILE"
+  if ! grep -qx "$svc" "$LOCAL_INFRA_BREW_FILE" 2>/dev/null; then
+    echo "$svc" >> "$LOCAL_INFRA_BREW_FILE"
+  fi
+}
+
+start_brew_service_if_possible() {
+  local svc="$1"
+  if ! command -v brew &>/dev/null; then
+    return 1
+  fi
+
+  if brew services start "$svc" >/dev/null 2>&1; then
+    info "Started Homebrew service: $svc"
+    mark_brew_service_started "$svc"
+    return 0
+  fi
+
+  return 1
+}
+
+deploy_infra_local() {
+  info "Starting infrastructure services from local host tools (no Docker)..."
+
+  # PostgreSQL
+  if port_open 5432; then
+    ok "PostgreSQL already running on 5432"
+  else
+    local pg_started=false
+    for svc in postgresql@17 postgresql@16 postgresql@15 postgresql@14 postgresql; do
+      if start_brew_service_if_possible "$svc"; then
+        pg_started=true
+        break
+      fi
+    done
+
+    if [[ "$pg_started" != true ]]; then
+      err "PostgreSQL is not running and could not be started locally."
+      err "Install/start it (example): brew install postgresql@17 && brew services start postgresql@17"
+      exit 1
+    fi
+
+    wait_for_port 5432 "PostgreSQL"
+  fi
+
+  # Redis
+  if port_open 6379; then
+    ok "Redis already running on 6379"
+  else
+    if ! start_brew_service_if_possible "redis"; then
+      err "Redis is not running and could not be started locally."
+      err "Install/start it (example): brew install redis && brew services start redis"
+      exit 1
+    fi
+    wait_for_port 6379 "Redis"
+  fi
+
+  # NATS
+  if port_open 4222; then
+    ok "NATS already running on 4222"
+  else
+    if start_brew_service_if_possible "nats-server"; then
+      wait_for_port 4222 "NATS"
+    elif command -v nats-server &>/dev/null; then
+      info "Starting nats-server directly (JetStream + monitoring)..."
+      stop_process "ef-nats" 2>/dev/null || true
+      nohup nats-server --jetstream --http_port 8222 > "$LOG_DIR/nats-server.log" 2>&1 &
+      save_pid "ef-nats" $!
+      wait_for_port 4222 "NATS"
+      wait_for_port 8222 "NATS monitor" 10 || true
+      info "Logs: $LOG_DIR/nats-server.log"
+    else
+      err "NATS is not running and could not be started locally."
+      err "Install/start it (example): brew install nats-server && brew services start nats-server"
+      exit 1
+    fi
+  fi
+
+  # CoTURN (optional for some streaming paths)
+  if port_open 3478; then
+    ok "CoTURN already listening on 3478"
+  else
+    if start_brew_service_if_possible "coturn"; then
+      wait_for_port 3478 "CoTURN" 10 || true
+    elif command -v turnserver &>/dev/null; then
+      info "Starting turnserver directly..."
+      stop_process "ef-coturn" 2>/dev/null || true
+      nohup turnserver \
+        --log-file=stdout \
+        --min-port=49152 \
+        --max-port=49200 \
+        --realm=edgefabric \
+        --user=edgefabric:edgefabric \
+        --lt-cred-mech \
+        > "$LOG_DIR/coturn.log" 2>&1 &
+      save_pid "ef-coturn" $!
+      wait_for_port 3478 "CoTURN" 10 || true
+      info "Logs: $LOG_DIR/coturn.log"
+    else
+      warn "CoTURN not installed. Continuing without local TURN server."
+      warn "Install if needed: brew install coturn"
+    fi
+  fi
+
+  ok "Local infrastructure is ready"
+}
+
+deploy_infra_auto() {
+  case "$INFRA_MODE" in
+    local)
+      deploy_infra_local
+      ;;
+    docker|"")
+      deploy_infra
+      ;;
+    *)
+      err "Invalid EF_INFRA_MODE='$INFRA_MODE' (use 'docker' or 'local')"
+      exit 1
+      ;;
+  esac
 }
 
 # ── Commands ──────────────────────────────────────────────────────
@@ -218,15 +375,33 @@ deploy_docker() {
 
 stop_all() {
   info "Stopping EdgeFabric services..."
+  stop_infra
   stop_process "ef-dashboard"
   stop_process "ef-agent"
   stop_process "ef-api"
+  ok "All services stopped"
+}
+
+stop_infra() {
+  info "Stopping infrastructure services..."
+  stop_process "ef-coturn" 2>/dev/null || true
+  stop_process "ef-nats" 2>/dev/null || true
 
   if command -v docker &>/dev/null && docker compose ps --quiet 2>/dev/null | grep -q .; then
-    info "Stopping Docker Compose services..."
-    docker compose down
+    info "Stopping Docker Compose infra services..."
+    docker compose stop postgres redis nats coturn >/dev/null 2>&1 || true
   fi
-  ok "All services stopped"
+
+  if command -v brew &>/dev/null && [[ -f "$LOCAL_INFRA_BREW_FILE" ]]; then
+    info "Stopping Homebrew infra services started by this script..."
+    while IFS= read -r svc; do
+      [[ -n "$svc" ]] || continue
+      brew services stop "$svc" >/dev/null 2>&1 || true
+    done < "$LOCAL_INFRA_BREW_FILE"
+    rm -f "$LOCAL_INFRA_BREW_FILE"
+  fi
+
+  ok "Infrastructure services stopped"
 }
 
 deploy_dashboard() {
@@ -329,10 +504,14 @@ unseed_devices() {
 # ── Main dispatch ─────────────────────────────────────────────────
 case "$COMMAND" in
   infra)      deploy_infra ;;
-  api)        deploy_infra; deploy_api ;;
+  infra-local) deploy_infra_local ;;
+  infra-stop) stop_infra ;;
+  api)        deploy_infra_auto; deploy_api ;;
+  api-local)  INFRA_MODE="local"; deploy_infra_auto; deploy_api ;;
   agent)      deploy_agent ;;
   dashboard)  deploy_dashboard ;;
-  all)        deploy_infra; deploy_api; deploy_agent; deploy_dashboard ;;
+  all)        deploy_infra_auto; deploy_api; deploy_agent; deploy_dashboard ;;
+  all-local)  INFRA_MODE="local"; deploy_infra_auto; deploy_api; deploy_agent; deploy_dashboard ;;
   docker)     deploy_docker ;;
   seed)       seed_devices ;;
   unseed)     unseed_devices ;;
@@ -344,11 +523,15 @@ case "$COMMAND" in
     echo "Usage: $0 <command>"
     echo ""
     echo "Commands:"
-    echo "  infra      Start infrastructure (Postgres, Redis, NATS, CoTURN)"
+    echo "  infra      Start infrastructure (Docker Compose)"
+    echo "  infra-local Start infrastructure using local host services/binaries"
+    echo "  infra-stop Stop infrastructure only (Docker/local)"
     echo "  api        Start infrastructure + API server (native)"
+    echo "  api-local  Start local infrastructure + API server (native)"
     echo "  agent      Start the edge agent (native)"
     echo "  dashboard  Start the dashboard (Trunk dev server)"
     echo "  all        Start everything (infra + api + agent + dashboard)"
+    echo "  all-local  Start everything with local infra (no Docker)"
     echo "  docker    Start full stack via Docker Compose"
     echo "  seed      Insert demo/seed devices into the database"
     echo "  unseed    Remove demo/seed devices from the database"
@@ -357,6 +540,7 @@ case "$COMMAND" in
     echo ""
     echo "Environment:"
     echo "  EF_RUN_MODE                    development|production (default: development)"
+    echo "  EF_INFRA_MODE                  docker|local (default: docker; used by api/all)"
     echo "  EF__AGENT__AGENT_ID            Agent identifier (default: hostname)"
     echo "  EF__AGENT__REGION              Agent region (default: local)"
     echo "  EF__AGENT__CONTROL_PLANE_URL   API endpoint (default: http://localhost:6060)"

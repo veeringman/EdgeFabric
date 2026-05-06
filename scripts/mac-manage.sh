@@ -9,6 +9,7 @@
 #   ./scripts/mac-manage.sh build
 #   ./scripts/mac-manage.sh start agent --control-plane-url http://192.168.29.78:6060
 #   ./scripts/mac-manage.sh start local
+#   ./scripts/mac-manage.sh start local --infra-mode local
 #   ./scripts/mac-manage.sh logs agent -f
 #   ./scripts/mac-manage.sh stop
 #   ./scripts/mac-manage.sh status
@@ -68,19 +69,21 @@ Commands:
   doctor                     Show prerequisite/tooling checks
   build [target]             Build binaries (default target: agent)
   start [target]             Start services
-  stop                       Stop all services managed by deploy.sh
+  stop [target]              Stop services (default: all)
   restart [target]           Restart services (stop + start)
   status                     Show service status
   logs [target]              Show logs (default target: all)
   wda <subcommand>           Run WDA manager (doctor/init/start/stop/status/logs)
 
 Targets:
+  infra                      Infrastructure only (for stop)
   agent                      Agent only
   api                        API (+ infra via deploy.sh api)
   local                      Infra + API + Agent + Dashboard (deploy.sh all)
   all                        Same as local
 
 Options:
+  --infra-mode <mode>        Infra mode for api/local start: docker|local (default: docker)
   --control-plane-url <url>  Set EF__AGENT__CONTROL_PLANE_URL for agent start
   --agent-id <id>            Set EF__AGENT__AGENT_ID
   --region <region>          Set EF__AGENT__REGION
@@ -91,7 +94,8 @@ Options:
 Examples:
   ./scripts/mac-manage.sh build agent
   ./scripts/mac-manage.sh start agent --control-plane-url http://192.168.29.78:6060
-  ./scripts/mac-manage.sh start api
+  ./scripts/mac-manage.sh start api --infra-mode local
+  ./scripts/mac-manage.sh stop infra
   ./scripts/mac-manage.sh logs agent -f
 EOF
 }
@@ -112,6 +116,7 @@ control_plane_url=""
 agent_id=""
 region=""
 run_mode="development"
+infra_mode="docker"
 follow_logs=false
 
 # Optional positional target (if next arg is not a flag).
@@ -125,6 +130,11 @@ while [[ $# -gt 0 ]]; do
     --control-plane-url)
       [[ $# -ge 2 ]] || { err "Missing value for --control-plane-url"; exit 1; }
       control_plane_url="$2"
+      shift 2
+      ;;
+    --infra-mode)
+      [[ $# -ge 2 ]] || { err "Missing value for --infra-mode"; exit 1; }
+      infra_mode="$2"
       shift 2
       ;;
     --agent-id)
@@ -162,6 +172,7 @@ if [[ -n "$control_plane_url" ]]; then export EF__AGENT__CONTROL_PLANE_URL="$con
 if [[ -n "$agent_id" ]]; then export EF__AGENT__AGENT_ID="$agent_id"; fi
 if [[ -n "$region" ]]; then export EF__AGENT__REGION="$region"; fi
 export EF_RUN_MODE="$run_mode"
+export EF_INFRA_MODE="$infra_mode"
 
 ensure_rust_env
 ensure_local_protoc
@@ -225,6 +236,15 @@ run_build() {
 
 run_start() {
   local start_target="${target:-agent}"
+
+  case "$infra_mode" in
+    docker|local) ;;
+    *)
+      err "Invalid --infra-mode: $infra_mode (use docker or local)"
+      exit 1
+      ;;
+  esac
+
   case "$start_target" in
     agent)
       info "Starting agent..."
@@ -232,11 +252,11 @@ run_start() {
       "$DEPLOY_SCRIPT" agent
       ;;
     api)
-      info "Starting infra + API..."
+      info "Starting infra + API (infra-mode=$infra_mode)..."
       "$DEPLOY_SCRIPT" api
       ;;
     local|all)
-      info "Starting full local stack..."
+      info "Starting full local stack (infra-mode=$infra_mode)..."
       "$DEPLOY_SCRIPT" all
       ;;
     *)
@@ -282,6 +302,24 @@ run_logs() {
   esac
 }
 
+run_stop() {
+  local stop_target="${target:-all}"
+  case "$stop_target" in
+    infra)
+      info "Stopping infrastructure only..."
+      "$DEPLOY_SCRIPT" infra-stop
+      ;;
+    all|local|api|agent|dashboard)
+      info "Stopping services..."
+      "$DEPLOY_SCRIPT" stop
+      ;;
+    *)
+      err "Invalid stop target: $stop_target"
+      exit 1
+      ;;
+  esac
+}
+
 case "$command" in
   doctor)
     show_doctor
@@ -293,8 +331,7 @@ case "$command" in
     run_start
     ;;
   stop)
-    info "Stopping services..."
-    "$DEPLOY_SCRIPT" stop
+    run_stop
     ;;
   restart)
     info "Restarting services..."

@@ -8,6 +8,7 @@ pub mod quantum;
 pub mod discovery;
 pub mod runners;
 pub mod builds;
+pub mod integrations;
 
 use axum::{Json, Router, extract::State, http::StatusCode, routing::{get, post, put}};
 use serde::Deserialize;
@@ -90,6 +91,15 @@ pub fn api_router() -> Router<AppState> {
         .route("/builds/{id}/logs", get(builds::get_build_logs))
         .route("/builds/{id}/artifacts", get(builds::list_build_artifacts))
         .route("/builds/{id}/cancel", post(builds::cancel_build))
+        // External integrations (MQTT + cloud sinks)
+        .route("/integrations/mqtt/subscriptions", get(integrations::list_mqtt_subscriptions).post(integrations::create_mqtt_subscription))
+        .route("/integrations/mqtt/subscriptions/{id}", axum::routing::delete(integrations::delete_mqtt_subscription))
+        .route("/integrations/mqtt/publishers", get(integrations::list_mqtt_publishers).post(integrations::create_mqtt_publisher))
+        .route("/integrations/mqtt/publishers/{id}", axum::routing::delete(integrations::delete_mqtt_publisher))
+        .route("/integrations/cloud/sinks", get(integrations::list_cloud_sinks).post(integrations::create_cloud_sink))
+        .route("/integrations/cloud/sinks/{id}", axum::routing::delete(integrations::delete_cloud_sink))
+        .route("/integrations/delivery-attempts", get(integrations::list_delivery_attempts))
+        .route("/integrations/sensors/events", post(integrations::ingest_sensor_event))
 }
 
 #[utoipa::path(get, path = "/health", tag = "health",

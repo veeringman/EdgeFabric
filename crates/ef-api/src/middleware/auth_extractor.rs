@@ -9,6 +9,7 @@ use uuid::Uuid;
 use crate::auth::{api_key, jwt};
 use crate::middleware::error_response::ApiError;
 use ef_core::config::VeerOsConfig;
+use crate::integrations::IntegrationManager;
 
 /// Authenticated tenant context extracted from either:
 /// - `Authorization: Bearer <jwt>` header
@@ -73,6 +74,7 @@ pub struct AppState {
     pub pool: PgPool,
     pub jwt_secret: String,
     pub veeros: VeerOsConfig,
+    pub integrations: IntegrationManager,
 }
 
 // Allow handlers to extract PgPool directly from AppState

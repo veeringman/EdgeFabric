@@ -1285,9 +1285,11 @@ dependencies = [
 name = "ef-api"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "anyhow",
  "async-nats",
  "axum 0.8.8",
+ "base64 0.22.1",
  "chrono",
  "ef-control",
  "ef-core",
@@ -1301,6 +1303,7 @@ dependencies = [
  "jsonwebtoken",
  "prost",
  "reqwest",
+ "rumqttc",
  "serde",
  "serde_json",
  "sqlx",

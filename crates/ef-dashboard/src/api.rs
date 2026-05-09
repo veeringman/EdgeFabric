@@ -933,3 +933,229 @@ pub async fn fetch_discovered_hosts(quantum_only: bool) -> Result<DiscoveryHosts
     };
     get::<DiscoveryHostsResponse>(path).await
 }
+
+// ─── External Integrations API ─────────────────────────────────────────────
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct MqttSubscriptionsResponse {
+    pub subscriptions: Vec<MqttSubscription>,
+    pub total: usize,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+pub struct MqttSubscription {
+    pub id: String,
+    pub tenant_id: String,
+    pub name: String,
+    pub broker_host: String,
+    pub broker_port: u16,
+    pub topic_filter: String,
+    pub client_id: String,
+    pub username: Option<String>,
+    pub use_tls: bool,
+    pub reconnect_secs: u64,
+    pub created_at: String,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct CreateMqttSubscriptionRequest {
+    pub name: String,
+    pub broker_host: String,
+    pub broker_port: u16,
+    pub topic_filter: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    pub use_tls: bool,
+    pub reconnect_secs: u64,
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct MqttSubscriptionEnvelope {
+    pub subscription: MqttSubscription,
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct MqttPublishersResponse {
+    pub publishers: Vec<MqttPublisher>,
+    pub total: usize,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+pub struct MqttPublisher {
+    pub id: String,
+    pub tenant_id: String,
+    pub name: String,
+    pub broker_host: String,
+    pub broker_port: u16,
+    pub topic_root: String,
+    pub client_id: String,
+    pub username: Option<String>,
+    pub use_tls: bool,
+    pub created_at: String,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct CreateMqttPublisherRequest {
+    pub name: String,
+    pub broker_host: String,
+    pub broker_port: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic_root: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    pub use_tls: bool,
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct MqttPublisherEnvelope {
+    pub publisher: MqttPublisher,
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct CloudSinksResponse {
+    pub sinks: Vec<CloudSink>,
+    pub total: usize,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CloudSink {
+    AwsS3PresignedPut {
+        id: String,
+        tenant_id: String,
+        name: String,
+        presigned_put_url: String,
+        created_at: String,
+    },
+    AwsIotCoreHttps {
+        id: String,
+        tenant_id: String,
+        name: String,
+        publish_url: String,
+        created_at: String,
+    },
+    AzureIotHub {
+        id: String,
+        tenant_id: String,
+        name: String,
+        host_name: String,
+        device_id: String,
+        api_version: String,
+        created_at: String,
+    },
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CreateCloudSinkRequest {
+    AwsS3PresignedPut {
+        name: String,
+        presigned_put_url: String,
+    },
+    AwsIotCoreHttps {
+        name: String,
+        publish_url: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        authorization_header: Option<String>,
+    },
+    AzureIotHub {
+        name: String,
+        host_name: String,
+        device_id: String,
+        sas_token: String,
+        api_version: String,
+    },
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct CloudSinkEnvelope {
+    pub sink: CloudSink,
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct DeliveryAttemptsResponse {
+    pub attempts: Vec<DeliveryAttempt>,
+    pub total: usize,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+pub struct DeliveryAttempt {
+    pub id: String,
+    pub endpoint_id: String,
+    pub tenant_id: Option<String>,
+    pub device_id: Option<String>,
+    pub sensor: Option<String>,
+    pub status: String,
+    pub attempt: i32,
+    pub error_message: Option<String>,
+    pub created_at: String,
+}
+
+pub async fn list_mqtt_subscriptions() -> Result<MqttSubscriptionsResponse, String> {
+    get::<MqttSubscriptionsResponse>("/integrations/mqtt/subscriptions").await
+}
+
+pub async fn create_mqtt_subscription(
+    req: &CreateMqttSubscriptionRequest,
+) -> Result<MqttSubscriptionEnvelope, String> {
+    post::<CreateMqttSubscriptionRequest, MqttSubscriptionEnvelope>(
+        "/integrations/mqtt/subscriptions",
+        req,
+    )
+    .await
+}
+
+pub async fn delete_mqtt_subscription(id: &str) -> Result<(), String> {
+    delete(&format!("/integrations/mqtt/subscriptions/{id}")).await
+}
+
+pub async fn list_mqtt_publishers() -> Result<MqttPublishersResponse, String> {
+    get::<MqttPublishersResponse>("/integrations/mqtt/publishers").await
+}
+
+pub async fn create_mqtt_publisher(
+    req: &CreateMqttPublisherRequest,
+) -> Result<MqttPublisherEnvelope, String> {
+    post::<CreateMqttPublisherRequest, MqttPublisherEnvelope>(
+        "/integrations/mqtt/publishers",
+        req,
+    )
+    .await
+}
+
+pub async fn delete_mqtt_publisher(id: &str) -> Result<(), String> {
+    delete(&format!("/integrations/mqtt/publishers/{id}")).await
+}
+
+pub async fn list_cloud_sinks() -> Result<CloudSinksResponse, String> {
+    get::<CloudSinksResponse>("/integrations/cloud/sinks").await
+}
+
+pub async fn create_cloud_sink(req: &CreateCloudSinkRequest) -> Result<CloudSinkEnvelope, String> {
+    post::<CreateCloudSinkRequest, CloudSinkEnvelope>("/integrations/cloud/sinks", req).await
+}
+
+pub async fn delete_cloud_sink(id: &str) -> Result<(), String> {
+    delete(&format!("/integrations/cloud/sinks/{id}")).await
+}
+
+pub async fn list_delivery_attempts(
+    status: Option<&str>,
+    limit: i64,
+) -> Result<DeliveryAttemptsResponse, String> {
+    let mut path = format!("/integrations/delivery-attempts?limit={limit}");
+    if let Some(status) = status {
+        path.push_str("&status=");
+        let encoded = js_sys::encode_uri_component(status);
+        path.push_str(&encoded.as_string().unwrap_or_default());
+    }
+    get::<DeliveryAttemptsResponse>(&path).await
+}

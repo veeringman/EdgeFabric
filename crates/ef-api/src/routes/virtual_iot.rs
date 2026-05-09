@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, process::Command};
 use uuid::Uuid;
 
+use crate::integrations::SensorEvent;
 use crate::middleware::auth_extractor::{AppState, AuthContext};
 use crate::middleware::error_response::ApiError;
 
@@ -605,6 +606,19 @@ pub async fn inject_virtual_iot_sensor(
     };
 
     let _ = DeviceRepo::update_heartbeat(&state.pool, id).await;
+
+    let event = SensorEvent {
+        tenant_id: auth.tenant_id,
+        device_id: id,
+        sensor: body.sensor.clone(),
+        value: body.value.clone(),
+        source: source.clone(),
+        timestamp: chrono::Utc::now().to_rfc3339(),
+    };
+    state
+        .integrations
+        .forward_sensor_event(auth.tenant_id, event)
+        .await;
 
     Ok(Json(json!({
         "device_id": id,

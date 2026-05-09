@@ -13,6 +13,7 @@ mod openapi;
 mod proto;
 mod routes;
 mod session_manager;
+mod integrations;
 mod virtual_iot_runtime;
 mod veeros_proxy;
 
@@ -65,11 +66,15 @@ async fn main() -> Result<()> {
     // so they behave like software-backed controllers instead of going stale.
     virtual_iot_runtime::spawn_virtual_iot_runtime(pool.clone());
 
+    let integrations = integrations::IntegrationManager::new(pool.clone());
     let state = AppState {
         pool,
         jwt_secret: cfg.auth.jwt_secret.clone(),
         veeros: cfg.veeros.clone(),
+        integrations,
     };
+
+    state.integrations.init().await;
 
     // Rate limiter: 50 requests/sec per IP
     let rate_limiter = middleware::rate_limit::build_rate_limiter(50);

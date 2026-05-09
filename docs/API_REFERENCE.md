@@ -784,6 +784,187 @@ This server starts immediately on agent launch, **independent of control-plane c
 
 ---
 
+## External MQTT + Cloud Integrations
+
+External applications can now integrate with EdgeFabric sensor traffic through:
+
+- inbound MQTT subscriptions (EdgeFabric subscribes to broker topics)
+- outbound MQTT publishers (EdgeFabric publishes sensor events for external subscribers)
+- cloud sinks (AWS S3 presigned PUT, AWS IoT Core HTTPS publish endpoint, Azure IoT Hub HTTPS telemetry)
+
+### MQTT Subscription Interfaces
+
+Create a subscription worker:
+
+```http
+POST /api/v1/integrations/mqtt/subscriptions
+Authorization: Bearer <jwt_token>
+Content-Type: application/json
+```
+
+```json
+{
+  "name": "lab-ingest",
+  "broker_host": "mqtt.edge-lab.local",
+  "broker_port": 1883,
+  "topic_filter": "external/sensors/#",
+  "client_id": "edgefabric-sub-01",
+  "username": "mqtt-user",
+  "password": "mqtt-pass",
+  "use_tls": false,
+  "reconnect_secs": 5
+}
+```
+
+List and delete subscriptions:
+
+```http
+GET /api/v1/integrations/mqtt/subscriptions
+DELETE /api/v1/integrations/mqtt/subscriptions/{id}
+```
+
+MQTT payload format expected by subscription workers:
+
+```json
+{
+  "device_id": "0f730adf-2be2-4f5b-8ed7-36b471d8df0e",
+  "sensor": "temperature",
+  "value": 27.5,
+  "source": "external-sensor-gateway"
+}
+```
+
+### MQTT Publisher Interfaces
+
+Configure outbound publishing so external applications can subscribe to EdgeFabric sensor topics:
+
+```http
+POST /api/v1/integrations/mqtt/publishers
+Authorization: Bearer <jwt_token>
+Content-Type: application/json
+```
+
+```json
+{
+  "name": "external-subscribers",
+  "broker_host": "mqtt.edge-lab.local",
+  "broker_port": 1883,
+  "topic_root": "edgefabric/sensors",
+  "client_id": "edgefabric-pub-01",
+  "username": "mqtt-user",
+  "password": "mqtt-pass",
+  "use_tls": false
+}
+```
+
+Topics are published as:
+
+```text
+{topic_root}/{device_id}/{sensor}
+```
+
+List and delete publishers:
+
+```http
+GET /api/v1/integrations/mqtt/publishers
+DELETE /api/v1/integrations/mqtt/publishers/{id}
+```
+
+### Cloud Sink Interfaces
+
+Create sink:
+
+```http
+POST /api/v1/integrations/cloud/sinks
+Authorization: Bearer <jwt_token>
+Content-Type: application/json
+```
+
+AWS S3 (presigned PUT URL):
+
+```json
+{
+  "kind": "aws_s3_presigned_put",
+  "name": "s3-archive",
+  "presigned_put_url": "https://bucket.s3.amazonaws.com/sensors/event.json?..."
+}
+```
+
+AWS IoT Core (HTTPS publish endpoint):
+
+```json
+{
+  "kind": "aws_iot_core_https",
+  "name": "aws-iot-core",
+  "publish_url": "https://<iot-data-endpoint>/topics/edgefabric/sensors?qos=1",
+  "authorization_header": "<auth-value-if-required>"
+}
+```
+
+Azure IoT Hub telemetry:
+
+```json
+{
+  "kind": "azure_iot_hub",
+  "name": "azure-iothub",
+  "host_name": "my-hub.azure-devices.net",
+  "device_id": "edge-device-01",
+  "sas_token": "SharedAccessSignature sr=...",
+  "api_version": "2021-04-12"
+}
+```
+
+List and delete sinks:
+
+```http
+GET /api/v1/integrations/cloud/sinks
+DELETE /api/v1/integrations/cloud/sinks/{id}
+```
+
+### Direct Sensor Ingest API (External Apps)
+
+For non-MQTT producers:
+
+```http
+POST /api/v1/integrations/sensors/events
+Authorization: Bearer <jwt_token>
+Content-Type: application/json
+```
+
+```json
+{
+  "device_id": "0f730adf-2be2-4f5b-8ed7-36b471d8df0e",
+  "sensor": "humidity",
+  "value": "56",
+  "source": "external-rest-bridge"
+}
+```
+
+### Delivery Attempts / Dead Letters
+
+Inspect integration delivery attempts (including `dead_letter` records):
+
+```http
+GET /api/v1/integrations/delivery-attempts?status=dead_letter&limit=100
+Authorization: Bearer <jwt_token>
+```
+
+Delivery behavior:
+
+- each publisher/sink delivery is retried with exponential backoff
+- failures are recorded as `failed` attempts
+- exhausted retries are recorded as `dead_letter`
+
+### Notes
+
+- Cloud and MQTT integration definitions are persisted in PostgreSQL (`integration_endpoints`) and restored at API startup.
+- Delivery telemetry is persisted in PostgreSQL (`integration_delivery_attempts`) for auditability and dead-letter review.
+- Sensitive integration fields are encrypted at rest by `ef-api` using `EF_INTEGRATIONS_SECRET_KEY`.
+- `EF_INTEGRATIONS_SECRET_KEY` accepted formats: raw 32-byte string, base64, `base64:<...>`, or `hex:<64-hex>`.
+- Virtual IoT sensor injection (`POST /api/v1/devices/{id}/virtual-iot/sensors`) now also forwards to configured MQTT publishers and cloud sinks.
+
+---
+
 ## Error Codes
 
 | HTTP Status | Code | Description |

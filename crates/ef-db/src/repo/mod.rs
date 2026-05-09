@@ -3,6 +3,7 @@ pub mod audit;
 pub mod build;
 pub mod device;
 pub mod discovered_host;
+pub mod integration;
 pub mod job;
 pub mod runner;
 pub mod session;

@@ -9,11 +9,20 @@ pub mod priority;
 use ef_core::device::DeviceFilter;
 use ef_core::error::{EdgeFabricError, Result};
 use ef_db::repo::device::{DeviceRepo, DeviceRow};
+use ef_db::repo::runner::{RunnerLeaseRow, RunnerRepo, RunnerRow};
 use sqlx::PgPool;
 use uuid::Uuid;
 
 pub struct Scheduler {
     pool: PgPool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RunnerFilter {
+    pub region: Option<String>,
+    pub required_capabilities: Vec<String>,
+    pub required_labels: Vec<String>,
+    pub lease_ttl_seconds: i64,
 }
 
 impl Scheduler {
@@ -98,6 +107,42 @@ impl Scheduler {
             // TODO: P4.8 — trigger device reset/wipe here
         } else {
             tracing::warn!(%device_id, "Release: device not found or status unchanged");
+        }
+        Ok(())
+    }
+
+    /// Allocate a runner using lease-based concurrency checks.
+    pub async fn allocate_runner(
+        &self,
+        tenant_id: Uuid,
+        filter: &RunnerFilter,
+        build_job_id: Option<Uuid>,
+    ) -> Result<(RunnerRow, RunnerLeaseRow)> {
+        match RunnerRepo::acquire_lease(
+            &self.pool,
+            tenant_id,
+            &filter.required_capabilities,
+            &filter.required_labels,
+            filter.region.as_deref(),
+            build_job_id,
+            filter.lease_ttl_seconds,
+        )
+        .await?
+        {
+            Some((runner, lease)) => {
+                tracing::info!(runner_id = %runner.id, lease_id = %lease.id, "Runner allocated with lease");
+                Ok((runner, lease))
+            }
+            None => Err(EdgeFabricError::NoMatchingDevices),
+        }
+    }
+
+    pub async fn release_runner_lease(&self, lease_id: Uuid) -> Result<()> {
+        let released = RunnerRepo::release_lease(&self.pool, lease_id).await?;
+        if released.is_some() {
+            tracing::info!(lease_id = %lease_id, "Runner lease released");
+        } else {
+            tracing::warn!(lease_id = %lease_id, "Runner lease release skipped (not found or already non-active)");
         }
         Ok(())
     }

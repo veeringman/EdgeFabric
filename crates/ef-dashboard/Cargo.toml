@@ -27,7 +27,11 @@ uuid = { version = "1", features = ["v4", "serde", "js"] }
 
 # Logging
 web-sys = { version = "0.3", features = [
+    "File",
+    "FileList",
     "HtmlInputElement",
+    "HtmlAnchorElement",
+    "HtmlElement",
     "HtmlSelectElement",
     "HtmlImageElement",
     "Window",

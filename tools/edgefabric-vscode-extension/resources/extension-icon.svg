@@ -1,0 +1,62 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="EdgeFabric VS Code Extension Icon">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#07111A"/>
+      <stop offset="100%" stop-color="#112638"/>
+    </linearGradient>
+    <linearGradient id="frame" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1A4A63"/>
+      <stop offset="100%" stop-color="#2A6E8A"/>
+    </linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0066BB"/>
+      <stop offset="42%" stop-color="#00CCFF"/>
+      <stop offset="100%" stop-color="#BFDB38"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="46%" cy="34%" r="66%">
+      <stop offset="0%" stop-color="#3CD6FF" stop-opacity="0.24"/>
+      <stop offset="100%" stop-color="#3CD6FF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="84" y="84" width="856" height="856" rx="188" fill="url(#bg)"/>
+  <rect x="114" y="114" width="796" height="796" rx="160" fill="none" stroke="url(#frame)" stroke-width="18"/>
+  <circle cx="442" cy="344" r="360" fill="url(#glow)"/>
+
+  <!-- Decorative shapes echoing the original icon feel -->
+  <path d="M194 750c114-95 215-121 366-110" fill="none" stroke="#1E4E67" stroke-opacity="0.45" stroke-width="20" stroke-linecap="round"/>
+  <circle cx="764" cy="292" r="38" fill="#173748" opacity="0.82"/>
+  <circle cx="800" cy="254" r="18" fill="#275B75" opacity="0.9"/>
+
+  <!-- Exact EdgeFabric-style grid silhouette: 3x4 with missing bottom-right tile -->
+  <g transform="translate(226 186)">
+    <rect x="0" y="0" width="164" height="112" rx="32" fill="url(#brand)"/>
+    <rect x="190" y="0" width="164" height="112" rx="32" fill="url(#brand)"/>
+    <rect x="380" y="0" width="164" height="112" rx="32" fill="url(#brand)"/>
+
+    <rect x="0" y="142" width="164" height="112" rx="32" fill="url(#brand)"/>
+    <rect x="190" y="142" width="164" height="112" rx="32" fill="url(#brand)"/>
+    <rect x="380" y="142" width="164" height="112" rx="32" fill="url(#brand)"/>
+
+    <rect x="0" y="284" width="164" height="112" rx="32" fill="url(#brand)"/>
+    <rect x="190" y="284" width="164" height="112" rx="32" fill="url(#brand)"/>
+    <rect x="380" y="284" width="164" height="112" rx="32" fill="url(#brand)"/>
+
+    <rect x="0" y="426" width="164" height="112" rx="32" fill="url(#brand)"/>
+    <rect x="190" y="426" width="164" height="112" rx="32" fill="url(#brand)"/>
+  </g>
+
+  <!-- Extension badge -->
+  <g transform="translate(796 786)">
+    <circle cx="0" cy="0" r="92" fill="#F6FBFF"/>
+    <circle cx="0" cy="0" r="92" fill="none" stroke="#0A1C2A" stroke-width="7"/>
+    <g stroke="#0066BB" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <line x1="0" y1="-30" x2="0" y2="24"/>
+      <line x1="-24" y1="8" x2="-40" y2="8"/>
+      <line x1="24" y1="8" x2="40" y2="8"/>
+      <circle cx="-40" cy="8" r="6" fill="#0066BB"/>
+      <circle cx="40" cy="8" r="6" fill="#0066BB"/>
+      <circle cx="0" cy="-30" r="7" fill="#00CCFF"/>
+    </g>
+  </g>
+</svg>

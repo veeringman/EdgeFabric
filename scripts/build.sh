@@ -122,7 +122,11 @@ fi
 build_crate() {
   local crate="$1"
   info "Building $crate..."
-  cargo build -p "$crate" "${CARGO_FLAGS[@]}"
+  if [[ ${#CARGO_FLAGS[@]} -gt 0 ]]; then
+    cargo build -p "$crate" "${CARGO_FLAGS[@]}"
+  else
+    cargo build -p "$crate"
+  fi
   ok "$crate built → $BUILD_DIR/"
 }
 
@@ -144,7 +148,11 @@ build_dashboard() {
 
 build_all() {
   info "Building all workspace crates..."
-  cargo build "${CARGO_FLAGS[@]}"
+  if [[ ${#CARGO_FLAGS[@]} -gt 0 ]]; then
+    cargo build "${CARGO_FLAGS[@]}"
+  else
+    cargo build
+  fi
   ok "All crates built → $BUILD_DIR/"
 }
 

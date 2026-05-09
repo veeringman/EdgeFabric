@@ -14,6 +14,8 @@
 
 - [Authentication](#authentication)
 - [Devices API](#devices-api)
+- [Runners API](#runners-api)
+- [Builds API](#builds-api)
 - [Sessions API](#sessions-api)
 - [Tests API](#tests-api)
 - [Streaming API](#streaming-api)
@@ -21,6 +23,7 @@
 - [gRPC Services](#grpc-services)
 - [Error Codes](#error-codes)
 - [Rate Limiting](#rate-limiting)
+- [VS Code Developer Flow](VSCODE_DEVELOPER_FLOW.md)
 
 ---
 
@@ -164,6 +167,290 @@ GET /api/v1/devices/{device_id}/health
   "last_heartbeat": "2026-04-06T10:30:00Z"
 }
 ```
+
+---
+
+## Runners API
+
+Runner APIs provide tenant-scoped registration and management of SSH/macOS CI runners.
+
+### Register Runner
+
+```http
+POST /api/v1/runners/register
+Authorization: Bearer <jwt_token>
+Content-Type: application/json
+
+{
+  "name": "mac-mini-runner-01",
+  "device_id": "f2b6f0d6-9fa9-4d86-b14c-77ff9f4d3b66",
+  "runner_class": "ios-build",
+  "host_os": "macos",
+  "architecture": "arm64",
+  "region": "in-lab",
+  "labels": ["ios", "team-a"],
+  "capabilities": ["ssh", "cicd_runner", "xcode"],
+  "max_concurrency": 2
+}
+```
+
+`device_id` should point to an already discovered/registered host from ef-agent and dashboard inventory.
+When `host` is omitted and `device_id` is provided, EdgeFabric derives `host:port` from device metadata (`serial` or `ip_address`).
+
+Manual override remains available:
+
+```json
+{
+  "name": "mac-mini-runner-01",
+  "device_id": "f2b6f0d6-9fa9-4d86-b14c-77ff9f4d3b66",
+  "host": "192.168.29.44",
+  "port": 22,
+  "runner_class": "ios-build"
+}
+```
+
+### List Runners
+
+```http
+GET /api/v1/runners
+Authorization: Bearer <jwt_token>
+```
+
+### Get Runner
+
+```http
+GET /api/v1/runners/{runner_id}
+Authorization: Bearer <jwt_token>
+```
+
+### Drain / Resume Runner
+
+Drain:
+
+```http
+POST /api/v1/runners/{runner_id}/drain
+Authorization: Bearer <jwt_token>
+Content-Type: application/json
+
+{ "drained": true }
+```
+
+Resume:
+
+```http
+POST /api/v1/runners/{runner_id}/drain
+Authorization: Bearer <jwt_token>
+Content-Type: application/json
+
+{ "drained": false }
+```
+
+### Probe Runner Reachability
+
+```http
+POST /api/v1/runners/{runner_id}/probe
+Authorization: Bearer <jwt_token>
+Content-Type: application/json
+
+{
+  "ssh_user": "builder"
+}
+```
+
+`ssh_user` is optional. If omitted, EdgeFabric tries a small fallback username set.
+
+Current probe mode performs:
+
+- TCP reachability to `host:port`
+- SSH authentication probe (batch mode, key-based)
+- Toolchain checks for runner capabilities:
+  - Apple: `xcode`, `simctl`, `fastlane`, `codesign`, `cocoapods`, `swiftpm`
+  - Linux/IoT: `linux_runner`, `iot_toolchain`, `esp32`, `rpi`, `iot_deploy`
+  - Quantum/VeerOS: `quantum_sdk`, `quantum_simulator`, `veeros_host`
+
+Probe metadata and discovered capabilities are stored in runner health and returned in the response.
+
+### Allocate Runner Lease
+
+```http
+POST /api/v1/runners/allocate
+Authorization: Bearer <jwt_token>
+Content-Type: application/json
+
+{
+  "region": "in-lab",
+  "required_capabilities": ["cicd_runner", "xcode", "artifact_upload"],
+  "required_labels": ["ios"],
+  "lease_ttl_seconds": 1200,
+  "build_job_id": "d2a81f42-95fb-4fb2-8e1f-85fe067feab4",
+  "target_device_id": "f2b6f0d6-9fa9-4d86-b14c-77ff9f4d3b66"
+}
+```
+
+Returns a matched runner and active lease. Concurrency is enforced against `max_concurrency`.
+
+`target_device_id` is optional. When provided, it should reference a registered/discovered device visible in dashboard inventory.
+Current allocation checks support iOS and can be extended for IoT/Virtual IoT orchestration policies.
+
+### Release Runner Lease
+
+```http
+POST /api/v1/runners/leases/{lease_id}/release
+Authorization: Bearer <jwt_token>
+```
+
+Marks an active lease as released so the runner can accept new allocations.
+
+---
+
+## Builds API
+
+### List Builds
+
+Returns tenant-scoped iOS build jobs ordered by newest first.
+
+```http
+GET /api/v1/builds
+Authorization: Bearer <jwt_token>
+```
+
+Optional query parameters:
+
+- `limit` (default `50`, max `200`)
+- `offset` (default `0`)
+- `status` (e.g. `queued`, `running`, `failed`, `succeeded`, `cancelled`)
+- `device` (substring match on `device_id`)
+- `source` (substring match on `source_ref`)
+
+Response metadata includes `status_counts` (queued/provisioning/running/succeeded/failed/cancelled)
+to support global status facets in dashboards while paging through results.
+
+### Submit iOS Remote Build/Deploy
+
+Runs `xcodebuild` on an allocated macOS runner over SSH and targets an already registered EdgeFabric iOS device by UDID.
+
+```http
+POST /api/v1/builds/ios
+Authorization: Bearer <jwt_token>
+Content-Type: application/json
+
+{
+  "source_ref": "project-main",
+  "project_path": "/Users/builder/work/my-ios-app",
+  "scheme": "MyApp",
+  "configuration": "Debug",
+  "target_device_id": "f2b6f0d6-9fa9-4d86-b14c-77ff9f4d3b66",
+  "region": "in-lab",
+  "required_runner_capabilities": ["xcode", "cicd_runner"],
+  "required_runner_labels": ["ios"],
+  "lease_ttl_seconds": 1800,
+  "ssh_user": "builder"
+}
+```
+
+Behavior:
+
+- Allocates runner lease with capability and concurrency checks.
+- Enqueues remote `xcodebuild -destination id=<target-udid> build` over SSH.
+- Persists build status and logs.
+- Releases lease on completion/failure/cancel.
+
+Response code is `202 Accepted` when build is queued/running asynchronously.
+
+### Submit IoT Build/Deploy (Linux SSH Runners)
+
+Builds and deploys IoT workloads (initially focused on ESP32C6 and Raspberry Pi) via Linux SSH runners.
+
+```http
+POST /api/v1/builds/iot/deploy
+Authorization: Bearer <jwt_token>
+Content-Type: application/json
+
+{
+  "source_ref": "iot-main",
+  "project_path": "/home/builder/work/edge-iot",
+  "target_device_id": "0f730adf-2be2-4f5b-8ed7-36b471d8df0e",
+  "board_profile": "esp32c6",
+  "deploy_command": "pio run -t upload",
+  "region": "edge-lab",
+  "required_runner_capabilities": ["linux_runner", "iot_toolchain", "esp32"],
+  "required_runner_labels": ["iot"],
+  "lease_ttl_seconds": 1800,
+  "ssh_user": "builder"
+}
+```
+
+Behavior:
+
+- Allocates Linux SSH runner with IoT capabilities.
+- Executes remote build/deploy command (custom or board-profile default).
+- Persists logs/status and releases lease on completion/failure/cancel.
+
+### Submit Quantum Program Run (VeerOS Hosts)
+
+Executes quantum programs through VeerOS-capable runners with either virtual processors/simulators or real hardware backends.
+
+```http
+POST /api/v1/builds/quantum/run
+Authorization: Bearer <jwt_token>
+Content-Type: application/json
+
+{
+  "source_ref": "quantum-main",
+  "project_path": "/home/builder/work/qprog",
+  "run_command": "python3 main.py",
+  "backend_kind": "virtual",
+  "backend_name": "veeros-vqp-1",
+  "veeros_host_hint": "host-12",
+  "region": "quantum-lab",
+  "required_runner_capabilities": ["veeros_host", "quantum_sdk", "quantum_simulator"],
+  "required_runner_labels": ["quantum"],
+  "lease_ttl_seconds": 1800,
+  "ssh_user": "builder"
+}
+```
+
+Notes:
+
+- `backend_kind` supports `virtual` or `real`.
+- `virtual` requires `quantum_simulator`-class runners.
+- `real` requires `quantum_hardware`-class runners.
+
+### Get Build
+
+```http
+GET /api/v1/builds/{build_id}
+Authorization: Bearer <jwt_token>
+```
+
+### Get Build Logs
+
+```http
+GET /api/v1/builds/{build_id}/logs
+Authorization: Bearer <jwt_token>
+```
+
+While build is running, this endpoint attempts a live tail from the remote runner log.
+
+### List Build Artifacts
+
+```http
+GET /api/v1/builds/{build_id}/artifacts
+Authorization: Bearer <jwt_token>
+```
+
+### Cancel Build
+
+```http
+POST /api/v1/builds/{build_id}/cancel
+Authorization: Bearer <jwt_token>
+```
+
+Cancel behavior:
+
+- marks build as `cancelled`
+- attempts remote process stop on runner
+- releases active runner lease
 
 ---
 

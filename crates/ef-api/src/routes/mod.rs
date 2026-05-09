@@ -6,6 +6,8 @@ pub mod agent;
 pub mod virtual_iot;
 pub mod quantum;
 pub mod discovery;
+pub mod runners;
+pub mod builds;
 
 use axum::{Json, Router, extract::State, http::StatusCode, routing::{get, post, put}};
 use serde::Deserialize;
@@ -13,7 +15,7 @@ use serde_json::{Value, json};
 use utoipa::ToSchema;
 
 use crate::auth::{api_key, jwt};
-use crate::middleware::auth_extractor::{AppState, AuthContext};
+use crate::middleware::auth_extractor::AppState;
 use crate::middleware::error_response::ApiError;
 
 pub fn api_router() -> Router<AppState> {
@@ -71,6 +73,23 @@ pub fn api_router() -> Router<AppState> {
         // Discovery
         .route("/discovery/hosts", get(discovery::list_hosts))
         .route("/discovery/hosts/{id}", get(discovery::get_host).delete(discovery::delete_host))
+        // Runner management
+        .route("/runners", get(runners::list_runners))
+        .route("/runners/register", post(runners::register_runner))
+        .route("/runners/allocate", post(runners::allocate_runner_lease))
+        .route("/runners/{id}", get(runners::get_runner))
+        .route("/runners/{id}/drain", post(runners::drain_runner))
+        .route("/runners/{id}/probe", post(runners::probe_runner))
+        .route("/runners/leases/{id}/release", post(runners::release_runner_lease))
+        // iOS build execution
+        .route("/builds", get(builds::list_builds))
+        .route("/builds/ios", post(builds::submit_ios_build))
+        .route("/builds/iot/deploy", post(builds::submit_iot_deploy))
+        .route("/builds/quantum/run", post(builds::submit_quantum_program))
+        .route("/builds/{id}", get(builds::get_build))
+        .route("/builds/{id}/logs", get(builds::get_build_logs))
+        .route("/builds/{id}/artifacts", get(builds::list_build_artifacts))
+        .route("/builds/{id}/cancel", post(builds::cancel_build))
 }
 
 #[utoipa::path(get, path = "/health", tag = "health",

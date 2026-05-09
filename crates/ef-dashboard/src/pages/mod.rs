@@ -1,4 +1,6 @@
 pub mod admin;
+pub mod builds;
+pub mod development_ide;
 pub mod devices;
 pub mod discovered_hosts;
 pub mod jobs;

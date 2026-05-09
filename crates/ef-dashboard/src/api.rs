@@ -471,6 +471,200 @@ pub struct JobProgress {
     pub queued: usize,
 }
 
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+pub struct BuildListResponse {
+    pub builds: Vec<BuildJob>,
+    pub total: usize,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+    #[serde(default)]
+    pub status_counts: BuildStatusCounts,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+pub struct BuildStatusCounts {
+    pub queued: i64,
+    pub provisioning: i64,
+    pub running: i64,
+    pub succeeded: i64,
+    pub failed: i64,
+    pub cancelled: i64,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+pub struct BuildJob {
+    pub id: String,
+    pub tenant_id: String,
+    pub runner_id: Option<String>,
+    pub device_id: Option<String>,
+    pub build_type: String,
+    pub status: String,
+    pub source_ref: String,
+    pub repository_url: Option<String>,
+    pub git_ref: Option<String>,
+    pub error_message: Option<String>,
+    pub queued_at: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    #[serde(default)]
+    pub runtime: serde_json::Value,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+pub struct BuildDetailResponse {
+    pub build: BuildJob,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+pub struct BuildLogsResponse {
+    pub build_id: String,
+    pub status: String,
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub stdout: String,
+    #[serde(default)]
+    pub stderr: String,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+pub struct BuildArtifact {
+    pub id: String,
+    pub artifact_type: String,
+    pub file_name: String,
+    pub storage_path: String,
+    pub size_bytes: i64,
+    pub checksum_sha256: Option<String>,
+    pub retention_until: Option<String>,
+    #[serde(default)]
+    pub metadata: serde_json::Value,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+pub struct BuildArtifactsResponse {
+    pub build_id: String,
+    pub artifacts: Vec<BuildArtifact>,
+    pub total: usize,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct SubmitIosBuildRequest {
+    pub source_ref: String,
+    pub project_path: String,
+    pub scheme: String,
+    pub configuration: String,
+    pub target_device_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    #[serde(default)]
+    pub required_runner_capabilities: Vec<String>,
+    #[serde(default)]
+    pub required_runner_labels: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lease_ttl_seconds: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ssh_user: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct SubmitIotDeployRequest {
+    pub source_ref: String,
+    pub project_path: String,
+    pub target_device_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub board_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deploy_command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    #[serde(default)]
+    pub required_runner_capabilities: Vec<String>,
+    #[serde(default)]
+    pub required_runner_labels: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lease_ttl_seconds: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ssh_user: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct SubmitQuantumProgramRequest {
+    pub source_ref: String,
+    pub project_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub veeros_host_hint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    #[serde(default)]
+    pub required_runner_capabilities: Vec<String>,
+    #[serde(default)]
+    pub required_runner_labels: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lease_ttl_seconds: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ssh_user: Option<String>,
+}
+
+pub async fn list_builds(
+    limit: i64,
+    offset: i64,
+    status: Option<&str>,
+    device: Option<&str>,
+    source: Option<&str>,
+) -> Result<BuildListResponse, String> {
+    let mut path = format!("/builds?limit={limit}&offset={offset}");
+    if let Some(status) = status {
+        path.push_str("&status=");
+        let encoded = js_sys::encode_uri_component(status);
+        path.push_str(&encoded.as_string().unwrap_or_default());
+    }
+    if let Some(device) = device {
+        path.push_str("&device=");
+        let encoded = js_sys::encode_uri_component(device);
+        path.push_str(&encoded.as_string().unwrap_or_default());
+    }
+    if let Some(source) = source {
+        path.push_str("&source=");
+        let encoded = js_sys::encode_uri_component(source);
+        path.push_str(&encoded.as_string().unwrap_or_default());
+    }
+    get::<BuildListResponse>(&path).await
+}
+
+pub async fn get_build(id: &str) -> Result<BuildDetailResponse, String> {
+    get::<BuildDetailResponse>(&format!("/builds/{id}")).await
+}
+
+pub async fn get_build_logs(id: &str) -> Result<BuildLogsResponse, String> {
+    get::<BuildLogsResponse>(&format!("/builds/{id}/logs")).await
+}
+
+pub async fn get_build_artifacts(id: &str) -> Result<BuildArtifactsResponse, String> {
+    get::<BuildArtifactsResponse>(&format!("/builds/{id}/artifacts")).await
+}
+
+pub async fn submit_ios_build(req: &SubmitIosBuildRequest) -> Result<serde_json::Value, String> {
+    post::<SubmitIosBuildRequest, serde_json::Value>("/builds/ios", req).await
+}
+
+pub async fn submit_iot_deploy(req: &SubmitIotDeployRequest) -> Result<serde_json::Value, String> {
+    post::<SubmitIotDeployRequest, serde_json::Value>("/builds/iot/deploy", req).await
+}
+
+pub async fn submit_quantum_program(req: &SubmitQuantumProgramRequest) -> Result<serde_json::Value, String> {
+    post::<SubmitQuantumProgramRequest, serde_json::Value>("/builds/quantum/run", req).await
+}
+
+pub async fn cancel_build(id: &str) -> Result<(), String> {
+    post_empty(&format!("/builds/{id}/cancel")).await
+}
+
 #[derive(Deserialize, Clone, Debug)]
 pub struct DeviceHealth {
     pub device_id: String,

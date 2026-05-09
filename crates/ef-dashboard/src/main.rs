@@ -13,7 +13,7 @@ use leptos_router::{
 
 use components::sidebar::Sidebar;
 use pages::{
-    admin::AdminPage, devices::DevicesPage, discovered_hosts::DiscoveredHostsPage,
+    admin::AdminPage, builds::BuildsPage, development_ide::DevelopmentIdePage, devices::DevicesPage, discovered_hosts::DiscoveredHostsPage,
     jobs::JobsPage, login::LoginPage, logs::LogsPage,
     overview::OverviewPage, quantum::QuantumPage, quantum_accelerators::QuantumAcceleratorsPage,
     quantum_designer::QuantumDesignerPage, quantum_jobs::QuantumJobsPage,
@@ -53,6 +53,8 @@ fn App() -> impl IntoView {
                 <Route path=path!("/sessions") view=move || view! { <AuthGuard><Shell><SessionsPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/sessions/live") view=move || view! { <AuthGuard><Shell><LiveSessionsPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/jobs") view=move || view! { <AuthGuard><Shell><JobsPage/></Shell></AuthGuard> }/>
+                <Route path=path!("/builds") view=move || view! { <AuthGuard><Shell><BuildsPage/></Shell></AuthGuard> }/>
+                <Route path=path!("/development/ide") view=move || view! { <AuthGuard><Shell><DevelopmentIdePage/></Shell></AuthGuard> }/>
                 <Route path=path!("/virtual-iot/backends") view=move || view! { <AuthGuard><Shell><VirtualIotBackendsPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/logs") view=move || view! { <AuthGuard><Shell><LogsPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/admin") view=move || view! { <AuthGuard><Shell><AdminPage/></Shell></AuthGuard> }/>

@@ -1,0 +1,163 @@
+{
+  "name": "edgefabric-vscode-extension",
+  "displayName": "EdgeFabric",
+  "description": "Build, deploy, and monitor EdgeFabric iOS, IoT, and Quantum workloads from VS Code.",
+  "version": "0.1.4",
+  "publisher": "veeringman",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/veeringman/EdgeFabric.git",
+    "directory": "tools/edgefabric-vscode-extension"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "icon": "resources/extension-icon.png",
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "edgefabric.login",
+        "title": "EdgeFabric: Login"
+      },
+      {
+        "command": "edgefabric.logout",
+        "title": "EdgeFabric: Logout"
+      },
+      {
+        "command": "edgefabric.submitIotDeploy",
+        "title": "EdgeFabric: Submit IoT Build + Deploy"
+      },
+      {
+        "command": "edgefabric.submitIosBuild",
+        "title": "EdgeFabric: Submit iOS Build + Deploy"
+      },
+      {
+        "command": "edgefabric.submitQuantumRun",
+        "title": "EdgeFabric: Submit Quantum Build + Run"
+      },
+      {
+        "command": "edgefabric.createIosStarterProject",
+        "title": "EdgeFabric: Create iOS Starter Project"
+      },
+      {
+        "command": "edgefabric.refreshBuilds",
+        "title": "EdgeFabric: Refresh Builds"
+      },
+      {
+        "command": "edgefabric.viewBuildLogs",
+        "title": "EdgeFabric: View Build Logs"
+      },
+      {
+        "command": "edgefabric.downloadBuildArtifact",
+        "title": "EdgeFabric: Download Build Artifact"
+      },
+      {
+        "command": "edgefabric.downloadAllBuildArtifacts",
+        "title": "EdgeFabric: Download All Build Artifacts"
+      },
+      {
+        "command": "edgefabric.setBuildFilters",
+        "title": "EdgeFabric: Set Build Filters"
+      },
+      {
+        "command": "edgefabric.clearBuildFilters",
+        "title": "EdgeFabric: Clear Build Filters"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "edgefabric",
+          "title": "EdgeFabric",
+          "icon": "resources/edgefabric.svg"
+        }
+      ]
+    },
+    "views": {
+      "edgefabric": [
+        {
+          "id": "edgefabricBuilds",
+          "name": "Builds"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "edgefabric.refreshBuilds",
+          "when": "view == edgefabricBuilds",
+          "group": "navigation"
+        },
+        {
+          "command": "edgefabric.login",
+          "when": "view == edgefabricBuilds",
+          "group": "navigation@2"
+        },
+        {
+          "command": "edgefabric.setBuildFilters",
+          "when": "view == edgefabricBuilds",
+          "group": "navigation@3"
+        },
+        {
+          "command": "edgefabric.clearBuildFilters",
+          "when": "view == edgefabricBuilds",
+          "group": "navigation@4"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "edgefabric.viewBuildLogs",
+          "when": "view == edgefabricBuilds",
+          "group": "inline"
+        },
+        {
+          "command": "edgefabric.downloadBuildArtifact",
+          "when": "view == edgefabricBuilds",
+          "group": "inline@2"
+        },
+        {
+          "command": "edgefabric.downloadAllBuildArtifacts",
+          "when": "view == edgefabricBuilds",
+          "group": "inline@3"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "EdgeFabric",
+      "properties": {
+        "edgefabric.apiBaseUrl": {
+          "type": "string",
+          "default": "http://localhost:6060/api/v1",
+          "description": "Base URL for the EdgeFabric API."
+        },
+        "edgefabric.defaultRegion": {
+          "type": "string",
+          "default": "",
+          "description": "Optional default region for build submissions."
+        },
+        "edgefabric.defaultSshUser": {
+          "type": "string",
+          "default": "",
+          "description": "Default SSH user for build submissions. When empty, EdgeFabric uses the current OS username."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package:vsix": "vsce package -o edgefabric-v${npm_package_version}.vsix",
+    "publish:vsce": "vsce publish"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.2.2",
+    "@types/node": "^20.17.6",
+    "@types/vscode": "^1.95.0",
+    "typescript": "^5.6.3"
+  }
+}

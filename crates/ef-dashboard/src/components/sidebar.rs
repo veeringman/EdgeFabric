@@ -44,6 +44,15 @@ fn NavIcon(name: String) -> impl IntoView {
             </svg>
         }
         .into_any(),
+        "builds" => view! {
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3v6"/>
+                <path d="m8 7 4-4 4 4"/>
+                <rect x="4" y="11" width="16" height="10" rx="2"/>
+                <path d="M8 15h8M8 18h5"/>
+            </svg>
+        }
+        .into_any(),
         "logs" => view! {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M4 4h16v16H4z"/>
@@ -112,6 +121,8 @@ pub fn Sidebar() -> impl IntoView {
                 <A href="/sessions"><span class="nav-icon"><NavIcon name="sessions".to_string()/></span><span>"Sessions"</span></A>
                 <A href="/sessions/live"><span class="nav-icon"><NavIcon name="live".to_string()/></span><span>"Live Viewer"</span></A>
                 <A href="/jobs"><span class="nav-icon"><NavIcon name="jobs".to_string()/></span><span>"Test Jobs"</span></A>
+                <A href="/builds"><span class="nav-icon"><NavIcon name="builds".to_string()/></span><span>"Builds"</span></A>
+                <A href="/development/ide"><span class="nav-icon"><NavIcon name="builds".to_string()/></span><span>"Development IDE"</span></A>
                 <A href="/virtual-iot/new"><span class="nav-icon"><NavIcon name="iot".to_string()/></span><span>"IoT Designer"</span></A>
                 <A href="/virtual-iot/backends"><span class="nav-icon"><NavIcon name="iot".to_string()/></span><span>"IoT Backends"</span></A>
                 <A href="/quantum"><span class="nav-icon"><NavIcon name="quantum".to_string()/></span><span>"Quantum"</span></A>

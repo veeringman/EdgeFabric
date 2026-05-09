@@ -1,8 +1,10 @@
 pub mod agent;
 pub mod audit;
+pub mod build;
 pub mod device;
 pub mod discovered_host;
 pub mod job;
+pub mod runner;
 pub mod session;
 pub mod tenant;
 pub mod virtual_iot;

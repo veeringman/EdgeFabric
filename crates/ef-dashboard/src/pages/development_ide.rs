@@ -7,14 +7,202 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen_futures::JsFuture;
 
 use crate::api::{
-    self, CreateIosStarterProjectRequest, Device, DeviceListResponse, SubmitIosBuildRequest,
-    SubmitIotDeployRequest, SubmitQuantumProgramRequest,
+    self, CreateIosStarterProjectRequest, Device, SaveWorkspaceProjectRequest,
+    SubmitIosBuildRequest, SubmitIotDeployRequest, SubmitQuantumProgramRequest,
     WorkspaceArchiveExportRequest, WorkspaceArchiveImportRequest, WorkspaceProjectFile,
+    WorkspaceProjectSummary,
 };
 
 use super::walk_directory::process_dropped_files;
 
 const DEFAULT_WORKSPACE_PATH: &str = "/Users/vijay/rnd/projects/workspace";
+
+const NAV_MIN_WIDTH: i32 = 220;
+const NAV_MAX_WIDTH: i32 = 420;
+const ACTIONS_MIN_WIDTH: i32 = 260;
+const ACTIONS_MAX_WIDTH: i32 = 520;
+    const TERMINAL_MIN_HEIGHT: i32 = 180;
+    const TERMINAL_MAX_HEIGHT: i32 = 420;
+    const BUILD_RESULTS_MIN_HEIGHT: i32 = 150;
+    const BUILD_RESULTS_MAX_HEIGHT: i32 = 360;
+
+fn detect_editor_language(path: &str) -> &'static str {
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".swift") {
+        "swift"
+    } else if lower.ends_with(".py") {
+        "python"
+    } else if lower.ends_with(".rs") {
+        "rust"
+    } else if lower.ends_with(".c") || lower.ends_with(".h") || lower.ends_with(".cpp") || lower.ends_with(".cc") || lower.ends_with(".cxx") || lower.ends_with(".hpp") || lower.ends_with(".hh") || lower.ends_with(".hxx") {
+        "cpp"
+    } else {
+        "plain"
+    }
+}
+
+fn editor_language_label(lang: &str) -> &'static str {
+    match lang {
+        "swift" => "Swift / SwiftUI",
+        "python" => "Python",
+        "cpp" => "C / C++",
+        "rust" => "Rust",
+        _ => "Plain Text",
+    }
+}
+
+fn escape_html(text: &str) -> String {
+    text
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+fn lang_keywords(lang: &str) -> &'static [&'static str] {
+    match lang {
+        "swift" => &[
+            "class", "struct", "enum", "protocol", "extension", "func", "let", "var", "if", "else", "guard", "switch", "case", "for", "while", "return", "import", "public", "private", "internal", "fileprivate", "open", "static", "mutating", "nonmutating", "init", "deinit", "async", "await", "try", "catch", "throw", "throws", "inout", "where", "some", "any", "Self", "self", "nil", "true", "false",
+        ],
+        "python" => &[
+            "def", "class", "if", "elif", "else", "for", "while", "return", "import", "from", "as", "try", "except", "finally", "raise", "with", "lambda", "pass", "break", "continue", "yield", "async", "await", "global", "nonlocal", "None", "True", "False", "and", "or", "not", "in", "is",
+        ],
+        "cpp" => &[
+            "int", "float", "double", "char", "bool", "void", "class", "struct", "enum", "template", "typename", "namespace", "using", "include", "if", "else", "switch", "case", "for", "while", "do", "return", "break", "continue", "const", "constexpr", "static", "inline", "virtual", "public", "private", "protected", "new", "delete", "this", "nullptr", "true", "false", "auto", "extern",
+        ],
+        "rust" => &[
+            "fn", "let", "mut", "const", "static", "struct", "enum", "trait", "impl", "for", "in", "if", "else", "match", "while", "loop", "return", "break", "continue", "pub", "crate", "mod", "use", "where", "async", "await", "move", "ref", "self", "Self", "dyn", "unsafe", "as", "true", "false",
+        ],
+        _ => &[],
+    }
+}
+
+fn lang_types(lang: &str) -> &'static [&'static str] {
+    match lang {
+        "swift" => &["String", "Int", "Double", "Float", "Bool", "Array", "Dictionary", "Set", "View", "Text", "VStack", "HStack", "ZStack", "NavigationStack"],
+        "python" => &["str", "int", "float", "bool", "list", "dict", "set", "tuple", "object"],
+        "cpp" => &["std", "string", "vector", "map", "set", "size_t"],
+        "rust" => &["String", "str", "Vec", "Option", "Result", "Self"],
+        _ => &[],
+    }
+}
+
+fn is_ident_start(ch: char) -> bool {
+    ch == '_' || ch.is_ascii_alphabetic()
+}
+
+fn is_ident_continue(ch: char) -> bool {
+    ch == '_' || ch.is_ascii_alphanumeric()
+}
+
+fn highlight_code_html(lang: &str, code: &str) -> String {
+    let keywords = lang_keywords(lang);
+    let types = lang_types(lang);
+    let mut out = String::with_capacity(code.len() + 64);
+    for line in code.lines() {
+        let chars: Vec<char> = line.chars().collect();
+        let mut i = 0usize;
+        while i < chars.len() {
+            let ch = chars[i];
+
+            let is_hash_comment = lang == "python" && ch == '#';
+            let is_slash_comment = i + 1 < chars.len() && chars[i] == '/' && chars[i + 1] == '/';
+            if is_hash_comment || is_slash_comment {
+                let comment: String = chars[i..].iter().collect();
+                out.push_str("<span class=\"tok-comment\">");
+                out.push_str(&escape_html(&comment));
+                out.push_str("</span>");
+                i = chars.len();
+                continue;
+            }
+
+            if i + 1 < chars.len() && chars[i] == '/' && chars[i + 1] == '*' {
+                let mut j = i + 2;
+                while j + 1 < chars.len() {
+                    if chars[j] == '*' && chars[j + 1] == '/' {
+                        j += 2;
+                        break;
+                    }
+                    j += 1;
+                }
+                let token: String = chars[i..j.min(chars.len())].iter().collect();
+                out.push_str("<span class=\"tok-comment\">");
+                out.push_str(&escape_html(&token));
+                out.push_str("</span>");
+                i = j.min(chars.len());
+                continue;
+            }
+
+            if ch == '"' || ch == '\'' {
+                let quote = ch;
+                let mut j = i + 1;
+                while j < chars.len() {
+                    if chars[j] == '\\' {
+                        j += 2;
+                        continue;
+                    }
+                    if chars[j] == quote {
+                        j += 1;
+                        break;
+                    }
+                    j += 1;
+                }
+                let token: String = chars[i..j.min(chars.len())].iter().collect();
+                out.push_str("<span class=\"tok-string\">");
+                out.push_str(&escape_html(&token));
+                out.push_str("</span>");
+                i = j.min(chars.len());
+                continue;
+            }
+
+            if ch.is_ascii_digit() {
+                let mut j = i + 1;
+                while j < chars.len() && (chars[j].is_ascii_digit() || chars[j] == '.' || chars[j] == '_') {
+                    j += 1;
+                }
+                let token: String = chars[i..j].iter().collect();
+                out.push_str("<span class=\"tok-number\">");
+                out.push_str(&escape_html(&token));
+                out.push_str("</span>");
+                i = j;
+                continue;
+            }
+
+            if is_ident_start(ch) {
+                let mut j = i + 1;
+                while j < chars.len() && is_ident_continue(chars[j]) {
+                    j += 1;
+                }
+                let token: String = chars[i..j].iter().collect();
+                if keywords.contains(&token.as_str()) {
+                    out.push_str("<span class=\"tok-keyword\">");
+                    out.push_str(&escape_html(&token));
+                    out.push_str("</span>");
+                } else if types.contains(&token.as_str()) {
+                    out.push_str("<span class=\"tok-type\">");
+                    out.push_str(&escape_html(&token));
+                    out.push_str("</span>");
+                } else {
+                    out.push_str(&escape_html(&token));
+                }
+                i = j;
+                continue;
+            }
+
+            if "{}[]();:,.<>+-=*/!&|%^~?".contains(ch) {
+                out.push_str("<span class=\"tok-op\">");
+                out.push_str(&escape_html(&ch.to_string()));
+                out.push_str("</span>");
+                i += 1;
+                continue;
+            }
+
+            out.push_str(&escape_html(&ch.to_string()));
+            i += 1;
+        }
+        out.push('\n');
+    }
+    out
+}
 
 #[component]
 pub fn DevelopmentIdePage() -> impl IntoView {
@@ -47,6 +235,10 @@ pub fn DevelopmentIdePage() -> impl IntoView {
     let (last_response, set_last_response) = signal(String::new());
     let (ide_fullscreen, set_ide_fullscreen) = signal(false);
     let (workspace_expanded, set_workspace_expanded) = signal(false);
+    let (navigator_visible, set_navigator_visible) = signal(true);
+    let (actions_visible, set_actions_visible) = signal(true);
+    let (navigator_width, set_navigator_width) = signal(280i32);
+    let (actions_width, set_actions_width) = signal(320i32);
 
     // Fetch all devices once on load for device-selection dropdowns
     let devices_resource = LocalResource::new(|| async move {
@@ -69,8 +261,77 @@ pub fn DevelopmentIdePage() -> impl IntoView {
     let (workspace_files, set_workspace_files) = signal(Vec::<WorkspaceProjectFile>::new());
     let (workspace_active_path, set_workspace_active_path) = signal(String::new());
     let (workspace_new_path, set_workspace_new_path) = signal(String::new());
+    let (workspace_context_path, set_workspace_context_path) = signal(String::new());
+    let (expanded_folders, set_expanded_folders) = signal(Vec::<String>::new());
+    let (editor_language_mode, set_editor_language_mode) = signal("auto".to_string());
+    let (editor_theme, set_editor_theme) = signal("edge".to_string());
+
+    // Server-persisted workspace projects ("Save Project" feature)
+    let (saved_project_name, set_saved_project_name) = signal(String::new());
+    let (saved_projects, set_saved_projects) = signal(Vec::<WorkspaceProjectSummary>::new());
+    let (saved_projects_visible, set_saved_projects_visible) = signal(false);
+
+    let active_editor_language = Memo::new(move |_| {
+        let mode = editor_language_mode.get();
+        if mode != "auto" {
+            return mode;
+        }
+        let active_path = workspace_active_path.get();
+        if !active_path.is_empty() {
+            return detect_editor_language(&active_path).to_string();
+        }
+        detect_editor_language(&source_file_name.get()).to_string()
+    });
+
+    let active_workspace_content = Memo::new(move |_| {
+        let active = workspace_active_path.get();
+        workspace_files
+            .get()
+            .into_iter()
+            .find(|f| f.path == active)
+            .map(|f| f.content)
+            .unwrap_or_default()
+    });
+
+    let highlighted_workspace_content = Memo::new(move |_| {
+        highlight_code_html(&active_editor_language.get(), &active_workspace_content.get())
+    });
+
+    let workspace_grid_style = Memo::new(move |_| {
+        if workspace_expanded.get() {
+            "display:flex; gap:0.75rem; align-items:stretch; min-width:0;".to_string()
+        } else {
+            match (navigator_visible.get(), actions_visible.get()) {
+                (true, true) => format!(
+                    "display:grid; grid-template-columns: minmax({nav_min}px, {nav}px) minmax(0, 1fr) minmax({actions_min}px, {actions}px); gap:1rem;",
+                    nav_min = NAV_MIN_WIDTH,
+                    nav = navigator_width.get(),
+                    actions_min = ACTIONS_MIN_WIDTH,
+                    actions = actions_width.get(),
+                ),
+                (true, false) => format!(
+                    "display:grid; grid-template-columns: minmax({nav_min}px, {nav}px) minmax(0, 1fr); gap:1rem;",
+                    nav_min = NAV_MIN_WIDTH,
+                    nav = navigator_width.get(),
+                ),
+                (false, true) => format!(
+                    "display:grid; grid-template-columns: minmax(0, 1fr) minmax({actions_min}px, {actions}px); gap:1rem;",
+                    actions_min = ACTIONS_MIN_WIDTH,
+                    actions = actions_width.get(),
+                ),
+                (false, false) => "display:grid; grid-template-columns: minmax(0, 1fr); gap:1rem;".to_string(),
+            }
+        }
+    });
+
+    let highlight_scroll_ref = NodeRef::<leptos::html::Pre>::new();
 
     let (terminal_visible, set_terminal_visible) = signal(false);
+    let (terminal_nonce, set_terminal_nonce) = signal(0u64);
+    let (terminal_height, set_terminal_height) = signal(260i32);
+    let (build_results_visible, set_build_results_visible) = signal(false);
+    let (build_results, _set_build_results) = signal(String::new());
+    let (build_results_height, set_build_results_height) = signal(200i32);
     let (terminal_host, set_terminal_host) = signal("127.0.0.1".to_string());
     let (terminal_port, set_terminal_port) = signal("22".to_string());
     let (terminal_agent_id, set_terminal_agent_id) = signal(String::new());
@@ -329,10 +590,33 @@ pub fn DevelopmentIdePage() -> impl IntoView {
         set_message.set(Some(format!("Downloaded source file: {filename}")));
     };
 
+    let resolve_workspace_target_path = move |raw_path: &str| -> String {
+        let input = raw_path.trim().trim_start_matches('/').to_string();
+        if input.is_empty() {
+            return String::new();
+        }
+        let context = workspace_context_path
+            .get_untracked()
+            .trim()
+            .trim_matches('/')
+            .to_string();
+        if context.is_empty() {
+            input
+        } else if input == context || input.starts_with(&(context.clone() + "/")) {
+            input
+        } else {
+            format!("{context}/{input}")
+        }
+    };
+
     let add_workspace_file = move |_| {
-        let path = workspace_new_path.get_untracked().trim().to_string();
+        let path = resolve_workspace_target_path(&workspace_new_path.get_untracked());
         if path.is_empty() {
             set_message.set(Some("Provide a file path before adding it to the workspace.".to_string()));
+            return;
+        }
+        if path.ends_with('/') {
+            set_message.set(Some("Folder paths should be created with the New Folder action.".to_string()));
             return;
         }
 
@@ -357,10 +641,228 @@ pub fn DevelopmentIdePage() -> impl IntoView {
         }
     };
 
+    let add_workspace_folder = move |_| {
+        let folder = resolve_workspace_target_path(&workspace_new_path.get_untracked())
+            .trim_matches('/')
+            .to_string();
+        if folder.is_empty() {
+            set_message.set(Some("Enter a folder name before creating it.".to_string()));
+            return;
+        }
+
+        let folder_prefix = format!("{folder}/");
+        let marker_path = format!("{folder}/.gitkeep");
+        let mut created = false;
+        set_workspace_files.update(|files| {
+            if files
+                .iter()
+                .any(|f| f.path == marker_path || f.path.starts_with(&folder_prefix))
+            {
+                return;
+            }
+            files.push(WorkspaceProjectFile {
+                path: marker_path.clone(),
+                content: String::new(),
+            });
+            created = true;
+        });
+
+        if created {
+            set_workspace_new_path.set(String::new());
+            set_message.set(Some(format!("Created workspace folder: {folder}")));
+        } else {
+            set_message.set(Some(format!("Folder already exists in workspace: {folder}")));
+        }
+    };
+
     let remove_workspace_file = move |path: String| {
-        set_workspace_files.update(|files| files.retain(|f| f.path != path));
-        if workspace_active_path.get_untracked() == path {
-            set_workspace_active_path.set(String::new());
+        let is_folder_marker = path.ends_with("/.gitkeep");
+        let label = if is_folder_marker {
+            path.trim_end_matches("/.gitkeep")
+        } else {
+            path.as_str()
+        };
+
+        let confirm_msg = if is_folder_marker {
+            format!("Delete folder '{label}' and all files inside it?")
+        } else {
+            format!("Delete file '{label}'?")
+        };
+
+        let confirmed = web_sys::window()
+            .and_then(|w| w.confirm_with_message(&confirm_msg).ok())
+            .unwrap_or(false);
+        if !confirmed {
+            return;
+        }
+
+        if is_folder_marker {
+            let folder_prefix = format!("{label}/");
+            set_workspace_files.update(|files| {
+                files.retain(|f| !f.path.starts_with(&folder_prefix));
+            });
+
+            let active = workspace_active_path.get_untracked();
+            if active.starts_with(&folder_prefix) {
+                set_workspace_active_path.set(String::new());
+            }
+            let context = workspace_context_path.get_untracked();
+            if context == label || context.starts_with(&folder_prefix) {
+                set_workspace_context_path.set(String::new());
+            }
+            set_message.set(Some(format!("Deleted folder: {label}")));
+        } else {
+            set_workspace_files.update(|files| files.retain(|f| f.path != path));
+            if workspace_active_path.get_untracked() == path {
+                set_workspace_active_path.set(String::new());
+            }
+            set_message.set(Some(format!("Deleted file: {label}")));
+        }
+    };
+
+    let rename_workspace_entry = move |path: String| {
+        let is_folder_marker = path.ends_with("/.gitkeep");
+        let current_label = if is_folder_marker {
+            path.trim_end_matches("/.gitkeep").to_string()
+        } else {
+            path.clone()
+        };
+
+        let default_value = if is_folder_marker {
+            current_label
+                .rsplit('/')
+                .next()
+                .unwrap_or(&current_label)
+                .to_string()
+        } else {
+            current_label
+                .rsplit('/')
+                .next()
+                .unwrap_or(&current_label)
+                .to_string()
+        };
+
+        let prompt_msg = if is_folder_marker {
+            "Rename folder to"
+        } else {
+            "Rename file to"
+        };
+
+        let Some(window) = web_sys::window() else {
+            set_message.set(Some("Window unavailable for rename prompt.".to_string()));
+            return;
+        };
+        let Ok(next_value) = window.prompt_with_message_and_default(prompt_msg, &default_value) else {
+            return;
+        };
+        let Some(next_value) = next_value else {
+            return;
+        };
+
+        let entered = next_value.trim().trim_matches('/').to_string();
+        if entered.is_empty() {
+            set_message.set(Some("Rename target cannot be empty.".to_string()));
+            return;
+        }
+
+        if is_folder_marker {
+            let old_folder = current_label;
+            let old_prefix = format!("{old_folder}/");
+            let parent_prefix = old_folder
+                .rsplit_once('/')
+                .map(|(parent, _)| format!("{parent}/"))
+                .unwrap_or_default();
+            let new_folder = if entered.contains('/') {
+                entered
+            } else {
+                format!("{parent_prefix}{entered}").trim_matches('/').to_string()
+            };
+            if new_folder == old_folder {
+                return;
+            }
+            let new_prefix = format!("{new_folder}/");
+
+            let files_snapshot = workspace_files.get_untracked();
+            let mut has_conflict = false;
+            for file in &files_snapshot {
+                if !file.path.starts_with(&old_prefix) {
+                    continue;
+                }
+                let suffix = file.path.trim_start_matches(&old_prefix);
+                let candidate = format!("{new_prefix}{suffix}");
+                if files_snapshot
+                    .iter()
+                    .any(|existing| existing.path == candidate && !existing.path.starts_with(&old_prefix))
+                {
+                    has_conflict = true;
+                    break;
+                }
+            }
+            if has_conflict {
+                set_message.set(Some(format!("Cannot rename folder; destination already exists: {new_folder}")));
+                return;
+            }
+
+            set_workspace_files.update(|files| {
+                for file in files.iter_mut() {
+                    if file.path.starts_with(&old_prefix) {
+                        let suffix = file.path.trim_start_matches(&old_prefix);
+                        file.path = format!("{new_prefix}{suffix}");
+                    }
+                }
+            });
+
+            let active = workspace_active_path.get_untracked();
+            if active.starts_with(&old_prefix) {
+                let suffix = active.trim_start_matches(&old_prefix);
+                set_workspace_active_path.set(format!("{new_prefix}{suffix}"));
+            }
+            let context = workspace_context_path.get_untracked();
+            if context == old_folder {
+                set_workspace_context_path.set(new_folder.clone());
+            } else if context.starts_with(&old_prefix) {
+                let suffix = context.trim_start_matches(&old_prefix);
+                set_workspace_context_path.set(format!("{new_prefix}{suffix}").trim_end_matches('/').to_string());
+            }
+            set_message.set(Some(format!("Renamed folder to: {new_folder}")));
+        } else {
+            let old_file = path;
+            let parent_prefix = old_file
+                .rsplit_once('/')
+                .map(|(parent, _)| format!("{parent}/"))
+                .unwrap_or_default();
+            let new_file = if entered.contains('/') {
+                entered
+            } else {
+                format!("{parent_prefix}{entered}").trim_matches('/').to_string()
+            };
+
+            if new_file.ends_with('/') {
+                set_message.set(Some("File rename target cannot end with '/'".to_string()));
+                return;
+            }
+            if new_file == old_file {
+                return;
+            }
+            if workspace_files
+                .get_untracked()
+                .iter()
+                .any(|file| file.path == new_file)
+            {
+                set_message.set(Some(format!("File already exists: {new_file}")));
+                return;
+            }
+
+            set_workspace_files.update(|files| {
+                if let Some(file) = files.iter_mut().find(|f| f.path == old_file) {
+                    file.path = new_file.clone();
+                }
+            });
+
+            if workspace_active_path.get_untracked() == old_file {
+                set_workspace_active_path.set(new_file.clone());
+            }
+            set_message.set(Some(format!("Renamed file to: {new_file}")));
         }
     };
 
@@ -608,6 +1110,165 @@ pub fn DevelopmentIdePage() -> impl IntoView {
         set_message.set(Some("Active workspace file loaded into source editor.".to_string()));
     };
 
+    // Refresh the list of saved projects from the server.
+    let refresh_saved_projects = move || {
+        leptos::task::spawn_local(async move {
+            match api::list_workspace_projects().await {
+                Ok(resp) => set_saved_projects.set(resp.projects),
+                Err(err) => set_message.set(Some(format!(
+                    "Failed to load saved projects: {err}"
+                ))),
+            }
+        });
+    };
+
+    // Save the current workspace to the server, prompting for a name when
+    // none has been set yet.
+    let save_project_to_server = move |_| {
+        let files = workspace_files.get_untracked();
+        if files.is_empty() {
+            set_message.set(Some(
+                "Workspace is empty. Add files before saving.".to_string(),
+            ));
+            return;
+        }
+
+        let mut name = saved_project_name.get_untracked().trim().to_string();
+        if name.is_empty() {
+            if let Some(window) = web_sys::window() {
+                if let Ok(Some(value)) = window
+                    .prompt_with_message_and_default(
+                        "Save project as:",
+                        "my-workspace",
+                    )
+                {
+                    name = value.trim().to_string();
+                }
+            }
+        }
+        if name.is_empty() {
+            set_message.set(Some(
+                "Save cancelled — project name is required.".to_string(),
+            ));
+            return;
+        }
+        set_saved_project_name.set(name.clone());
+
+        let req = SaveWorkspaceProjectRequest {
+            name: name.clone(),
+            files,
+        };
+
+        leptos::task::spawn_local(async move {
+            match api::save_workspace_project(&req).await {
+                Ok(resp) => {
+                    set_message.set(Some(format!(
+                        "✅ Saved project '{}' ({} file(s)) to server.",
+                        resp.name, resp.file_count
+                    )));
+                    // Refresh list so the dropdown shows the new entry.
+                    match api::list_workspace_projects().await {
+                        Ok(list) => set_saved_projects.set(list.projects),
+                        Err(_) => {}
+                    }
+                }
+                Err(err) => {
+                    set_message.set(Some(format!("Save project failed: {err}")));
+                }
+            }
+        });
+    };
+
+    // Load the named project from the server into the workspace, replacing
+    // the current files.
+    let load_project_from_server = move |project_name: String| {
+        let project_name = project_name.trim().to_string();
+        if project_name.is_empty() {
+            set_message.set(Some("Select a saved project to load.".to_string()));
+            return;
+        }
+        if !workspace_files.get_untracked().is_empty() {
+            if let Some(window) = web_sys::window() {
+                let proceed = window
+                    .confirm_with_message(
+                        "Loading replaces the current workspace files. Continue?",
+                    )
+                    .unwrap_or(false);
+                if !proceed {
+                    return;
+                }
+            }
+        }
+
+        leptos::task::spawn_local(async move {
+            match api::get_workspace_project(&project_name).await {
+                Ok(detail) => {
+                    let count = detail.files.len();
+                    let first_path = detail.files.first().map(|f| f.path.clone());
+                    set_workspace_files.set(detail.files);
+                    if let Some(p) = first_path {
+                        set_workspace_active_path.set(p);
+                    } else {
+                        set_workspace_active_path.set(String::new());
+                    }
+                    set_saved_project_name.set(detail.name.clone());
+                    set_message.set(Some(format!(
+                        "📥 Loaded project '{}' ({count} file(s)) from server.",
+                        detail.name
+                    )));
+                }
+                Err(err) => {
+                    set_message.set(Some(format!("Load project failed: {err}")));
+                }
+            }
+        });
+    };
+
+    let delete_saved_project = move |project_name: String| {
+        let project_name = project_name.trim().to_string();
+        if project_name.is_empty() {
+            return;
+        }
+        if let Some(window) = web_sys::window() {
+            let proceed = window
+                .confirm_with_message(&format!(
+                    "Delete saved project '{project_name}' from server?"
+                ))
+                .unwrap_or(false);
+            if !proceed {
+                return;
+            }
+        }
+
+        leptos::task::spawn_local(async move {
+            match api::delete_workspace_project(&project_name).await {
+                Ok(()) => {
+                    set_message.set(Some(format!(
+                        "🗑 Deleted saved project '{project_name}'."
+                    )));
+                    if saved_project_name.get_untracked() == project_name {
+                        set_saved_project_name.set(String::new());
+                    }
+                    match api::list_workspace_projects().await {
+                        Ok(list) => set_saved_projects.set(list.projects),
+                        Err(_) => {}
+                    }
+                }
+                Err(err) => {
+                    set_message.set(Some(format!("Delete project failed: {err}")));
+                }
+            }
+        });
+    };
+
+    // Auto-load the saved project list once on mount.
+    Effect::new(move |prev: Option<bool>| {
+        if prev.is_none() {
+            refresh_saved_projects();
+        }
+        true
+    });
+
     let create_starter_project = move |download_after_create: bool| {
         set_starter_running.set(true);
         set_starter_message.set(None);
@@ -728,11 +1389,123 @@ pub fn DevelopmentIdePage() -> impl IntoView {
         };
 
         set_terminal_ws_path.set(ws_path);
+        set_workspace_expanded.set(true);
+        set_terminal_nonce.update(|v| *v = v.saturating_add(1));
         set_terminal_visible.set(true);
     };
 
     let close_terminal_panel = move |_| {
         set_terminal_visible.set(false);
+    };
+
+    let terminate_terminal_panel = move |_| {
+        set_terminal_visible.set(false);
+        set_terminal_nonce.update(|v| *v = v.saturating_add(1));
+    };
+
+    let sync_editor_overlay_scroll = move |ev: leptos::ev::Event| {
+        let Some(target) = ev.target() else { return; };
+        let Ok(textarea) = target.dyn_into::<web_sys::HtmlElement>() else {
+            return;
+        };
+        let Some(pre) = highlight_scroll_ref.get() else {
+            return;
+        };
+        pre.set_scroll_top(textarea.scroll_top());
+        pre.set_scroll_left(textarea.scroll_left());
+    };
+
+    let reset_workspace_layout = move |_| {
+        set_navigator_visible.set(true);
+        set_actions_visible.set(true);
+        set_navigator_width.set(280);
+        set_actions_width.set(320);
+        set_terminal_height.set(260);
+        set_build_results_height.set(200);
+    };
+
+    let close_navigator_pane = move |_| set_navigator_visible.set(false);
+    let close_actions_pane = move |_| set_actions_visible.set(false);
+
+    let start_pane_resize = move |pane: &'static str, ev: leptos::ev::PointerEvent| {
+        let Some(window) = web_sys::window() else { return; };
+        let Some(document) = window.document() else { return; };
+
+        let start_x = ev.client_x();
+        let start_nav = navigator_width.get_untracked();
+        let start_actions = actions_width.get_untracked();
+        let document_for_up = document.clone();
+
+        let move_handler = Closure::wrap(Box::new(move |event: web_sys::PointerEvent| {
+            let dx = event.client_x() - start_x;
+            if pane == "navigator" {
+                let next = (start_nav + dx).clamp(NAV_MIN_WIDTH, NAV_MAX_WIDTH);
+                set_navigator_width.set(next);
+            } else {
+                let next = (start_actions - dx).clamp(ACTIONS_MIN_WIDTH, ACTIONS_MAX_WIDTH);
+                set_actions_width.set(next);
+            }
+        }) as Box<dyn FnMut(_)>);
+
+        let up_handler = Closure::wrap(Box::new(move |_event: web_sys::PointerEvent| {
+            document_for_up.set_onpointermove(None);
+            document_for_up.set_onpointerup(None);
+        }) as Box<dyn FnMut(_)>);
+
+        document.set_onpointermove(Some(move_handler.as_ref().unchecked_ref()));
+        document.set_onpointerup(Some(up_handler.as_ref().unchecked_ref()));
+        move_handler.forget();
+        up_handler.forget();
+    };
+
+    let start_terminal_resize = move |ev: leptos::ev::PointerEvent| {
+        let Some(window) = web_sys::window() else { return; };
+        let Some(document) = window.document() else { return; };
+
+        let start_y = ev.client_y();
+        let start_height = terminal_height.get_untracked();
+        let document_for_up = document.clone();
+
+        let move_handler = Closure::wrap(Box::new(move |event: web_sys::PointerEvent| {
+            let dy = start_y - event.client_y();
+            let next = (start_height + dy).clamp(TERMINAL_MIN_HEIGHT, TERMINAL_MAX_HEIGHT);
+            set_terminal_height.set(next);
+        }) as Box<dyn FnMut(_)>);
+
+        let up_handler = Closure::wrap(Box::new(move |_event: web_sys::PointerEvent| {
+            document_for_up.set_onpointermove(None);
+            document_for_up.set_onpointerup(None);
+        }) as Box<dyn FnMut(_)>);
+
+        document.set_onpointermove(Some(move_handler.as_ref().unchecked_ref()));
+        document.set_onpointerup(Some(up_handler.as_ref().unchecked_ref()));
+        move_handler.forget();
+        up_handler.forget();
+    };
+
+    let start_build_results_resize = move |ev: leptos::ev::PointerEvent| {
+        let Some(window) = web_sys::window() else { return; };
+        let Some(document) = window.document() else { return; };
+
+        let start_y = ev.client_y();
+        let start_height = build_results_height.get_untracked();
+        let document_for_up = document.clone();
+
+        let move_handler = Closure::wrap(Box::new(move |event: web_sys::PointerEvent| {
+            let dy = start_y - event.client_y();
+            let next = (start_height + dy).clamp(BUILD_RESULTS_MIN_HEIGHT, BUILD_RESULTS_MAX_HEIGHT);
+            set_build_results_height.set(next);
+        }) as Box<dyn FnMut(_)>);
+
+        let up_handler = Closure::wrap(Box::new(move |_event: web_sys::PointerEvent| {
+            document_for_up.set_onpointermove(None);
+            document_for_up.set_onpointerup(None);
+        }) as Box<dyn FnMut(_)>);
+
+        document.set_onpointermove(Some(move_handler.as_ref().unchecked_ref()));
+        document.set_onpointerup(Some(up_handler.as_ref().unchecked_ref()));
+        move_handler.forget();
+        up_handler.forget();
     };
 
     let open_platform_starter = move |target_platform: &'static str| {
@@ -812,7 +1585,73 @@ pub fn DevelopmentIdePage() -> impl IntoView {
                     </button>
                 </Show>
 
-                <form on:submit=submit class="ide-grid" class:ide-workspace-expanded=workspace_expanded>
+                <Show when=move || workspace_expanded.get()>
+                    <div class="ide-ws-palette">
+                        <div class="ide-ws-palette-group">
+                            <button class="ide-ws-icon-btn" type="button" title="Exit Workspace" on:click=move |_| set_workspace_expanded.set(false)>
+                                <span class="ide-ws-icon">"⤺"</span>
+                            </button>
+                            <button class="ide-ws-icon-btn" type="button" title="Reset Layout" on:click=reset_workspace_layout>
+                                <span class="ide-ws-icon">"↺"</span>
+                            </button>
+                            <div class="ide-ws-tab-strip">
+                                <button
+                                    class="ide-ws-tab"
+                                    class:active=move || navigator_visible.get()
+                                    type="button"
+                                    title="Navigator pane"
+                                    on:click=move |_| set_navigator_visible.set(true)
+                                >
+                                    <span class="ide-ws-tab-icon">"▣"</span>
+                                    <span class="ide-ws-tab-text">"Navigator"</span>
+                                </button>
+                                <button
+                                    class="ide-ws-tab"
+                                    class:active=move || true
+                                    type="button"
+                                    title="Editor pane"
+                                >
+                                    <span class="ide-ws-tab-icon">"✎"</span>
+                                    <span class="ide-ws-tab-text">"Editor"</span>
+                                </button>
+                                <button
+                                    class="ide-ws-tab"
+                                    class:active=move || actions_visible.get()
+                                    type="button"
+                                    title="Actions pane"
+                                    on:click=move |_| set_actions_visible.set(true)
+                                >
+                                    <span class="ide-ws-tab-icon">"⚙"</span>
+                                    <span class="ide-ws-tab-text">"Actions"</span>
+                                </button>
+                                <button
+                                    class="ide-ws-tab"
+                                    class:active=move || terminal_visible.get()
+                                    type="button"
+                                    title="Terminal pane"
+                                    on:click=move |_| set_terminal_visible.set(true)
+                                >
+                                    <span class="ide-ws-tab-icon">"⌘"</span>
+                                    <span class="ide-ws-tab-text">"Terminal"</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="ide-ws-palette-group ide-ws-palette-right">
+                            <span class="ide-ws-palette-hint">"Quick Restore"</span>
+                            <button class="ide-ws-icon-btn" type="button" title={move || if navigator_visible.get() { "Navigator visible" } else { "Show Navigator" }} on:click=move |_| set_navigator_visible.set(true)>
+                                <span class="ide-ws-icon">"🗂"</span>
+                            </button>
+                            <button class="ide-ws-icon-btn" type="button" title={move || if actions_visible.get() { "Actions visible" } else { "Show Actions" }} on:click=move |_| set_actions_visible.set(true)>
+                                <span class="ide-ws-icon">"⚙"</span>
+                            </button>
+                            <button class="ide-ws-icon-btn" type="button" title={move || if terminal_visible.get() { "Terminal visible" } else { "Show Terminal" }} on:click=move |_| set_terminal_visible.set(true)>
+                                <span class="ide-ws-icon">"⌘"</span>
+                            </button>
+                        </div>
+                    </div>
+                </Show>
+
+                <form on:submit=submit class="ide-grid" class:ide-workspace-expanded=workspace_expanded style=move || workspace_grid_style.get()>
                     // ── LEFT: Project config (hidden in expanded workspace mode) ──────
                     <Show when=move || !workspace_expanded.get()>
                         <section class="ide-panel">
@@ -975,78 +1814,360 @@ pub fn DevelopmentIdePage() -> impl IntoView {
 
                     // ── EXPANDED WORKSPACE: Full-pane file navigator + editor ─────────
                     <Show when=move || workspace_expanded.get()>
-                        <section class="ide-panel ide-ws-navigator">
-                            <div class="ide-ws-nav-header">
-                                <span class="ide-ws-nav-title">"Navigator"</span>
-                                <button
-                                    class="ide-ws-collapse-btn"
-                                    type="button"
-                                    title="Exit workspace view"
-                                    on:click=move |_| set_workspace_expanded.set(false)
-                                >"✕"</button>
-                            </div>
-                            <div class="upload-row ide-ws-toolbar">
-                                <label class="field" style="flex:1; margin:0">
-                                    <input
-                                        type="text"
-                                        placeholder="src/main.rs"
-                                        prop:value=workspace_new_path
-                                        on:input=move |ev| set_workspace_new_path.set(event_target_value(&ev))
-                                    />
-                                </label>
-                                <button class="btn btn-ghost" type="button" on:click=add_workspace_file title="Add file">"+File"</button>
-                                <input type="file" multiple on:change=upload_workspace_files/>
-                                <input type="file" accept=".zip,application/zip" on:change=import_workspace_zip/>
-                            </div>
-                            <div
-                                class="ide-ws-file-tree"
-                                on:drop=handle_workspace_drop
-                                on:dragover=handle_workspace_dragover
-                            >
-                                <For
-                                    each=move || workspace_files.get()
-                                    key=|file| file.path.clone()
-                                    children=move |file| {
-                                        let file_path = file.path.clone();
-                                        view! {
-                                            <div class="ide-ws-file-row">
-                                                <span class="ide-ws-file-icon">"📄"</span>
+                        <Show when=move || navigator_visible.get()>
+                            <>
+                                <section class="ide-panel ide-ws-navigator" style=move || format!("flex:0 0 {}px; min-width:{}px; max-width:{}px;", navigator_width.get(), NAV_MIN_WIDTH, NAV_MAX_WIDTH)>
+                                    <div class="ide-ws-nav-header">
+                                        <span class="ide-ws-nav-title">"Navigator"</span>
+                                        <button
+                                            class="ide-ws-collapse-btn"
+                                            type="button"
+                                            title="Close Navigator"
+                                            on:click=close_navigator_pane
+                                        >"✕"</button>
+                                    </div>
+                                    <div class="ide-ws-toolbar-v2">
+                                        <button class="ide-ws-toolbar-btn" type="button" title="New File" on:click=add_workspace_file>
+                                            "＋"
+                                        </button>
+                                        <button class="ide-ws-toolbar-btn" type="button" title="New Folder" on:click=add_workspace_folder>
+                                            "📁"
+                                        </button>
+                                        <label class="ide-ws-toolbar-btn ide-file-input-label" title="Upload Files">
+                                            "⤴"
+                                            <input type="file" multiple on:change=upload_workspace_files style="display:none"/>
+                                        </label>
+                                        <label class="ide-ws-toolbar-btn ide-file-input-label" title="Import ZIP">
+                                            "📦"
+                                            <input type="file" accept=".zip,application/zip" on:change=import_workspace_zip style="display:none"/>
+                                        </label>
+                                        <div class="ide-ws-toolbar-divider"></div>
+                                        <button class="ide-ws-toolbar-btn" type="button" title="Export to ZIP" on:click=export_workspace>
+                                            "💾"
+                                        </button>
+                                        <button class="ide-ws-toolbar-btn" type="button" title="Sync to Source" on:click=sync_workspace_to_source>
+                                            "↗"
+                                        </button>
+                                        <div class="ide-ws-toolbar-divider"></div>
+                                        <button
+                                            class="ide-ws-toolbar-btn"
+                                            type="button"
+                                            title="Save Project to Server"
+                                            on:click=save_project_to_server
+                                        >
+                                            "☁"
+                                        </button>
+                                        <button
+                                            class="ide-ws-toolbar-btn"
+                                            type="button"
+                                            title="Open Saved Project"
+                                            on:click=move |_| {
+                                                let next = !saved_projects_visible.get_untracked();
+                                                set_saved_projects_visible.set(next);
+                                                if next {
+                                                    refresh_saved_projects();
+                                                }
+                                            }
+                                        >
+                                            "📂"
+                                        </button>
+                                    </div>
+                                    <Show when=move || saved_projects_visible.get() fallback=|| ().into_view()>
+                                        <div class="ide-ws-saved-projects">
+                                            <div class="ide-ws-saved-projects-header">
+                                                <span>"Saved on Server"</span>
+                                                <input
+                                                    class="ide-ws-create-input"
+                                                    type="text"
+                                                    placeholder="project name"
+                                                    prop:value=saved_project_name
+                                                    on:input=move |ev| set_saved_project_name.set(event_target_value(&ev))
+                                                />
                                                 <button
+                                                    class="btn btn-ghost ide-ws-saved-refresh"
                                                     type="button"
-                                                    class="ide-ws-file-name"
-                                                    class:active=move || workspace_active_path.get() == file_path
-                                                    on:click={
-                                                        let file_path = file.path.clone();
-                                                        move |_| set_workspace_active_path.set(file_path.clone())
-                                                    }
-                                                >{file.path.clone()}</button>
-                                                <button
-                                                    type="button"
-                                                    class="ide-ws-file-remove"
-                                                    title="Remove"
-                                                    on:click={
-                                                        let file_path = file.path.clone();
-                                                        move |_| remove_workspace_file(file_path.clone())
-                                                    }
-                                                >"✕"</button>
+                                                    title="Refresh list"
+                                                    on:click=move |_| refresh_saved_projects()
+                                                >"⟳"</button>
                                             </div>
-                                        }
+                                            <Show
+                                                when=move || !saved_projects.get().is_empty()
+                                                fallback=|| view! {
+                                                    <div class="ide-ws-saved-empty">
+                                                        "No saved projects yet. Use ☁ to save the current workspace."
+                                                    </div>
+                                                }
+                                            >
+                                                <ul class="ide-ws-saved-list">
+                                                    <For
+                                                        each=move || saved_projects.get()
+                                                        key=|p| p.id.clone()
+                                                        children=move |project| {
+                                                            let name_for_load = project.name.clone();
+                                                            let name_for_delete = project.name.clone();
+                                                            let display_name = project.name.clone();
+                                                            let updated = project.updated_at.clone();
+                                                            let count = project.file_count;
+                                                            view! {
+                                                                <li class="ide-ws-saved-item">
+                                                                    <button
+                                                                        class="ide-ws-saved-load"
+                                                                        type="button"
+                                                                        title=move || format!("Load '{display_name}'")
+                                                                        on:click=move |_| load_project_from_server(name_for_load.clone())
+                                                                    >
+                                                                        <span class="ide-ws-saved-name">{project.name.clone()}</span>
+                                                                        <span class="ide-ws-saved-meta">
+                                                                            {format!("{} file(s) · {}", count, updated)}
+                                                                        </span>
+                                                                    </button>
+                                                                    <button
+                                                                        class="ide-ws-saved-delete"
+                                                                        type="button"
+                                                                        title="Delete from server"
+                                                                        on:click=move |_| delete_saved_project(name_for_delete.clone())
+                                                                    >"✕"</button>
+                                                                </li>
+                                                            }
+                                                        }
+                                                    />
+                                                </ul>
+                                            </Show>
+                                        </div>
+                                    </Show>
+                                    <div class="ide-ws-quick-create">
+                                        <input
+                                            class="ide-ws-create-input"
+                                            type="text"
+                                            placeholder=move || {
+                                                let ctx = workspace_context_path.get();
+                                                if ctx.is_empty() {
+                                                    "new/file.rs or src/components".to_string()
+                                                } else {
+                                                    format!("{ctx}/...")
+                                                }
+                                            }
+                                            prop:value=workspace_new_path
+                                            on:input=move |ev| set_workspace_new_path.set(event_target_value(&ev))
+                                        />
+                                        <div class="ide-ws-create-actions">
+                                            <button class="ide-ws-mini-btn" type="button" on:click=add_workspace_file>
+                                                "File"
+                                            </button>
+                                            <button class="ide-ws-mini-btn" type="button" on:click=add_workspace_folder>
+                                                "Folder"
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="ide-ws-context-row">
+                                        <span class="ide-ws-context-label">"Context:"</span>
+                                        <button
+                                            type="button"
+                                            class="ide-ws-context-path"
+                                            title="Clear context"
+                                            on:click=move |_| set_workspace_context_path.set(String::new())
+                                        >
+                                            {move || {
+                                                let ctx = workspace_context_path.get();
+                                                if ctx.is_empty() { "/".to_string() } else { format!("/{ctx}") }
+                                            }}
+                                        </button>
+                                    </div>
+                                    <div
+                                        class="ide-ws-file-tree"
+                                        on:drop=handle_workspace_drop
+                                        on:dragover=handle_workspace_dragover
+                                    >
+                                        <For
+                                            each=move || {
+                                                let mut files = workspace_files.get();
+                                                files.sort_by(|a, b| a.path.cmp(&b.path));
+                                                let expanded = expanded_folders.get();
+                                                files
+                                                    .into_iter()
+                                                    .filter(|file| {
+                                                        let file_path = if file.path.ends_with("/.gitkeep") {
+                                                            file.path.trim_end_matches("/.gitkeep").to_string()
+                                                        } else {
+                                                            file.path.clone()
+                                                        };
+
+                                                        if let Some((parent, _)) = file_path.rsplit_once('/') {
+                                                            expanded.contains(&parent.to_string())
+                                                        } else {
+                                                            true
+                                                        }
+                                                    })
+                                                    .collect::<Vec<_>>()
+                                            }
+                                            key=|file| file.path.clone()
+                                            children=move |file| {
+                                                let file_path = file.path.clone();
+                                                let is_folder_marker = file_path.ends_with("/.gitkeep");
+                                                let logical_path = if is_folder_marker {
+                                                    file_path.trim_end_matches("/.gitkeep").to_string()
+                                                } else {
+                                                    file_path.clone()
+                                                };
+                                                let folder_path = if is_folder_marker { logical_path.clone() } else { String::new() };
+                                                let depth = logical_path.matches('/').count();
+                                                let display_name = logical_path
+                                                    .rsplit('/')
+                                                    .next()
+                                                    .unwrap_or(&logical_path)
+                                                    .to_string();
+                                                let row_style = format!("padding-left:{}px;", 10 + (depth * 14));
+                                                view! {
+                                                    <div class="ide-ws-file-row" style=row_style>
+                                                        <button
+                                                            type="button"
+                                                            class="ide-ws-folder-toggle"
+                                                            class:hidden=move || !is_folder_marker
+                                                            title={
+                                                                let fp = folder_path.clone();
+                                                                move || {
+                                                                    let expanded = expanded_folders.get();
+                                                                    if expanded.contains(&fp) {
+                                                                        "Collapse folder"
+                                                                    } else {
+                                                                        "Expand folder"
+                                                                    }
+                                                                }
+                                                            }
+                                                            on:click={
+                                                                let fp = folder_path.clone();
+                                                                move |_| {
+                                                                    set_expanded_folders.update(|exp| {
+                                                                        if let Some(pos) = exp.iter().position(|f| f == &fp) {
+                                                                            exp.remove(pos);
+                                                                        } else {
+                                                                            exp.push(fp.clone());
+                                                                        }
+                                                                    });
+                                                                }
+                                                            }
+                                                        >
+                                                            {
+                                                                let fp = folder_path.clone();
+                                                                move || {
+                                                                    let expanded = expanded_folders.get();
+                                                                    if expanded.contains(&fp) {
+                                                                        "▼"
+                                                                    } else {
+                                                                        "▶"
+                                                                    }
+                                                                }
+                                                            }
+                                                        </button>
+                                                        <div class="ide-ws-folder-spacer" class:hidden=move || is_folder_marker></div>
+                                                        <span class="ide-ws-file-icon">{if is_folder_marker { "📁" } else { "📄" }}</span>
+                                                        <button
+                                                            type="button"
+                                                            class="ide-ws-file-name"
+                                                            class:active=move || {
+                                                                !is_folder_marker && workspace_active_path.get() == file_path
+                                                            }
+                                                            class:folder=is_folder_marker
+                                                            on:click={
+                                                                let file_path = file.path.clone();
+                                                                move |_| {
+                                                                    if file_path.ends_with("/.gitkeep") {
+                                                                        set_workspace_context_path.set(
+                                                                            file_path
+                                                                                .trim_end_matches("/.gitkeep")
+                                                                                .trim_matches('/')
+                                                                                .to_string(),
+                                                                        );
+                                                                    } else {
+                                                                        set_workspace_active_path.set(file_path.clone());
+                                                                        if let Some((parent, _)) = file_path.rsplit_once('/') {
+                                                                            set_workspace_context_path.set(parent.to_string());
+                                                                        } else {
+                                                                            set_workspace_context_path.set(String::new());
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        >{display_name}</button>
+                                                        <button
+                                                            type="button"
+                                                            class="ide-ws-file-rename"
+                                                            title="Rename"
+                                                            on:click={
+                                                                let file_path = file.path.clone();
+                                                                move |_| rename_workspace_entry(file_path.clone())
+                                                            }
+                                                        >"✎"</button>
+                                                        <button
+                                                            type="button"
+                                                            class="ide-ws-file-remove"
+                                                            title="Remove"
+                                                            on:click={
+                                                                let file_path = file.path.clone();
+                                                                move |_| remove_workspace_file(file_path.clone())
+                                                            }
+                                                        >"✕"</button>
+                                                    </div>
+                                                }
+                                            }
+                                        />
+                                    </div>
+                                    <div class="ide-ws-nav-footer">
+                                        <button class="btn btn-ghost" style="font-size:0.78rem" type="button" on:click=sync_workspace_to_source>"→ Sync"</button>
+                                    </div>
+                                </section>
+                                <div
+                                    class="ide-ws-resizer ide-ws-resizer-left"
+                                    title="Resize Navigator"
+                                    on:pointerdown=move |ev| {
+                                        ev.prevent_default();
+                                        start_pane_resize("navigator", ev);
                                     }
                                 />
-                            </div>
-                            <div class="ide-ws-nav-footer">
-                                <button class="btn btn-ghost" style="font-size:0.78rem" type="button" on:click=export_workspace>"Export ZIP"</button>
-                                <button class="btn btn-ghost" style="font-size:0.78rem" type="button" on:click=sync_workspace_to_source>"→ Source"</button>
-                            </div>
-                        </section>
+                            </>
+                        </Show>
 
-                        <section class="ide-panel ide-ws-editor">
+                        <section
+                            class="ide-panel ide-ws-editor"
+                            style="flex:1 1 auto; min-width:0;"
+                            attr:data-editor-lang=move || active_editor_language.get()
+                            attr:data-editor-theme=move || editor_theme.get()
+                        >
                             <div class="ide-ws-editor-header">
                                 <span class="ide-ws-editor-filename">{move || {
                                     let p = workspace_active_path.get();
                                     if p.is_empty() { "No file selected".to_string() } else { p }
                                 }}</span>
                                 <div class="ide-ws-editor-actions">
+                                    <span class="ide-ws-language-pill">{move || editor_language_label(&active_editor_language.get())}</span>
+                                    <label class="ide-ws-select-wrap" title="Editor language mode">
+                                        <span>"Lang"</span>
+                                        <select
+                                            class="ide-ws-select"
+                                            prop:value=editor_language_mode
+                                            on:change=move |ev| set_editor_language_mode.set(event_target_value(&ev))
+                                        >
+                                            <option value="auto">"Auto"</option>
+                                            <option value="swift">"Swift"</option>
+                                            <option value="python">"Python"</option>
+                                            <option value="cpp">"C/C++"</option>
+                                            <option value="rust">"Rust"</option>
+                                            <option value="plain">"Plain"</option>
+                                        </select>
+                                    </label>
+                                    <label class="ide-ws-select-wrap" title="Editor color theme">
+                                        <span>"Theme"</span>
+                                        <select
+                                            class="ide-ws-select"
+                                            prop:value=editor_theme
+                                            on:change=move |ev| set_editor_theme.set(event_target_value(&ev))
+                                        >
+                                            <option value="edge">"Edge Dark"</option>
+                                            <option value="dusk">"Dusk"</option>
+                                            <option value="forest">"Forest"</option>
+                                            <option value="graphite">"Graphite"</option>
+                                        </select>
+                                    </label>
                                     <button class="btn btn-ghost" style="font-size:0.78rem" type="button" on:click=download_source>"↓ Download"</button>
                                     <button class="btn btn-primary" style="font-size:0.78rem" type="submit" disabled=move || submitting.get() || platform.get() == "android">
                                         {move || if submitting.get() { "Submitting…" }
@@ -1057,36 +2178,106 @@ pub fn DevelopmentIdePage() -> impl IntoView {
                                     </button>
                                 </div>
                             </div>
-                            <textarea
-                                class="ide-ws-code"
-                                spellcheck="false"
-                                placeholder="Select a file in the navigator to edit its content…"
-                                prop:value=move || {
-                                    let active = workspace_active_path.get();
-                                    workspace_files.get().into_iter()
-                                        .find(|f| f.path == active)
-                                        .map(|f| f.content)
-                                        .unwrap_or_default()
-                                }
-                                on:input=move |ev| {
-                                    let active = workspace_active_path.get_untracked();
-                                    if active.is_empty() { return; }
-                                    let value = event_target_value(&ev);
-                                    set_workspace_files.update(|files| {
-                                        if let Some(f) = files.iter_mut().find(|f| f.path == active) {
-                                            f.content = value;
-                                        }
-                                    });
-                                }
-                            ></textarea>
+                            <div class="ide-ws-code-wrap">
+                                <pre class="ide-ws-highlight" node_ref=highlight_scroll_ref><code inner_html=move || highlighted_workspace_content.get()></code></pre>
+                                <textarea
+                                    class="ide-ws-code ide-ws-code-input"
+                                    spellcheck="false"
+                                    placeholder="Select a file in the navigator to edit its content…"
+                                    prop:value=move || active_workspace_content.get()
+                                    on:scroll=sync_editor_overlay_scroll
+                                    on:input=move |ev| {
+                                        let active = workspace_active_path.get_untracked();
+                                        if active.is_empty() { return; }
+                                        let value = event_target_value(&ev);
+                                        set_workspace_files.update(|files| {
+                                            if let Some(f) = files.iter_mut().find(|f| f.path == active) {
+                                                f.content = value;
+                                            }
+                                        });
+                                    }
+                                ></textarea>
+                            </div>
                             <Show when=move || message.get().is_some()>
                                 <p class="ide-ws-status-bar">{move || message.get().unwrap_or_default()}</p>
+                            </Show>
+
+                            <Show when=move || build_results_visible.get() || terminal_visible.get()>
+                                <Show when=move || build_results_visible.get()>
+                                    <div
+                                        class="ide-build-resizer"
+                                        title="Resize Build Results"
+                                        on:pointerdown=move |ev| {
+                                            ev.prevent_default();
+                                            start_build_results_resize(ev);
+                                        }
+                                    />
+                                    <div
+                                        class="ide-build-results-dock"
+                                        style=move || format!("flex:0 0 {}px; min-height:{}px; max-height:{}px;", build_results_height.get(), BUILD_RESULTS_MIN_HEIGHT, BUILD_RESULTS_MAX_HEIGHT)
+                                    >
+                                        <div class="ide-build-header">
+                                            <h3>"Build Results"</h3>
+                                            <div class="ide-build-header-actions">
+                                                <button class="ide-dock-btn" type="button" title="Close" on:click=move |_| set_build_results_visible.set(false)>
+                                                    "✕"
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <pre class="ide-build-output">{move || build_results.get()}</pre>
+                                    </div>
+                                </Show>
+                                <Show when=move || terminal_visible.get()>
+                                    <div
+                                        class="ide-terminal-resizer"
+                                        title="Resize Terminal"
+                                        on:pointerdown=move |ev| {
+                                            ev.prevent_default();
+                                            start_terminal_resize(ev);
+                                        }
+                                    />
+                                <div
+                                    class="ide-terminal-dock"
+                                    style=move || format!("flex:0 0 {}px; min-height:{}px; max-height:{}px;", terminal_height.get(), TERMINAL_MIN_HEIGHT, TERMINAL_MAX_HEIGHT)
+                                >
+                                    <div class="ide-terminal-header">
+                                        <h3>"Terminal"</h3>
+                                        <div class="ide-terminal-header-actions">
+                                            <span class="ide-dock-path">{move || terminal_ws_path.get()}</span>
+                                            <button class="ide-dock-btn ide-dock-btn-secondary" type="button" title="Terminate Session" on:click=terminate_terminal_panel>
+                                                "⊗"
+                                            </button>
+                                            <button class="ide-dock-btn" type="button" title="Close Panel" on:click=close_terminal_panel>
+                                                "✕"
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <DevIdeShellTerminal ws_path=terminal_ws_path nonce=terminal_nonce/>
+                                </div>
+                                </Show>
                             </Show>
                         </section>
                     </Show>
 
-                    <section class="ide-panel ide-actions">
-                        <h2>"Actions"</h2>
+                    <div
+                        class="ide-ws-resizer ide-ws-resizer-right"
+                        class:hidden-pane=move || !workspace_expanded.get() || !actions_visible.get()
+                        title="Resize Actions"
+                        on:pointerdown=move |ev| {
+                            ev.prevent_default();
+                            start_pane_resize("actions", ev);
+                        }
+                    />
+                    <section class="ide-panel ide-actions" class:hidden-pane=move || workspace_expanded.get() && !actions_visible.get() style=move || format!("flex:0 0 {}px; min-width:{}px; max-width:{}px;", actions_width.get(), ACTIONS_MIN_WIDTH, ACTIONS_MAX_WIDTH)>
+                        <div class="ide-ws-nav-header ide-actions-header">
+                            <span class="ide-ws-nav-title">"Actions"</span>
+                            <button
+                                class="ide-ws-collapse-btn"
+                                type="button"
+                                title="Close Actions"
+                                on:click=close_actions_pane
+                            >"✕"</button>
+                        </div>
                         <div class="field">
                             <span>"Source File Name"</span>
                             <input type="text" prop:value=source_file_name on:input=move |ev| set_source_file_name.set(event_target_value(&ev))/>
@@ -1335,15 +2526,6 @@ pub fn DevelopmentIdePage() -> impl IntoView {
                     </section>
                 </form>
 
-                <Show when=move || terminal_visible.get()>
-                    <div class="ide-terminal-dock">
-                        <div class="ide-terminal-header">
-                            <h3>"Terminal Dock"</h3>
-                            <span>{move || terminal_ws_path.get()}</span>
-                        </div>
-                        <DevIdeShellTerminal ws_path=terminal_ws_path/>
-                    </div>
-                </Show>
             </div>
         </div>
 
@@ -1545,6 +2727,57 @@ pub fn DevelopmentIdePage() -> impl IntoView {
                     padding: 0;
                     overflow: hidden;
                     min-height: 0;
+                    --editor-bg: #0d1117;
+                    --editor-text: #c9d1d9;
+                    --editor-muted: #9ab0c6;
+                    --editor-accent: #67b7ff;
+                    --editor-header-bg: #0f1726;
+                    --editor-status-bg: #111d2d;
+                    --editor-selection: rgba(103, 183, 255, 0.25);
+                }
+
+                .ide-ws-editor[data-editor-lang="swift"] {
+                    --editor-accent: #ff9d6b;
+                    --editor-selection: rgba(255, 157, 107, 0.26);
+                }
+
+                .ide-ws-editor[data-editor-lang="python"] {
+                    --editor-accent: #f2cf63;
+                    --editor-selection: rgba(242, 207, 99, 0.24);
+                }
+
+                .ide-ws-editor[data-editor-lang="cpp"] {
+                    --editor-accent: #7ecbff;
+                    --editor-selection: rgba(126, 203, 255, 0.24);
+                }
+
+                .ide-ws-editor[data-editor-lang="rust"] {
+                    --editor-accent: #ffa066;
+                    --editor-selection: rgba(255, 160, 102, 0.24);
+                }
+
+                .ide-ws-editor[data-editor-theme="dusk"] {
+                    --editor-bg: #151224;
+                    --editor-text: #d8d5f5;
+                    --editor-muted: #aca5d8;
+                    --editor-header-bg: #1e1732;
+                    --editor-status-bg: #1b1530;
+                }
+
+                .ide-ws-editor[data-editor-theme="forest"] {
+                    --editor-bg: #0d1a15;
+                    --editor-text: #d5e8dd;
+                    --editor-muted: #97b3a6;
+                    --editor-header-bg: #11241c;
+                    --editor-status-bg: #102019;
+                }
+
+                .ide-ws-editor[data-editor-theme="graphite"] {
+                    --editor-bg: #1a1c21;
+                    --editor-text: #d5d7dc;
+                    --editor-muted: #a8aeb8;
+                    --editor-header-bg: #22252d;
+                    --editor-status-bg: #1f2229;
                 }
 
                 .ide-ws-editor-header {
@@ -1552,7 +2785,7 @@ pub fn DevelopmentIdePage() -> impl IntoView {
                     align-items: center;
                     justify-content: space-between;
                     padding: 0.5rem 0.9rem;
-                    background: var(--bg-primary, #0d1117);
+                    background: var(--editor-header-bg);
                     border-bottom: 1px solid var(--border-color);
                     gap: 0.6rem;
                 }
@@ -1568,8 +2801,42 @@ pub fn DevelopmentIdePage() -> impl IntoView {
 
                 .ide-ws-editor-actions {
                     display: flex;
+                    align-items: center;
                     gap: 0.4rem;
                     flex-shrink: 0;
+                }
+
+                .ide-ws-language-pill {
+                    font-size: 0.72rem;
+                    letter-spacing: 0.02em;
+                    color: var(--editor-accent);
+                    border: 1px solid color-mix(in srgb, var(--editor-accent) 45%, transparent);
+                    background: color-mix(in srgb, var(--editor-accent) 14%, transparent);
+                    padding: 0.22rem 0.5rem;
+                    border-radius: 999px;
+                    white-space: nowrap;
+                }
+
+                .ide-ws-select-wrap {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.32rem;
+                    font-size: 0.68rem;
+                    color: var(--editor-muted);
+                }
+
+                .ide-ws-select {
+                    border: 1px solid var(--border-color);
+                    border-radius: 5px;
+                    background: color-mix(in srgb, var(--editor-bg) 85%, #fff 15%);
+                    color: var(--editor-text);
+                    padding: 0.16rem 0.38rem;
+                    font-size: 0.72rem;
+                    outline: none;
+                }
+
+                .ide-ws-select:focus {
+                    border-color: var(--editor-accent);
                 }
 
                 .ide-ws-code {
@@ -1578,22 +2845,90 @@ pub fn DevelopmentIdePage() -> impl IntoView {
                     resize: none;
                     border: none;
                     outline: none;
-                    background: #0d1117;
-                    color: #c9d1d9;
+                    background: var(--editor-bg);
+                    color: var(--editor-text);
                     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
                     font-size: 0.9rem;
                     line-height: 1.6;
                     padding: 1rem 1.2rem;
                     tab-size: 4;
                     min-height: 0;
+                    caret-color: var(--editor-accent);
                 }
+
+                .ide-ws-code::selection {
+                    background: var(--editor-selection);
+                }
+
+                .ide-ws-code-wrap {
+                    position: relative;
+                    flex: 1;
+                    min-height: 0;
+                    overflow: hidden;
+                    background: var(--editor-bg);
+                }
+
+                .ide-ws-highlight {
+                    position: absolute;
+                    inset: 0;
+                    margin: 0;
+                    overflow: auto;
+                    background: transparent;
+                    color: var(--editor-text);
+                    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+                    font-size: 0.9rem;
+                    line-height: 1.6;
+                    padding: 1rem 1.2rem;
+                    tab-size: 4;
+                    pointer-events: none;
+                    white-space: pre;
+                }
+
+                .ide-ws-highlight code {
+                    display: block;
+                    white-space: pre;
+                    color: var(--editor-text);
+                }
+
+                .ide-ws-code-input {
+                    position: absolute;
+                    inset: 0;
+                    background: transparent;
+                    color: transparent;
+                    -webkit-text-fill-color: transparent;
+                    z-index: 1;
+                }
+
+                .ide-ws-code-input::placeholder {
+                    color: var(--editor-muted);
+                    -webkit-text-fill-color: var(--editor-muted);
+                }
+
+                .tok-keyword { color: color-mix(in srgb, var(--editor-accent) 82%, #f8f8f8 18%); font-weight: 600; }
+                .tok-type { color: color-mix(in srgb, var(--editor-accent) 55%, #9fe3ff 45%); }
+                .tok-string { color: #89d185; }
+                .tok-comment { color: #6f8097; font-style: italic; }
+                .tok-number { color: #7ed0ff; }
+                .tok-op { color: #b7c6d8; }
+
+                .ide-ws-editor[data-editor-theme="dusk"] .tok-string { color: #b6e387; }
+                .ide-ws-editor[data-editor-theme="dusk"] .tok-comment { color: #8b83b3; }
+                .ide-ws-editor[data-editor-theme="dusk"] .tok-number { color: #9ee3ff; }
+
+                .ide-ws-editor[data-editor-theme="forest"] .tok-string { color: #9ee495; }
+                .ide-ws-editor[data-editor-theme="forest"] .tok-comment { color: #7f9f8f; }
+                .ide-ws-editor[data-editor-theme="forest"] .tok-number { color: #78d8ba; }
+
+                .ide-ws-editor[data-editor-theme="graphite"] .tok-string { color: #8ddf9d; }
+                .ide-ws-editor[data-editor-theme="graphite"] .tok-comment { color: #838b95; }
+                .ide-ws-editor[data-editor-theme="graphite"] .tok-number { color: #8dc6ff; }
 
                 .ide-ws-status-bar {
                     margin: 0;
                     padding: 0.35rem 0.9rem;
                     font-size: 0.78rem;
-                    color: var(--text-secondary);
-                    background: var(--bg-secondary);
+                    color: var(--editor-muted);
+                    background: var(--editor-status-bg);
                     border-top: 1px solid var(--border-color);
                 }
 
@@ -1601,6 +2936,142 @@ pub fn DevelopmentIdePage() -> impl IntoView {
                     display: grid;
                     grid-template-columns: 280px 1fr 320px;
                     gap: 1rem;
+                }
+
+                .ide-ws-palette {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    gap: 0.75rem;
+                    padding: 0.55rem 0.75rem;
+                    margin-bottom: 0.75rem;
+                    border: 1px solid var(--border-color);
+                    border-radius: 10px;
+                    background: linear-gradient(180deg, rgba(11, 22, 40, 0.92), rgba(8, 16, 28, 0.96));
+                    position: sticky;
+                    top: 0;
+                    z-index: 10;
+                    backdrop-filter: blur(8px);
+                }
+
+                .ide-ws-palette-group {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                    flex-wrap: wrap;
+                }
+
+                .ide-ws-icon-btn {
+                    width: 2rem;
+                    height: 2rem;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    border: 1px solid var(--border-color);
+                    border-radius: 8px;
+                    background: rgba(255,255,255,0.03);
+                    color: var(--text-secondary);
+                    cursor: pointer;
+                    transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease, transform 0.14s ease;
+                    flex: 0 0 auto;
+                }
+
+                .ide-ws-icon-btn:hover {
+                    background: rgba(59, 130, 246, 0.12);
+                    border-color: rgba(96, 165, 250, 0.4);
+                    color: var(--text-primary);
+                    transform: translateY(-1px);
+                }
+
+                .ide-ws-icon {
+                    font-size: 0.9rem;
+                    line-height: 1;
+                }
+
+                .ide-ws-tab-strip {
+                    display: inline-flex;
+                    align-items: stretch;
+                    gap: 0.35rem;
+                    padding-left: 0.25rem;
+                    margin-left: 0.25rem;
+                    border-left: 1px solid rgba(148,163,184,0.16);
+                    flex-wrap: wrap;
+                }
+
+                .ide-ws-tab {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.45rem;
+                    padding: 0.42rem 0.7rem;
+                    border: 1px solid var(--border-color);
+                    border-radius: 999px;
+                    background: rgba(255,255,255,0.02);
+                    color: var(--text-secondary);
+                    cursor: pointer;
+                    transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease, transform 0.14s ease;
+                    white-space: nowrap;
+                }
+
+                .ide-ws-tab:hover {
+                    background: rgba(255,255,255,0.05);
+                    color: var(--text-primary);
+                    transform: translateY(-1px);
+                }
+
+                .ide-ws-tab.active {
+                    background: rgba(59,130,246,0.15);
+                    border-color: rgba(96,165,250,0.42);
+                    color: #eff6ff;
+                    box-shadow: inset 0 0 0 1px rgba(96,165,250,0.12);
+                }
+
+                .ide-ws-tab-icon {
+                    font-size: 0.85rem;
+                    line-height: 1;
+                }
+
+                .ide-ws-tab-text {
+                    font-size: 0.78rem;
+                    font-weight: 600;
+                }
+
+                .ide-ws-palette-hint {
+                    font-size: 0.7rem;
+                    letter-spacing: 0.06em;
+                    text-transform: uppercase;
+                    color: var(--text-muted);
+                    margin-right: 0.2rem;
+                }
+
+                .ide-ws-palette-right {
+                    justify-content: flex-end;
+                    margin-left: auto;
+                }
+
+                .ide-ws-resizer {
+                    flex: 0 0 10px;
+                    align-self: stretch;
+                    cursor: col-resize;
+                    border-radius: 999px;
+                    background: linear-gradient(180deg, rgba(148,163,184,0.25), rgba(59,130,246,0.42), rgba(148,163,184,0.25));
+                    box-shadow: inset 0 0 0 1px rgba(148,163,184,0.16);
+                    transition: background 0.15s ease, box-shadow 0.15s ease;
+                }
+
+                .ide-ws-resizer:hover {
+                    background: linear-gradient(180deg, rgba(148,163,184,0.35), rgba(59,130,246,0.65), rgba(148,163,184,0.35));
+                }
+
+                .ide-ws-resizer-left {
+                    margin-right: -0.15rem;
+                }
+
+                .ide-ws-resizer-right {
+                    margin-left: -0.15rem;
+                }
+
+                .hidden-pane {
+                    display: none !important;
                 }
 
                 .ide-panel {
@@ -1715,11 +3186,28 @@ pub fn DevelopmentIdePage() -> impl IntoView {
                 }
 
                 .ide-terminal-dock {
-                    margin-top: 1rem;
+                    margin-top: 0;
+                    flex: 0 0 auto;
                     border: 1px solid var(--border-color);
-                    border-radius: 10px;
+                    border-radius: 0;
                     overflow: hidden;
                     background: #08111f;
+                    border-left: none;
+                    border-right: none;
+                    border-bottom: none;
+                }
+
+                .ide-terminal-resizer {
+                    flex: 0 0 10px;
+                    cursor: row-resize;
+                    border-radius: 999px;
+                    background: linear-gradient(90deg, rgba(148,163,184,0.25), rgba(59,130,246,0.42), rgba(148,163,184,0.25));
+                    box-shadow: inset 0 0 0 1px rgba(148,163,184,0.16);
+                    transition: background 0.15s ease, box-shadow 0.15s ease;
+                }
+
+                .ide-terminal-resizer:hover {
+                    background: linear-gradient(90deg, rgba(148,163,184,0.35), rgba(59,130,246,0.65), rgba(148,163,184,0.35));
                 }
 
                 .ide-terminal-header {
@@ -1741,10 +3229,19 @@ pub fn DevelopmentIdePage() -> impl IntoView {
                 .ide-terminal-header span {
                     font-size: 0.72rem;
                     color: #9fb4c9;
-                    max-width: 70%;
+                    max-width: 50%;
                     overflow: hidden;
                     text-overflow: ellipsis;
                     white-space: nowrap;
+                }
+
+                .ide-terminal-header-actions {
+                    display: flex;
+                    align-items: center;
+                    justify-content: flex-end;
+                    gap: 0.45rem;
+                    flex: 1;
+                    min-width: 0;
                 }
 
                 .response-box {
@@ -1764,6 +3261,398 @@ pub fn DevelopmentIdePage() -> impl IntoView {
                     gap: 0.5rem;
                     align-items: center;
                     flex-wrap: wrap;
+                }
+
+                /* Navigator Toolbar v2 - Icon-based */
+                .ide-ws-toolbar-v2 {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.2rem;
+                    padding: 0.35rem 0.45rem;
+                    background: linear-gradient(180deg, rgba(17, 24, 39, 0.84), rgba(13, 19, 31, 0.78));
+                    border-bottom: 1px solid var(--border-color);
+                    flex-wrap: nowrap;
+                }
+
+                .ide-ws-toolbar-btn {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 26px;
+                    height: 26px;
+                    border: 1px solid rgba(148, 163, 184, 0.14);
+                    border-radius: 5px;
+                    background: rgba(15, 23, 42, 0.25);
+                    color: #c7d2e3;
+                    cursor: pointer;
+                    font-size: 0.84rem;
+                    line-height: 1;
+                    transition: all 0.16s ease;
+                    padding: 0;
+                }
+
+                .ide-ws-toolbar-btn:hover {
+                    background: rgba(59, 130, 246, 0.16);
+                    border-color: rgba(96, 165, 250, 0.42);
+                    color: #ecf4ff;
+                    transform: translateY(-1px);
+                }
+
+                .ide-ws-toolbar-btn:active {
+                    transform: translateY(0);
+                    background: rgba(37, 99, 235, 0.24);
+                    border-color: rgba(96, 165, 250, 0.56);
+                }
+
+                .ide-file-input-label {
+                    display: flex !important;
+                    align-items: center;
+                    justify-content: center;
+                }
+
+                .ide-ws-toolbar-divider {
+                    width: 1px;
+                    height: 18px;
+                    background: rgba(148, 163, 184, 0.3);
+                    margin: 0 0.2rem;
+                }
+
+                .ide-ws-saved-projects {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.4rem;
+                    padding: 0.5rem;
+                    background: rgba(15, 23, 42, 0.5);
+                    border-bottom: 1px solid var(--border-color);
+                }
+                .ide-ws-saved-projects-header {
+                    display: grid;
+                    grid-template-columns: auto 1fr auto;
+                    align-items: center;
+                    gap: 0.4rem;
+                    font-size: 0.74rem;
+                    color: #a3b3c8;
+                    letter-spacing: 0.04em;
+                    text-transform: uppercase;
+                }
+                .ide-ws-saved-refresh {
+                    padding: 0.15rem 0.45rem !important;
+                    font-size: 0.85rem !important;
+                    line-height: 1 !important;
+                }
+                .ide-ws-saved-empty {
+                    padding: 0.4rem 0.2rem;
+                    font-size: 0.78rem;
+                    color: #7d8aa0;
+                    font-style: italic;
+                }
+                .ide-ws-saved-list {
+                    list-style: none;
+                    margin: 0;
+                    padding: 0;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.25rem;
+                    max-height: 180px;
+                    overflow-y: auto;
+                }
+                .ide-ws-saved-item {
+                    display: grid;
+                    grid-template-columns: 1fr auto;
+                    gap: 0.25rem;
+                    align-items: stretch;
+                }
+                .ide-ws-saved-load {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: flex-start;
+                    text-align: left;
+                    padding: 0.35rem 0.5rem;
+                    border: 1px solid rgba(148, 163, 184, 0.14);
+                    border-radius: 5px;
+                    background: rgba(15, 23, 42, 0.4);
+                    color: #d6e0ee;
+                    cursor: pointer;
+                    transition: all 0.14s ease;
+                }
+                .ide-ws-saved-load:hover {
+                    background: rgba(59, 130, 246, 0.16);
+                    border-color: rgba(96, 165, 250, 0.42);
+                    color: #ecf4ff;
+                }
+                .ide-ws-saved-name {
+                    font-size: 0.84rem;
+                    font-weight: 600;
+                }
+                .ide-ws-saved-meta {
+                    font-size: 0.7rem;
+                    color: #8c9aaf;
+                    margin-top: 0.1rem;
+                }
+                .ide-ws-saved-delete {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 28px;
+                    border: 1px solid rgba(220, 38, 38, 0.25);
+                    border-radius: 5px;
+                    background: rgba(127, 29, 29, 0.18);
+                    color: #fca5a5;
+                    cursor: pointer;
+                    font-size: 0.85rem;
+                    transition: all 0.14s ease;
+                }
+                .ide-ws-saved-delete:hover {
+                    background: rgba(220, 38, 38, 0.28);
+                    color: #fff;
+                }
+
+                .ide-ws-quick-create {
+                    display: grid;
+                    grid-template-columns: 1fr auto;
+                    gap: 0.35rem;
+                    padding: 0.45rem;
+                    border-bottom: 1px solid var(--border-color);
+                    background: rgba(15, 23, 42, 0.3);
+                }
+
+                .ide-ws-create-input {
+                    min-width: 0;
+                    border: 1px solid rgba(148, 163, 184, 0.28);
+                    border-radius: 6px;
+                    background: rgba(3, 8, 18, 0.55);
+                    color: var(--text-primary);
+                    padding: 0.36rem 0.5rem;
+                    font-size: 0.76rem;
+                    outline: none;
+                }
+
+                .ide-ws-create-input:focus {
+                    border-color: rgba(96, 165, 250, 0.7);
+                    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.18);
+                }
+
+                .ide-ws-create-actions {
+                    display: flex;
+                    gap: 0.3rem;
+                }
+
+                .ide-ws-mini-btn {
+                    border: 1px solid rgba(148, 163, 184, 0.25);
+                    border-radius: 6px;
+                    background: rgba(30, 41, 59, 0.6);
+                    color: #dbe7fb;
+                    padding: 0.34rem 0.5rem;
+                    font-size: 0.7rem;
+                    font-weight: 600;
+                    cursor: pointer;
+                    letter-spacing: 0.01em;
+                    transition: all 0.15s ease;
+                }
+
+                .ide-ws-mini-btn:hover {
+                    background: rgba(59, 130, 246, 0.2);
+                    border-color: rgba(96, 165, 250, 0.52);
+                }
+
+                .ide-ws-mini-btn:active {
+                    background: rgba(37, 99, 235, 0.26);
+                }
+
+                .ide-ws-context-row {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.4rem;
+                    padding: 0.35rem 0.5rem;
+                    border-bottom: 1px solid var(--border-color);
+                    background: rgba(8, 14, 27, 0.42);
+                }
+
+                .ide-ws-context-label {
+                    color: var(--text-secondary);
+                    font-size: 0.68rem;
+                    letter-spacing: 0.04em;
+                    text-transform: uppercase;
+                    flex-shrink: 0;
+                }
+
+                .ide-ws-context-path {
+                    border: 1px solid rgba(148, 163, 184, 0.25);
+                    border-radius: 6px;
+                    background: rgba(15, 23, 42, 0.45);
+                    color: #dbe7fb;
+                    font-size: 0.72rem;
+                    text-align: left;
+                    padding: 0.2rem 0.42rem;
+                    min-width: 0;
+                    width: 100%;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                    cursor: pointer;
+                }
+
+                .ide-ws-context-path:hover {
+                    border-color: rgba(96, 165, 250, 0.48);
+                    background: rgba(37, 99, 235, 0.2);
+                }
+
+                .ide-ws-file-name.folder {
+                    color: #9cc6ff;
+                    font-style: italic;
+                }
+
+                .ide-ws-folder-toggle {
+                    background: none;
+                    border: none;
+                    color: var(--text-secondary);
+                    cursor: pointer;
+                    font-size: 0.65rem;
+                    padding: 0.15rem 0.2rem;
+                    min-width: 16px;
+                    text-align: center;
+                    line-height: 1;
+                    flex-shrink: 0;
+                    transition: color 0.15s ease;
+                }
+
+                .ide-ws-folder-toggle:hover {
+                    color: #dbe7fb;
+                }
+
+                .ide-ws-folder-spacer {
+                    width: 16px;
+                    flex-shrink: 0;
+                }
+
+                .hidden {
+                    display: none !important;
+                }
+
+                .ide-ws-file-rename {
+                    background: none;
+                    border: none;
+                    color: var(--text-secondary);
+                    cursor: pointer;
+                    font-size: 0.72rem;
+                    opacity: 0;
+                    padding: 0.1rem 0.3rem;
+                    border-radius: 3px;
+                }
+
+                .ide-ws-file-row:hover .ide-ws-file-rename,
+                .ide-ws-file-row:hover .ide-ws-file-remove {
+                    opacity: 1;
+                }
+
+                .ide-ws-file-rename:hover,
+                .ide-ws-file-remove:hover {
+                    background: rgba(148, 163, 184, 0.18);
+                    color: #edf4ff;
+                }
+
+                /* Build Results Dock */
+                .ide-build-results-dock {
+                    flex: 0 0 auto;
+                    border: 1px solid var(--border-color);
+                    border-radius: 0;
+                    overflow: hidden;
+                    background: #0d1520;
+                    border-left: none;
+                    border-right: none;
+                    display: flex;
+                    flex-direction: column;
+                    min-height: 0;
+                }
+
+                .ide-build-resizer {
+                    flex: 0 0 10px;
+                    cursor: row-resize;
+                    border-radius: 999px;
+                    background: linear-gradient(90deg, rgba(148,163,184,0.25), rgba(59,130,246,0.42), rgba(148,163,184,0.25));
+                    box-shadow: inset 0 0 0 1px rgba(148,163,184,0.16);
+                    transition: background 0.15s ease, box-shadow 0.15s ease;
+                }
+
+                .ide-build-resizer:hover {
+                    background: linear-gradient(90deg, rgba(148,163,184,0.35), rgba(59,130,246,0.65), rgba(148,163,184,0.35));
+                }
+
+                .ide-build-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    gap: 0.6rem;
+                    padding: 0.6rem 0.8rem;
+                    border-bottom: 1px solid #2a3d4a;
+                    color: #d7e0ea;
+                    background: #0f1d28;
+                    flex-shrink: 0;
+                }
+
+                .ide-build-header h3 {
+                    margin: 0;
+                    font-size: 0.9rem;
+                    font-weight: 600;
+                }
+
+                .ide-build-header-actions {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.3rem;
+                    margin-left: auto;
+                }
+
+                .ide-build-output {
+                    flex: 1;
+                    margin: 0;
+                    padding: 0.8rem;
+                    background: #08111f;
+                    color: #9fb4c9;
+                    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                    font-size: 0.8rem;
+                    line-height: 1.5;
+                    overflow-y: auto;
+                    white-space: pre-wrap;
+                    word-break: break-word;
+                    border: none;
+                }
+
+                /* Dock button styles */
+                .ide-dock-btn {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 28px;
+                    height: 28px;
+                    border: 1px solid transparent;
+                    border-radius: 4px;
+                    background: transparent;
+                    color: #9fb4c9;
+                    cursor: pointer;
+                    font-size: 1rem;
+                    transition: all 0.15s ease;
+                    padding: 0;
+                }
+
+                .ide-dock-btn:hover {
+                    background: rgba(59, 130, 246, 0.15);
+                    color: #d7e0ea;
+                }
+
+                .ide-dock-btn-secondary:hover {
+                    background: rgba(239, 68, 68, 0.15);
+                    color: #ff8c8c;
+                }
+
+                .ide-dock-path {
+                    font-size: 0.72rem;
+                    color: #7a8fa6;
+                    max-width: 45%;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                    flex: 1;
                 }
 
                 @media (max-width: 1200px) {
@@ -1899,10 +3788,9 @@ const DEV_IDE_TERM_KEY: &str = "__ef_dev_ide_term";
 const DEV_IDE_WS_KEY: &str = "__ef_dev_ide_ws";
 
 #[component]
-fn DevIdeShellTerminal(ws_path: ReadSignal<String>) -> impl IntoView {
+fn DevIdeShellTerminal(ws_path: ReadSignal<String>, nonce: ReadSignal<u64>) -> impl IntoView {
     let (connected, set_connected) = signal(false);
     let socket_ref = StoredValue::new(None::<web_sys::WebSocket>);
-    let attempted = StoredValue::new(false);
     let term_ref = NodeRef::<leptos::html::Div>::new();
 
     let term_write = |text: &str| {
@@ -1919,6 +3807,7 @@ fn DevIdeShellTerminal(ws_path: ReadSignal<String>) -> impl IntoView {
     };
 
     Effect::new(move || {
+        let _nonce = nonce.get();
         let Some(_el) = term_ref.get() else { return };
         let init_js = format!(
             r#"(function() {{
@@ -1971,19 +3860,26 @@ fn DevIdeShellTerminal(ws_path: ReadSignal<String>) -> impl IntoView {
     });
 
     Effect::new(move || {
+        let _nonce = nonce.get();
         let ws_path_value = ws_path.get();
-        if attempted.get_value() || ws_path_value.trim().is_empty() {
+        if ws_path_value.trim().is_empty() {
             return;
         }
         if term_ref.get().is_none() {
             return;
         }
-        attempted.set_value(true);
 
-        let host = web_sys::window()
-            .and_then(|w| w.location().hostname().ok())
-            .unwrap_or_else(|| "localhost".to_string());
-        let ws_url = format!("ws://{host}:6060{ws_path_value}");
+        if let Some(existing) = socket_ref.get_value() {
+            let _ = existing.close();
+        }
+        set_connected.set(false);
+
+        let Some(window) = web_sys::window() else { return };
+        let location = window.location();
+        let protocol = location.protocol().unwrap_or_else(|_| "http:".to_string());
+        let host = location.hostname().unwrap_or_else(|_| "localhost".to_string());
+        let scheme = if protocol == "https:" { "wss" } else { "ws" };
+        let ws_url = format!("{scheme}://{host}:6060{ws_path_value}");
         let ws = match web_sys::WebSocket::new(&ws_url) {
             Ok(ws) => ws,
             Err(_) => return,
@@ -2060,6 +3956,13 @@ fn DevIdeShellTerminal(ws_path: ReadSignal<String>) -> impl IntoView {
         let _ = js_sys::eval(&cleanup_js);
     });
 
+    let focus_terminal = move |_: web_sys::MouseEvent| {
+        let _ = js_sys::eval(&format!(
+            "window.{}.focus && window.{}.focus()",
+            DEV_IDE_TERM_KEY, DEV_IDE_TERM_KEY
+        ));
+    };
+
     view! {
         <div style="display:flex; flex-direction:column; min-height:26rem;">
             <div style="display:flex; justify-content:space-between; align-items:center; padding:0.45rem 0.7rem; color:#d7e0ea;">
@@ -2069,6 +3972,7 @@ fn DevIdeShellTerminal(ws_path: ReadSignal<String>) -> impl IntoView {
             <div
                 node_ref=term_ref
                 id="ef-dev-ide-shell-term"
+                on:click=focus_terminal
                 style="margin:0; padding:0.5rem; flex:1; min-height:24rem; background:#08111f; overflow:hidden;"
             ></div>
         </div>

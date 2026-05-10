@@ -99,6 +99,13 @@ pub fn api_router() -> Router<AppState> {
         .route("/starter-projects/ios/archive/{module_name}", get(starter_projects::download_ios_starter_archive))
         .route("/starter-projects/workspace/archive", post(starter_projects::export_workspace_archive))
         .route("/starter-projects/workspace/import", post(starter_projects::import_workspace_archive))
+        .route("/starter-projects/workspace/save", post(starter_projects::save_workspace_project))
+        .route("/starter-projects/workspace/projects", get(starter_projects::list_workspace_projects))
+        .route(
+            "/starter-projects/workspace/projects/{name}",
+            get(starter_projects::get_workspace_project)
+                .delete(starter_projects::delete_workspace_project),
+        )
         // External integrations (MQTT + cloud sinks)
         .route("/integrations/mqtt/subscriptions", get(integrations::list_mqtt_subscriptions).post(integrations::create_mqtt_subscription))
         .route("/integrations/mqtt/subscriptions/{id}", axum::routing::delete(integrations::delete_mqtt_subscription))

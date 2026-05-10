@@ -814,6 +814,90 @@ pub async fn import_workspace_archive(
     post::<WorkspaceArchiveImportRequest, WorkspaceArchiveImportResponse>("/starter-projects/workspace/import", req).await
 }
 
+// ─── Saved workspace projects (server-side persistence) ──────────────────────
+
+#[derive(Serialize, Clone, Debug)]
+pub struct SaveWorkspaceProjectRequest {
+    pub name: String,
+    pub files: Vec<WorkspaceProjectFile>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct SaveWorkspaceProjectResponse {
+    pub id: String,
+    pub name: String,
+    pub file_count: i32,
+    pub updated_at: String,
+    pub created_at: String,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct WorkspaceProjectSummary {
+    pub id: String,
+    pub name: String,
+    pub file_count: i32,
+    pub updated_at: String,
+    pub created_at: String,
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct ListWorkspaceProjectsResponse {
+    #[serde(default)]
+    pub projects: Vec<WorkspaceProjectSummary>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct WorkspaceProjectDetail {
+    pub id: String,
+    pub name: String,
+    pub files: Vec<WorkspaceProjectFile>,
+    pub file_count: i32,
+    pub updated_at: String,
+    pub created_at: String,
+}
+
+pub async fn save_workspace_project(
+    req: &SaveWorkspaceProjectRequest,
+) -> Result<SaveWorkspaceProjectResponse, String> {
+    post::<SaveWorkspaceProjectRequest, SaveWorkspaceProjectResponse>(
+        "/starter-projects/workspace/save",
+        req,
+    )
+    .await
+}
+
+pub async fn list_workspace_projects() -> Result<ListWorkspaceProjectsResponse, String> {
+    get::<ListWorkspaceProjectsResponse>("/starter-projects/workspace/projects").await
+}
+
+pub async fn get_workspace_project(name: &str) -> Result<WorkspaceProjectDetail, String> {
+    let encoded = encode_path_segment(name);
+    get::<WorkspaceProjectDetail>(&format!(
+        "/starter-projects/workspace/projects/{encoded}"
+    ))
+    .await
+}
+
+pub async fn delete_workspace_project(name: &str) -> Result<(), String> {
+    let encoded = encode_path_segment(name);
+    delete(&format!("/starter-projects/workspace/projects/{encoded}")).await
+}
+
+fn encode_path_segment(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.' || ch == '~' {
+            out.push(ch);
+        } else {
+            let mut buf = [0u8; 4];
+            for b in ch.encode_utf8(&mut buf).bytes() {
+                out.push_str(&format!("%{:02X}", b));
+            }
+        }
+    }
+    out
+}
+
 pub async fn cancel_build(id: &str) -> Result<(), String> {
     post_empty(&format!("/builds/{id}/cancel")).await
 }

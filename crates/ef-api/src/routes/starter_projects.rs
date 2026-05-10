@@ -613,3 +613,206 @@ pub async fn import_workspace_archive(
         skipped_binary_files,
     }))
 }
+
+// ─── Saved workspace projects (server-side persistence) ──────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct SaveWorkspaceProjectRequest {
+    pub name: String,
+    pub files: Vec<WorkspaceProjectFile>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SaveWorkspaceProjectResponse {
+    pub id: Uuid,
+    pub name: String,
+    pub file_count: i32,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WorkspaceProjectSummary {
+    pub id: Uuid,
+    pub name: String,
+    pub file_count: i32,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListWorkspaceProjectsResponse {
+    pub projects: Vec<WorkspaceProjectSummary>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WorkspaceProjectDetail {
+    pub id: Uuid,
+    pub name: String,
+    pub files: Vec<WorkspaceProjectFile>,
+    pub file_count: i32,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+fn validate_project_name(raw: &str) -> Result<String, (StatusCode, Json<ApiError>)> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(ApiError::bad_request("project name cannot be empty"));
+    }
+    if trimmed.len() > 128 {
+        return Err(ApiError::bad_request("project name is too long (max 128 chars)"));
+    }
+    if !trimmed.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' || c == ' ') {
+        return Err(ApiError::bad_request(
+            "project name may only contain alphanumerics, space, '_', '-' or '.'",
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+pub async fn save_workspace_project(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Json(payload): Json<SaveWorkspaceProjectRequest>,
+) -> Result<Json<SaveWorkspaceProjectResponse>, (StatusCode, Json<ApiError>)> {
+    use sqlx::Row;
+
+    let name = validate_project_name(&payload.name)?;
+
+    for file in &payload.files {
+        if !is_valid_workspace_path(&file.path) {
+            return Err(ApiError::bad_request(format!(
+                "invalid workspace file path: {}",
+                file.path
+            )));
+        }
+    }
+
+    let files_json = serde_json::to_value(&payload.files)
+        .map_err(|e| ApiError::internal(format!("Failed to serialize files: {e}")))?;
+    let file_count = payload.files.len() as i32;
+
+    let row = sqlx::query(
+        r#"
+        INSERT INTO workspace_projects (tenant_id, name, files, file_count)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (tenant_id, name) DO UPDATE
+            SET files = EXCLUDED.files,
+                file_count = EXCLUDED.file_count,
+                updated_at = NOW()
+        RETURNING id, name, file_count, created_at, updated_at
+        "#,
+    )
+    .bind(auth.tenant_id)
+    .bind(&name)
+    .bind(&files_json)
+    .bind(file_count)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|e| ApiError::internal(format!("Failed to save project: {e}")))?;
+
+    Ok(Json(SaveWorkspaceProjectResponse {
+        id: row.try_get("id").map_err(|e| ApiError::internal(e.to_string()))?,
+        name: row.try_get("name").map_err(|e| ApiError::internal(e.to_string()))?,
+        file_count: row.try_get("file_count").map_err(|e| ApiError::internal(e.to_string()))?,
+        created_at: row.try_get("created_at").map_err(|e| ApiError::internal(e.to_string()))?,
+        updated_at: row.try_get("updated_at").map_err(|e| ApiError::internal(e.to_string()))?,
+    }))
+}
+
+pub async fn list_workspace_projects(
+    auth: AuthContext,
+    State(state): State<AppState>,
+) -> Result<Json<ListWorkspaceProjectsResponse>, (StatusCode, Json<ApiError>)> {
+    use sqlx::Row;
+
+    let rows = sqlx::query(
+        r#"
+        SELECT id, name, file_count, created_at, updated_at
+        FROM workspace_projects
+        WHERE tenant_id = $1
+        ORDER BY updated_at DESC
+        "#,
+    )
+    .bind(auth.tenant_id)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|e| ApiError::internal(format!("Failed to list projects: {e}")))?;
+
+    let mut projects = Vec::with_capacity(rows.len());
+    for r in rows {
+        projects.push(WorkspaceProjectSummary {
+            id: r.try_get("id").map_err(|e| ApiError::internal(e.to_string()))?,
+            name: r.try_get("name").map_err(|e| ApiError::internal(e.to_string()))?,
+            file_count: r.try_get("file_count").map_err(|e| ApiError::internal(e.to_string()))?,
+            created_at: r.try_get("created_at").map_err(|e| ApiError::internal(e.to_string()))?,
+            updated_at: r.try_get("updated_at").map_err(|e| ApiError::internal(e.to_string()))?,
+        });
+    }
+
+    Ok(Json(ListWorkspaceProjectsResponse { projects }))
+}
+
+pub async fn get_workspace_project(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    AxumPath(name): AxumPath<String>,
+) -> Result<Json<WorkspaceProjectDetail>, (StatusCode, Json<ApiError>)> {
+    use sqlx::Row;
+
+    let name = validate_project_name(&name)?;
+
+    let row = sqlx::query(
+        r#"
+        SELECT id, name, files, file_count, created_at, updated_at
+        FROM workspace_projects
+        WHERE tenant_id = $1 AND name = $2
+        "#,
+    )
+    .bind(auth.tenant_id)
+    .bind(&name)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| ApiError::internal(format!("Failed to load project: {e}")))?;
+
+    let row = row.ok_or_else(|| ApiError::not_found("project not found"))?;
+
+    let files_json: serde_json::Value = row
+        .try_get("files")
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let files: Vec<WorkspaceProjectFile> = serde_json::from_value(files_json)
+        .map_err(|e| ApiError::internal(format!("Failed to decode stored files: {e}")))?;
+
+    Ok(Json(WorkspaceProjectDetail {
+        id: row.try_get("id").map_err(|e| ApiError::internal(e.to_string()))?,
+        name: row.try_get("name").map_err(|e| ApiError::internal(e.to_string()))?,
+        files,
+        file_count: row.try_get("file_count").map_err(|e| ApiError::internal(e.to_string()))?,
+        created_at: row.try_get("created_at").map_err(|e| ApiError::internal(e.to_string()))?,
+        updated_at: row.try_get("updated_at").map_err(|e| ApiError::internal(e.to_string()))?,
+    }))
+}
+
+pub async fn delete_workspace_project(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    AxumPath(name): AxumPath<String>,
+) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
+    let name = validate_project_name(&name)?;
+
+    let result = sqlx::query(
+        r#"DELETE FROM workspace_projects WHERE tenant_id = $1 AND name = $2"#,
+    )
+    .bind(auth.tenant_id)
+    .bind(&name)
+    .execute(&state.pool)
+    .await
+    .map_err(|e| ApiError::internal(format!("Failed to delete project: {e}")))?;
+
+    if result.rows_affected() == 0 {
+        return Err(ApiError::not_found("project not found"));
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}

@@ -116,6 +116,7 @@ pub fn Sidebar() -> impl IntoView {
                 <img class="brand-logo" src="/logo.png" alt="EdgeFabric" />
             </div>
             <nav class="sidebar-nav" on:click=close>
+                <div class="nav-section-title">"Core Platform"</div>
                 <A href="/"><span class="nav-icon"><NavIcon name="overview".to_string()/></span><span>"Overview"</span></A>
                 <A href="/devices"><span class="nav-icon"><NavIcon name="devices".to_string()/></span><span>"Devices"</span></A>
                 <A href="/sessions"><span class="nav-icon"><NavIcon name="sessions".to_string()/></span><span>"Sessions"</span></A>
@@ -123,15 +124,21 @@ pub fn Sidebar() -> impl IntoView {
                 <A href="/jobs"><span class="nav-icon"><NavIcon name="jobs".to_string()/></span><span>"Test Jobs"</span></A>
                 <A href="/builds"><span class="nav-icon"><NavIcon name="builds".to_string()/></span><span>"Builds"</span></A>
                 <A href="/development/ide"><span class="nav-icon"><NavIcon name="builds".to_string()/></span><span>"Development IDE"</span></A>
+                <A href="/logs"><span class="nav-icon"><NavIcon name="logs".to_string()/></span><span>"Logs"</span></A>
+
+                <div class="nav-section-title">"IoT & Integrations"</div>
                 <A href="/virtual-iot/new"><span class="nav-icon"><NavIcon name="iot".to_string()/></span><span>"IoT Designer"</span></A>
                 <A href="/virtual-iot/backends"><span class="nav-icon"><NavIcon name="iot".to_string()/></span><span>"IoT Backends"</span></A>
                 <A href="/integrations"><span class="nav-icon"><NavIcon name="iot".to_string()/></span><span>"Integrations"</span></A>
+
+                <div class="nav-section-title">"Quantum & VeerOS"</div>
                 <A href="/quantum"><span class="nav-icon"><NavIcon name="quantum".to_string()/></span><span>"Quantum"</span></A>
                 <A href="/quantum/accelerators"><span class="nav-icon"><NavIcon name="quantum".to_string()/></span><span>"Accelerators"</span></A>
                 <A href="/quantum/designer"><span class="nav-icon"><NavIcon name="quantum".to_string()/></span><span>"Circuit Designer"</span></A>
                 <A href="/quantum/jobs"><span class="nav-icon"><NavIcon name="quantum".to_string()/></span><span>"Jobs"</span></A>
                 <A href="/veeros/hosts"><span class="nav-icon"><NavIcon name="quantum".to_string()/></span><span>"VeerOS Hosts"</span></A>
-                <A href="/logs"><span class="nav-icon"><NavIcon name="logs".to_string()/></span><span>"Logs"</span></A>
+
+                <div class="nav-section-title">"Administration"</div>
                 <A href="/admin"><span class="nav-icon"><NavIcon name="admin".to_string()/></span><span>"Admin"</span></A>
             </nav>
             <div class="sidebar-footer">

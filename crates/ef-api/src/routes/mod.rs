@@ -9,6 +9,7 @@ pub mod discovery;
 pub mod runners;
 pub mod builds;
 pub mod integrations;
+pub mod starter_projects;
 
 use axum::{Json, Router, extract::State, http::StatusCode, routing::{get, post, put}};
 use serde::Deserialize;
@@ -53,6 +54,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/agent/devices/{id}", axum::routing::delete(agent::deregister_device))
         .route("/agent/{agent_id}/commands", get(agent::poll_commands))
         .route("/agents", get(agent::list_agents))
+        .route("/agents/{agent_id}", get(agent::get_agent))
         // Virtual IoT endpoints
         .route("/devices/virtual-iot", post(virtual_iot::create_virtual_iot))
         .route("/devices/virtual-iot/backends", get(virtual_iot::list_virtual_iot_backends).post(virtual_iot::create_virtual_iot_backend))
@@ -91,6 +93,12 @@ pub fn api_router() -> Router<AppState> {
         .route("/builds/{id}/logs", get(builds::get_build_logs))
         .route("/builds/{id}/artifacts", get(builds::list_build_artifacts))
         .route("/builds/{id}/cancel", post(builds::cancel_build))
+        // iOS starter project generation/download
+        .route("/starter-projects/ios/defaults", get(starter_projects::ios_starter_defaults))
+        .route("/starter-projects/ios", post(starter_projects::create_ios_starter_project))
+        .route("/starter-projects/ios/archive/{module_name}", get(starter_projects::download_ios_starter_archive))
+        .route("/starter-projects/workspace/archive", post(starter_projects::export_workspace_archive))
+        .route("/starter-projects/workspace/import", post(starter_projects::import_workspace_archive))
         // External integrations (MQTT + cloud sinks)
         .route("/integrations/mqtt/subscriptions", get(integrations::list_mqtt_subscriptions).post(integrations::create_mqtt_subscription))
         .route("/integrations/mqtt/subscriptions/{id}", axum::routing::delete(integrations::delete_mqtt_subscription))

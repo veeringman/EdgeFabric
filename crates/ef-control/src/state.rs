@@ -61,10 +61,15 @@ pub fn spawn_stale_device_checker(
         loop {
             tick.tick().await;
             let cutoff = chrono::Utc::now() - chrono::Duration::seconds(stale_threshold_secs);
+            
+            // Mark ANY device (available, busy, or in other states) as offline if stale
+            // Exclude virtual_iot devices (they're software-backed and don't need heartbeats)
+            // Also exclude devices that are already in terminal states (succeeded, failed, etc.)
             let result = sqlx::query(
-                r#"UPDATE devices SET status = 'offline'::device_status
+                r#"UPDATE devices 
+                   SET status = 'offline'::device_status, updated_at = now()
                    WHERE status IN ('available'::device_status, 'busy'::device_status)
-                                         AND os <> 'virtual_iot'::device_os
+                     AND os <> 'virtual_iot'::device_os
                      AND (last_heartbeat IS NULL OR last_heartbeat < $1)"#,
             )
             .bind(cutoff)
@@ -73,7 +78,11 @@ pub fn spawn_stale_device_checker(
 
             match result {
                 Ok(r) if r.rows_affected() > 0 => {
-                    tracing::warn!(count = r.rows_affected(), "Marked stale devices offline");
+                    tracing::info!(
+                        count = r.rows_affected(), 
+                        threshold_secs = stale_threshold_secs,
+                        "Marked stale devices offline (no heartbeat)"
+                    );
                 }
                 Err(e) => {
                     tracing::error!("Stale device check failed: {e}");

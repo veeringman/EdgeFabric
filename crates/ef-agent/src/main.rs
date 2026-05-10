@@ -218,10 +218,68 @@ fn detect_local_ip() -> Option<String> {
 fn detect_capabilities(cfg: &config::AgentRuntime) -> Vec<String> {
     let mut caps: Vec<String> = vec!["android".into(), "ios".into(), "iot".into(), "ssh".into()];
 
+    // ── VeerOS capability (if VM script exists) ────────────────────────
     if std::path::Path::new(&cfg.veeros.vm_script_path).exists() {
         caps.push("veeros".into());
     }
 
-    // Future: detect runner (cargo/gradle/xcodebuild), dockerized capabilities, etc.
+    // ── Build toolchain detection ─────────────────────────────────────
+    if command_exists("xcodebuild") {
+        caps.push("xcode".into());
+    }
+    if command_exists("cargo") {
+        caps.push("cargo".into());
+    }
+    if command_exists("gradle") {
+        caps.push("gradle".into());
+    }
+    if command_exists("cmake") {
+        caps.push("cmake".into());
+    }
+    if command_exists("make") {
+        caps.push("make".into());
+    }
+
+    // ── SDK & Runtime detection ───────────────────────────────────────
+    if command_exists("docker") || command_exists("podman") {
+        caps.push("containerization".into());
+    }
+    if command_exists("swift") {
+        caps.push("swift".into());
+    }
+    if command_exists("python3") || command_exists("python") {
+        caps.push("python".into());
+    }
+    if command_exists("node") {
+        caps.push("node".into());
+    }
+    if command_exists("go") {
+        caps.push("go".into());
+    }
+    if command_exists("java") {
+        caps.push("java".into());
+    }
+
+    // ── CI/CD & Runner capabilities ───────────────────────────────────
+    if command_exists("git") {
+        caps.push("git".into());
+    }
+    if command_exists("curl") {
+        caps.push("curl".into());
+    }
+
+    tracing::info!(capabilities = ?caps, "Agent capabilities detected");
     caps
+}
+
+/// Check if a command exists in PATH.
+fn command_exists(cmd: &str) -> bool {
+    let output = std::process::Command::new("which")
+        .arg(cmd)
+        .output();
+
+    match output {
+        Ok(out) => out.status.success(),
+        Err(_) => false,
+    }
 }

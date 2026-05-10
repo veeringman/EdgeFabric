@@ -812,6 +812,10 @@ fn parse_xctrace_output(stdout: &str) -> Vec<Device> {
             in_devices_section = true;
             continue;
         }
+        if line.starts_with("== Devices Offline ==") {
+            // xctrace lists disconnected iPhones here; do not treat them as available.
+            break;
+        }
         if line.starts_with("== Simulators ==") {
             // stop at simulators section (separate from real devices)
             break;

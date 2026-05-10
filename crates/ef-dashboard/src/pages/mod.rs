@@ -19,3 +19,4 @@ pub mod veeros_shell;
 pub mod virtual_iot_backends;
 pub mod virtual_iot_designer;
 pub mod virtual_iot_shell;
+pub mod walk_directory;

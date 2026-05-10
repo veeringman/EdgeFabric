@@ -190,6 +190,10 @@ pub async fn register_agent(
         ApiError::internal("Failed to register agent")
     })?;
 
+    if let Err(e) = DeviceRepo::set_agent_offline(&state.pool, agent_uuid).await {
+        tracing::warn!(agent_id = %body.agent_id, "Failed to mark previous agent devices offline: {e}");
+    }
+
     Ok(Json(json!({ "agent": agent })))
 }
 
@@ -221,4 +225,36 @@ pub async fn list_agents(
     })?;
 
     Ok(Json(json!({ "agents": agents, "total": agents.len() })))
+}
+
+/// GET /api/v1/agents/:agent_id
+///
+/// Fetch a single agent by ID with its capabilities.
+pub async fn get_agent(
+    Path(agent_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    let agent_uuid = Uuid::parse_str(&agent_id).unwrap_or_else(|_| {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        agent_id.hash(&mut hasher);
+        let h = hasher.finish().to_be_bytes();
+        let mut bytes = [0u8; 16];
+        bytes[..8].copy_from_slice(&h);
+        bytes[8..16].copy_from_slice(&h);
+        Uuid::from_bytes(bytes)
+    });
+
+    let agents = AgentRepo::list(&state.pool, None, None, false)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to list agents: {e}");
+            ApiError::internal("Failed to list agents")
+        })?;
+
+    let agent = agents.into_iter()
+        .find(|a| a.id == agent_uuid)
+        .ok_or_else(|| ApiError::not_found(format!("Agent {agent_id} not found")))?;
+
+    Ok(Json(serde_json::to_value(agent).unwrap_or(json!({}))))
 }

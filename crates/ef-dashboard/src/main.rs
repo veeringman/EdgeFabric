@@ -117,8 +117,8 @@ fn Shell(children: Children) -> impl IntoView {
                             </svg>
                         </button>
                         <img class="topbar-logo" src="/logo.png" alt="EdgeFabric" />
-                        <span class="topbar-title topbar-title-full">"Unified Device Management & Test Orchestration Platform"</span>
-                        <span class="topbar-title topbar-title-short">"Device Management Platform"</span>
+                        <span class="topbar-title topbar-title-full">"Multi-Platform Build, Test & Deploy Orchestration · iOS · IoT · Quantum"</span>
+                        <span class="topbar-title topbar-title-short">"Build · Test · Deploy"</span>
                     </div>
                     <div class="topbar-actions">
                         <span class="topbar-status">

@@ -43,6 +43,7 @@ aes-gcm = "0.10"
 tokio-tungstenite = "0.26"
 utoipa = { workspace = true }
 utoipa-swagger-ui = { workspace = true }
+zip = "0.6"
 
 [build-dependencies]
 tonic-build = { workspace = true }

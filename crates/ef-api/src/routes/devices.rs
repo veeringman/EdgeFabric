@@ -89,9 +89,10 @@ pub async fn create_device(
     State(state): State<AppState>,
     Json(body): Json<CreateDeviceRequest>,
 ) -> Result<(StatusCode, Json<Value>), (StatusCode, Json<ApiError>)> {
-    tracing::info!(tenant_id = %auth.tenant_id, name = %body.name, "Creating device");
+    tracing::info!(tenant_id = %auth.tenant_id, name = %body.name, serial = ?body.serial, "Creating or updating device");
 
-    let device = DeviceRepo::create(
+    // Use upsert to prevent duplicates: if device with same serial (or name if no serial) exists, update it
+    let device = DeviceRepo::upsert(
         &state.pool,
         &body.name,
         body.serial.as_deref(),
@@ -103,7 +104,7 @@ pub async fn create_device(
     )
     .await
     .map_err(|e| {
-        tracing::error!("Failed to create device: {e}");
+        tracing::error!("Failed to upsert device: {e}");
         ApiError::internal("Failed to create device")
     })?;
 

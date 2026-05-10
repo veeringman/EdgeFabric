@@ -228,7 +228,7 @@ pub struct LoginResponse {
 
 // ---------- Response models ----------
 
-#[derive(Deserialize, Clone, Debug, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct DeviceListResponse {
     pub devices: Vec<Device>,
     pub total: usize,
@@ -244,9 +244,29 @@ pub struct Device {
     pub kind: String,
     pub status: String,
     pub region: String,
+    pub agent_id: Option<String>,
     pub capabilities: serde_json::Value,
     pub last_heartbeat: Option<String>,
     pub created_at: Option<String>,
+}
+
+// -- Agent types --
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct AgentListResponse {
+    pub agents: Vec<Agent>,
+    pub total: usize,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct Agent {
+    pub id: String,
+    pub name: String,
+    pub region: String,
+    pub status: String,
+    pub capabilities: Vec<String>,
+    pub streaming_url: Option<String>,
+    pub last_heartbeat: Option<String>,
 }
 
 // -- Virtual IoT types --
@@ -553,6 +573,7 @@ pub struct SubmitIosBuildRequest {
     pub project_path: String,
     pub scheme: String,
     pub configuration: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub target_device_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub region: Option<String>,
@@ -611,6 +632,71 @@ pub struct SubmitQuantumProgramRequest {
     pub ssh_user: Option<String>,
 }
 
+#[derive(Serialize, Clone, Debug)]
+pub struct CreateIosStarterProjectRequest {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub organization_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bundle_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub team_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interface_style: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deployment_target: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub archive: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ssh_user: Option<String>,
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct CreateIosStarterProjectResponse {
+    pub module_name: String,
+    pub project_dir: String,
+    pub archive_path: Option<String>,
+    pub download_path: Option<String>,
+    #[serde(default)]
+    pub stdout: String,
+    #[serde(default)]
+    pub stderr: String,
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct IosStarterDefaultsResponse {
+    pub username: String,
+    pub suggested_app_name: String,
+    pub suggested_organization_id: String,
+    pub xcode_developer_dir: Option<String>,
+    pub xcode_version: Option<String>,
+    pub default_team_id: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct WorkspaceProjectFile {
+    pub path: String,
+    pub content: String,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct WorkspaceArchiveExportRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_name: Option<String>,
+    pub files: Vec<WorkspaceProjectFile>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct WorkspaceArchiveImportRequest {
+    pub archive_base64: String,
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct WorkspaceArchiveImportResponse {
+    pub files: Vec<WorkspaceProjectFile>,
+    pub skipped_binary_files: usize,
+}
+
 pub async fn list_builds(
     limit: i64,
     offset: i64,
@@ -659,6 +745,73 @@ pub async fn submit_iot_deploy(req: &SubmitIotDeployRequest) -> Result<serde_jso
 
 pub async fn submit_quantum_program(req: &SubmitQuantumProgramRequest) -> Result<serde_json::Value, String> {
     post::<SubmitQuantumProgramRequest, serde_json::Value>("/builds/quantum/run", req).await
+}
+
+pub async fn get_ios_starter_defaults() -> Result<IosStarterDefaultsResponse, String> {
+    get::<IosStarterDefaultsResponse>("/starter-projects/ios/defaults").await
+}
+
+pub async fn create_ios_starter_project(
+    req: &CreateIosStarterProjectRequest,
+) -> Result<CreateIosStarterProjectResponse, String> {
+    post::<CreateIosStarterProjectRequest, CreateIosStarterProjectResponse>("/starter-projects/ios", req).await
+}
+
+pub async fn download_ios_starter_archive(module_name: &str) -> Result<Vec<u8>, String> {
+    let encoded = js_sys::encode_uri_component(module_name)
+        .as_string()
+        .unwrap_or_default();
+    let path = format!("/starter-projects/ios/archive/{encoded}");
+    let resp = Request::get(&format!("{}{path}", base_url()))
+        .header("Authorization", &auth_header())
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if resp.status() == 401 {
+        handle_unauthorized();
+        return Err("Session expired".into());
+    }
+
+    if !resp.ok() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("HTTP {status}: {body}"));
+    }
+
+    resp.binary().await.map_err(|e| e.to_string())
+}
+
+pub async fn export_workspace_archive(
+    req: &WorkspaceArchiveExportRequest,
+) -> Result<Vec<u8>, String> {
+    let resp = Request::post(&format!("{}/starter-projects/workspace/archive", base_url()))
+        .header("Authorization", &auth_header())
+        .header("Content-Type", "application/json")
+        .body(serde_json::to_string(req).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if resp.status() == 401 {
+        handle_unauthorized();
+        return Err("Session expired".into());
+    }
+
+    if !resp.ok() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("HTTP {status}: {body}"));
+    }
+
+    resp.binary().await.map_err(|e| e.to_string())
+}
+
+pub async fn import_workspace_archive(
+    req: &WorkspaceArchiveImportRequest,
+) -> Result<WorkspaceArchiveImportResponse, String> {
+    post::<WorkspaceArchiveImportRequest, WorkspaceArchiveImportResponse>("/starter-projects/workspace/import", req).await
 }
 
 pub async fn cancel_build(id: &str) -> Result<(), String> {
@@ -889,6 +1042,7 @@ pub fn veeros_host_to_device(h: &DiscoveredHost) -> Device {
         kind: "veeros_host".into(),
         status: status.into(),
         region: "VeerOS".into(),
+        agent_id: Some(h.agent_id.clone()),
         capabilities: json!(caps),
         last_heartbeat: Some(h.last_seen_at.clone()),
         created_at: None,
@@ -932,6 +1086,16 @@ pub async fn fetch_discovered_hosts(quantum_only: bool) -> Result<DiscoveryHosts
         "/discovery/hosts"
     };
     get::<DiscoveryHostsResponse>(path).await
+}
+
+/// Fetch all registered agents with their capabilities.
+pub async fn fetch_all_agents() -> AgentListResponse {
+    get::<AgentListResponse>("/agents").await.unwrap_or_default()
+}
+
+/// Fetch a single agent by ID.
+pub async fn fetch_agent(agent_id: &str) -> Result<Agent, String> {
+    get::<Agent>(&format!("/agents/{agent_id}")).await
 }
 
 // ─── External Integrations API ─────────────────────────────────────────────

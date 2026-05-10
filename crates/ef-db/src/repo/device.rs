@@ -196,6 +196,85 @@ impl DeviceRepo {
         .await
     }
 
+    /// Upsert a device (for direct API registration, without agent_id).
+    /// If serial is provided, upsert by serial (prevents duplicates);
+    /// If serial is not provided, check by name first and update if exists, else create.
+    /// This prevents duplicate devices when creating via API.
+    pub async fn upsert(
+        pool: &PgPool,
+        name: &str,
+        serial: Option<&str>,
+        os: &str,
+        os_version: &str,
+        kind: &str,
+        region: &str,
+        capabilities: &[String],
+    ) -> Result<DeviceRow, sqlx::Error> {
+        if let Some(serial_val) = serial {
+            // Upsert by serial if provided (guaranteed unique)
+            sqlx::query_as::<_, DeviceRow>(
+                r#"INSERT INTO devices (name, serial, os, os_version, kind, region, capabilities, status)
+                   VALUES ($1, $2, $3::device_os, $4, $5::device_kind, $6, $7, 'available'::device_status)
+                   ON CONFLICT (serial) WHERE serial IS NOT NULL DO UPDATE SET
+                       name = EXCLUDED.name,
+                       os_version = EXCLUDED.os_version,
+                       region = EXCLUDED.region,
+                       capabilities = EXCLUDED.capabilities,
+                       status = 'available'::device_status,
+                       last_heartbeat = now()
+                   RETURNING id, name, serial, os::text, os_version, kind::text, status::text,
+                             region, capabilities, agent_id, ip_address, registered_at, last_heartbeat, updated_at"#,
+            )
+            .bind(name)
+            .bind(serial_val)
+            .bind(os)
+            .bind(os_version)
+            .bind(kind)
+            .bind(region)
+            .bind(capabilities)
+            .fetch_one(pool)
+            .await
+        } else {
+            // No serial: try to find existing device by name and update it
+            // First, try to update if exists
+            let updated = sqlx::query_as::<_, DeviceRow>(
+                r#"UPDATE devices SET os = $2::device_os, os_version = $3, region = $4, 
+                       capabilities = $5, status = 'available'::device_status, last_heartbeat = now()
+                   WHERE name = $1 AND serial IS NULL
+                   RETURNING id, name, serial, os::text, os_version, kind::text, status::text,
+                             region, capabilities, agent_id, ip_address, registered_at, last_heartbeat, updated_at"#,
+            )
+            .bind(name)
+            .bind(os)
+            .bind(os_version)
+            .bind(region)
+            .bind(capabilities)
+            .fetch_optional(pool)
+            .await?;
+
+            if let Some(device) = updated {
+                Ok(device)
+            } else {
+                // No existing device found, create new one
+                sqlx::query_as::<_, DeviceRow>(
+                    r#"INSERT INTO devices (name, serial, os, os_version, kind, region, capabilities, status)
+                       VALUES ($1, $2, $3::device_os, $4, $5::device_kind, $6, $7, 'available'::device_status)
+                       RETURNING id, name, serial, os::text, os_version, kind::text, status::text,
+                                 region, capabilities, agent_id, ip_address, registered_at, last_heartbeat, updated_at"#,
+                )
+                .bind(name)
+                .bind(serial)
+                .bind(os)
+                .bind(os_version)
+                .bind(kind)
+                .bind(region)
+                .bind(capabilities)
+                .fetch_one(pool)
+                .await
+            }
+        }
+    }
+
     /// Mark all devices owned by an agent as offline (e.g. agent disconnected).
     pub async fn set_agent_offline(pool: &PgPool, agent_id: Uuid) -> Result<u64, sqlx::Error> {
         let result = sqlx::query(

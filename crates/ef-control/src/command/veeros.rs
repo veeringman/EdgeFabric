@@ -81,44 +81,88 @@ pub struct VeerOsDriver;
 impl VeerOsDriver {
     const FOLD_SHELL_PORT: u16 = 2323;
 
-    fn fold_binary_path(cfg: &VeerOsConfig) -> Option<String> {
-        let p = PathBuf::from(&cfg.root_dir).join("target/debug/fold");
+    fn resolved_root_dir(cfg: &VeerOsConfig) -> String {
+        let configured = PathBuf::from(&cfg.root_dir);
+        if configured.exists() {
+            return configured.to_string_lossy().to_string();
+        }
+
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        if let Ok(home) = std::env::var("HOME") {
+            candidates.push(PathBuf::from(&home).join("rnd/projects/VeerOS"));
+            candidates.push(PathBuf::from(&home).join("VeerOS"));
+        }
+        if let Ok(cwd) = std::env::current_dir() {
+            candidates.push(cwd.join("../VeerOS"));
+        }
+        candidates.push(PathBuf::from("/home/vijay/rnd/projects/VeerOS"));
+        candidates.push(PathBuf::from("/home/vijay/rnd/VeerOS"));
+
+        for candidate in candidates {
+            if candidate.exists() {
+                return candidate.to_string_lossy().to_string();
+            }
+        }
+
+        cfg.root_dir.clone()
+    }
+
+    fn path_exists_in_root(cfg: &VeerOsConfig, rel: &str) -> Option<String> {
+        let p = PathBuf::from(Self::resolved_root_dir(cfg)).join(rel);
         if p.exists() {
             Some(p.to_string_lossy().to_string())
         } else {
             None
         }
+    }
+
+    fn command_exists(cmd: &str) -> bool {
+        std::process::Command::new("which")
+            .arg(cmd)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    fn fold_binary_path(cfg: &VeerOsConfig) -> Option<String> {
+        for rel in ["target/debug/fold", "target/release/fold"] {
+            if let Some(found) = Self::path_exists_in_root(cfg, rel) {
+                return Some(found);
+            }
+        }
+        if Self::command_exists("fold") {
+            return Some("fold".to_string());
+        }
+        None
     }
 
     fn veer_vm_binary_path(cfg: &VeerOsConfig) -> Option<String> {
-        let p = PathBuf::from(&cfg.root_dir).join("target/debug/veer-vm");
-        if p.exists() {
-            Some(p.to_string_lossy().to_string())
-        } else {
-            None
+        for rel in ["target/debug/veer-vm", "target/release/veer-vm"] {
+            if let Some(found) = Self::path_exists_in_root(cfg, rel) {
+                return Some(found);
+            }
         }
+        None
     }
 
     fn kernel_path_qemu(cfg: &VeerOsConfig, target: &str) -> Option<String> {
-        let p = PathBuf::from(&cfg.root_dir).join(format!(
-            "target/riscv32imc-unknown-none-elf/debug/kernel-qemu-{target}"
-        ));
-        if p.exists() {
-            Some(p.to_string_lossy().to_string())
-        } else {
-            None
+        for profile in ["debug", "release"] {
+            let rel = format!("target/riscv32imc-unknown-none-elf/{profile}/kernel-qemu-{target}");
+            if let Some(found) = Self::path_exists_in_root(cfg, &rel) {
+                return Some(found);
+            }
         }
+        None
     }
 
     fn kernel_path_fold(cfg: &VeerOsConfig, target: &str) -> Option<String> {
-        let p = PathBuf::from(&cfg.root_dir).join(format!(
-            "target/riscv32imc-unknown-none-elf/debug/kernel-fold-{target}"
-        ));
-        if p.exists() {
-            Some(p.to_string_lossy().to_string())
-        } else {
-            None
+        for profile in ["debug", "release"] {
+            let rel = format!("target/riscv32imc-unknown-none-elf/{profile}/kernel-fold-{target}");
+            if let Some(found) = Self::path_exists_in_root(cfg, &rel) {
+                return Some(found);
+            }
         }
+        None
     }
 
     fn kernel_path_for_fold_runtime(cfg: &VeerOsConfig, target: &str) -> Option<String> {
@@ -190,20 +234,84 @@ impl VeerOsDriver {
     fn resolve_vm_script_path(cfg: &VeerOsConfig) -> Option<String> {
         let configured = Path::new(&cfg.vm_script_path);
         if configured.exists() {
-            return Some(cfg.vm_script_path.clone());
+            return Some(configured.to_string_lossy().to_string());
+        }
+        if !configured.is_absolute() {
+            let rel_from_root = PathBuf::from(Self::resolved_root_dir(cfg)).join(configured);
+            if rel_from_root.exists() {
+                return Some(rel_from_root.to_string_lossy().to_string());
+            }
         }
 
         // Backward/forward compatibility:
         // - legacy: scripts/veeros-vm
         // - folded microCM runtime: scripts/veer-vm
-        let candidates = [
-            format!("{}/scripts/veer-vm", cfg.root_dir),
-            format!("{}/scripts/veeros-vm", cfg.root_dir),
-        ];
+        let root = Self::resolved_root_dir(cfg);
+        let candidates = [format!("{root}/scripts/veer-vm"), format!("{root}/scripts/veeros-vm")];
 
         candidates
             .into_iter()
             .find(|candidate| Path::new(candidate).exists())
+    }
+
+    fn resolve_veer_cli_path(cfg: &VeerOsConfig) -> Option<String> {
+        let configured = Path::new(&cfg.veer_cli_path);
+        if configured.exists() {
+            return Some(configured.to_string_lossy().to_string());
+        }
+        if !configured.is_absolute() && Self::command_exists(&cfg.veer_cli_path) {
+            return Some(cfg.veer_cli_path.clone());
+        }
+        for rel in ["target/release/veer", "target/debug/veer"] {
+            if let Some(found) = Self::path_exists_in_root(cfg, rel) {
+                return Some(found);
+            }
+        }
+        if Self::command_exists("veer") {
+            return Some("veer".to_string());
+        }
+        None
+    }
+
+    fn resolve_veer_connect_path(cfg: &VeerOsConfig) -> Option<String> {
+        let configured = Path::new(&cfg.veer_connect_path);
+        if configured.exists() {
+            return Some(configured.to_string_lossy().to_string());
+        }
+        if !configured.is_absolute() && Self::command_exists(&cfg.veer_connect_path) {
+            return Some(cfg.veer_connect_path.clone());
+        }
+        for rel in [
+            "target/release/veer-connect",
+            "target/debug/veer-connect",
+            "scripts/veeros-connect",
+        ] {
+            if let Some(found) = Self::path_exists_in_root(cfg, rel) {
+                return Some(found);
+            }
+        }
+        if Self::command_exists("veeros-connect") {
+            return Some("veeros-connect".to_string());
+        }
+        None
+    }
+
+    fn normalize_net_mode(net_mode: &str) -> String {
+        let host_os = std::env::consts::OS;
+        let requested = net_mode.trim().to_ascii_lowercase();
+        match requested.as_str() {
+            "" => {
+                if host_os == "macos" { "user".to_string() } else { "nat".to_string() }
+            }
+            // Backward-compat: older EdgeFabric configs used "tap0" but
+            // veeros-vm expects nat|bridge|user.
+            "tap0" => {
+                if host_os == "macos" { "user".to_string() } else { "nat".to_string() }
+            }
+            // bridge mode is Linux-oriented; on macOS fall back to user mode.
+            "bridge" if host_os == "macos" => "user".to_string(),
+            other => other.to_string(),
+        }
     }
 
     pub fn sanitize_vm_name(name: &str, suffix: &str) -> String {
@@ -234,6 +342,8 @@ impl VeerOsDriver {
         memory_mb: u32,
         net_mode: &str,
     ) -> Result<CommandOutput> {
+        let net_mode_owned = Self::normalize_net_mode(net_mode);
+        let net_mode = net_mode_owned.as_str();
         if Self::is_fold_runtime_available(cfg, target) {
             let veer_vm = Self::veer_vm_binary_path(cfg)
                 .ok_or_else(|| EdgeFabricError::Internal("veer-vm binary not found".into()))?;
@@ -701,8 +811,8 @@ impl VeerOsDriver {
                     host: guest_ip.clone(),
                     port: Self::FOLD_SHELL_PORT,
                     connect_command: format!(
-                        "{} shell {} {}",
-                        cfg.veer_connect_path,
+                        "{} {} {}",
+                        Self::resolve_veer_connect_path(cfg).unwrap_or_else(|| cfg.veer_connect_path.clone()),
                         guest_ip,
                         Self::FOLD_SHELL_PORT
                     ),
@@ -730,12 +840,31 @@ impl VeerOsDriver {
             .get("ssh_port")
             .and_then(|v| v.parse::<u16>().ok())
             .ok_or_else(|| EdgeFabricError::Internal("VeerOS VM is missing ssh_port".into()))?;
+        let target = config
+            .get("target")
+            .map(|t| t.trim().to_ascii_lowercase())
+            .unwrap_or_else(|| "x86_64".to_string());
         let host = "localhost".to_string();
+        // veeros-vm uses SSH for x86_64 targets and VSC for esp32c6.
+        // Keep shell command generation aligned with veeros-vm connect logic.
+        let connect_command = if target == "x86_64" {
+            format!(
+                "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o LogLevel=ERROR -p {} veeros@{}",
+                port, host
+            )
+        } else {
+            format!(
+                "{} {} {}",
+                Self::resolve_veer_connect_path(cfg).unwrap_or_else(|| cfg.veer_connect_path.clone()),
+                host,
+                port
+            )
+        };
         Ok(VeerOsShellInfo {
             vm_name: vm_name.to_string(),
             host: host.clone(),
             port,
-            connect_command: format!("{} shell {} {}", cfg.veer_connect_path, host, port),
+            connect_command,
             sensor_feed_path: None,
         })
     }
@@ -765,7 +894,7 @@ impl VeerOsDriver {
                 "name": "IBM Quantum",
                 "access": {
                     "via_cli": cfg.veer_cli_path,
-                    "cli_available": Path::new(&cfg.veer_cli_path).exists(),
+                    "cli_available": Self::resolve_veer_cli_path(cfg).is_some(),
                     "endpoint_variants": ["default", "staging"]
                 },
                 "supports": {
@@ -881,17 +1010,40 @@ impl VeerOsDriver {
     }
 
     async fn run_command(cfg: &VeerOsConfig, program: &str, args: &[&str]) -> Result<CommandOutput> {
-        if !Path::new(program).exists() {
-            return Err(EdgeFabricError::Internal(format!(
-                "VeerOS runtime command not found: {program}",
-            )));
-        }
+        let root = Self::resolved_root_dir(cfg);
+        let resolved_program = if Path::new(program).exists() {
+            program.to_string()
+        } else if program.contains('/') {
+            let p = PathBuf::from(&root).join(program);
+            if p.exists() {
+                p.to_string_lossy().to_string()
+            } else {
+                return Err(EdgeFabricError::Internal(format!(
+                    "VeerOS runtime command not found: {program}",
+                )));
+            }
+        } else {
+            program.to_string()
+        };
 
-        let output = Command::new(program)
-            .current_dir(&cfg.root_dir)
+        let output = match Command::new(&resolved_program)
+            .current_dir(&root)
             .args(args)
             .output()
-            .await?;
+            .await
+        {
+            Ok(out) => out,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied && Path::new(&resolved_program).exists() => {
+                // Some script checkouts can lose +x; run them through bash as a fallback.
+                Command::new("bash")
+                    .current_dir(&root)
+                    .arg(&resolved_program)
+                    .args(args)
+                    .output()
+                    .await?
+            }
+            Err(e) => return Err(e.into()),
+        };
 
         Ok(CommandOutput {
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
@@ -901,15 +1053,15 @@ impl VeerOsDriver {
     }
 
     async fn run_veer_command(cfg: &VeerOsConfig, args: &[String]) -> Result<CommandOutput> {
-        if !Path::new(&cfg.veer_cli_path).exists() {
-            return Err(EdgeFabricError::Internal(format!(
-                "VeerOS CLI not found: {}",
+        let veer_cli = Self::resolve_veer_cli_path(cfg).ok_or_else(|| {
+            EdgeFabricError::Internal(format!(
+                "VeerOS CLI not found: {} (also checked target/release/veer, target/debug/veer and PATH)",
                 cfg.veer_cli_path
-            )));
-        }
+            ))
+        })?;
 
-        let output = Command::new(&cfg.veer_cli_path)
-            .current_dir(&cfg.root_dir)
+        let output = Command::new(&veer_cli)
+            .current_dir(Self::resolved_root_dir(cfg))
             .args(args)
             .output()
             .await?;

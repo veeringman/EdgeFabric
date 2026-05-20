@@ -1092,7 +1092,7 @@ async fn local_shell_session(
 
     let host = backend.shell_host.clone().unwrap_or_else(|| "localhost".into());
     let port = backend.shell_port.unwrap_or_default().to_string();
-    let mut child = match spawn_backend_shell_command(&state, &backend) {
+    let mut child = match spawn_backend_shell_command(&state, &backend).await {
         Ok(child) => child,
         Err(e) => {
             tracing::error!(device_id = %device_id, "Failed to spawn backend shell command: {e}");
@@ -1581,32 +1581,63 @@ fn resolve_veer_connect_path(state: &AppState) -> String {
     }
 }
 
-fn spawn_backend_shell_command(
+async fn spawn_backend_shell_command(
     state: &AppState,
     backend: &VirtualIotBackendRow,
 ) -> Result<tokio::process::Child, std::io::Error> {
-    let connect_command = backend
-        .config
-        .get("connect_command")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|cmd| !cmd.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| {
-            let host = backend.shell_host.clone().unwrap_or_else(|| "localhost".into());
-            let port = backend.shell_port.unwrap_or_default().to_string();
-            format!("{} shell {} {}", resolve_veer_connect_path(state), host, port)
-        });
+    let connect_command = if let Some(vm_name) = backend.vm_name.as_deref() {
+        match VeerOsDriver::shell_info(&state.veeros, vm_name).await {
+            Ok(info) => info.connect_command,
+            Err(e) => {
+                tracing::warn!(backend_id = %backend.id, vm_name = %vm_name, "shell_info refresh failed, using stored command: {e}");
+                backend
+                    .config
+                    .get("connect_command")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|cmd| !cmd.is_empty())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| {
+                        let host = backend.shell_host.clone().unwrap_or_else(|| "localhost".into());
+                        let port = backend.shell_port.unwrap_or_default().to_string();
+                        format!("{} {} {}", resolve_veer_connect_path(state), host, port)
+                    })
+            }
+        }
+    } else {
+        backend
+            .config
+            .get("connect_command")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|cmd| !cmd.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                let host = backend.shell_host.clone().unwrap_or_else(|| "localhost".into());
+                let port = backend.shell_port.unwrap_or_default().to_string();
+                format!("{} {} {}", resolve_veer_connect_path(state), host, port)
+            })
+    };
 
-    let mut parts = connect_command.split_whitespace();
-    let program = parts.next().ok_or_else(|| {
+    let mut tokens: Vec<String> = connect_command
+        .split_whitespace()
+        .map(|part| part.to_string())
+        .collect();
+    let program = tokens.first().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "backend connect_command is empty")
-    })?;
+    })?.clone();
+
+    if tokens.get(1).map(|t| t.eq_ignore_ascii_case("shell")) == Some(true)
+        && (program.ends_with("veer-connect") || program.ends_with("veeros-connect"))
+    {
+        tokens.remove(1);
+    }
+    let args = tokens.into_iter().skip(1).collect::<Vec<_>>();
 
     Command::new(program)
         .current_dir(&state.veeros.root_dir)
         .env("TERM", "xterm-256color")
-        .args(parts)
+        .args(args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())

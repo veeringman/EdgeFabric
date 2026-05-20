@@ -278,7 +278,7 @@ pub struct Device {
 
 // -- Agent types --
 
-#[derive(Deserialize, Clone, Debug, Default)]
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
 pub struct AgentListResponse {
     pub agents: Vec<Agent>,
     pub total: usize,
@@ -353,22 +353,6 @@ pub struct VirtualIotConfig {
 pub struct VirtualIotBackendListResponse {
     pub backends: Vec<VirtualIotBackend>,
     pub total: usize,
-}
-
-#[derive(Deserialize, Serialize, Clone, Debug, Default)]
-pub struct AgentListResponse {
-    pub agents: Vec<Agent>,
-    pub total: usize,
-}
-
-#[derive(Deserialize, Serialize, Clone, Debug)]
-pub struct Agent {
-    pub id: String,
-    pub name: String,
-    pub region: String,
-    pub streaming_url: Option<String>,
-    pub status: String,
-    pub capabilities: Vec<String>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]

@@ -2379,10 +2379,36 @@ fn VirtualIotViewer(
     let (script_busy, set_script_busy) = signal(false);
     let (script_status, set_script_status) = signal(Option::<String>::None);
     let (active_tab, set_active_tab) = signal("detail".to_string());
+    let (detail_full_window, set_detail_full_window) = signal(false);
+    let (history_panel_visible, set_history_panel_visible) = signal(true);
     // Once user opens the shell tab, keep the terminal mounted so switching
     // back to "Detail" and returning doesn't kill the WS / xterm session.
     let (shell_opened, set_shell_opened) = signal(false);
     let device_id_value = StoredValue::new(device_id.clone());
+
+    // When detail pane is expanded, toggle a body class so shell chrome
+    // (sidebar/topbar) can be hidden and restored cleanly.
+    Effect::new(move || {
+        let is_full = detail_full_window.get();
+        if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+            if let Some(body) = document.body() {
+                let classes = body.class_list();
+                if is_full {
+                    let _ = classes.add_1("virtual-iot-full-window");
+                } else {
+                    let _ = classes.remove_1("virtual-iot-full-window");
+                }
+            }
+        }
+    });
+
+    on_cleanup(move || {
+        if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+            if let Some(body) = document.body() {
+                let _ = body.class_list().remove_1("virtual-iot-full-window");
+            }
+        }
+    });
 
     // Free-form scene layout: each item (controller + each sensor module) stores [x, y, w, h]
     // in container-relative px. Seeded on first render per enabled-sensors list.
@@ -2665,7 +2691,13 @@ fn VirtualIotViewer(
     };
 
     view! {
-        <div class="card virtual-iot-viewer">
+        <div class=move || {
+            if detail_full_window.get() {
+                "card virtual-iot-viewer is-full-window"
+            } else {
+                "card virtual-iot-viewer"
+            }
+        }>
             <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; gap:1rem;">
                 <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
                     <DeviceOsIcon os="virtual_iot".to_string() class="os-icon-title"/>
@@ -2726,6 +2758,21 @@ fn VirtualIotViewer(
                     </div>
                 </div>
                 <div style="display:flex; gap:0.5rem; align-items:center;">
+                    <Show when=move || active_tab.get() == "detail">
+                        <button
+                            class="btn btn-ghost btn-sm"
+                            title=move || {
+                                if detail_full_window.get() {
+                                    "Restore pane size".to_string()
+                                } else {
+                                    "Expand to full window".to_string()
+                                }
+                            }
+                            on:click=move |_| set_detail_full_window.update(|is_full| *is_full = !*is_full)
+                        >
+                            {move || if detail_full_window.get() { "🗗 Restore" } else { "⛶ Full Window" }}
+                        </button>
+                    </Show>
                     <Show when=move || backend_attached.get() && active_tab.get() == "shell">
                         <a
                             class="btn btn-ghost btn-sm"
@@ -2735,7 +2782,12 @@ fn VirtualIotViewer(
                             title="Pop the shell out to a new browser tab"
                         >"⇗ Pop out"</a>
                     </Show>
-                    <button class="btn btn-ghost btn-sm" on:click=move |_| on_close.run(())>"✕ Close"</button>
+                    <button class="btn btn-ghost btn-sm" on:click=move |_| {
+                        set_detail_full_window.set(false);
+                        on_close.run(());
+                    }>
+                        "✕ Close"
+                    </button>
                 </div>
             </div>
 
@@ -3002,31 +3054,46 @@ fn VirtualIotViewer(
                         </div>
                     </Show>
 
-                    <div class="virtual-iot-runtime-log card-section">
-                        <div class="virtual-iot-section-title">"Recent sensor history"</div>
-                        <div class="virtual-iot-runtime-log-table">
-                            <Show
-                                when=move || !sensor_log.get().is_empty()
-                                fallback=move || view! { <div class="virtual-iot-runtime-log-empty">"No readings stored yet. Use a preset, slider, or scenario trigger to generate simulated telemetry."</div> }
-                            >
-                                {move || sensor_log.get().into_iter().rev().take(20).map(|entry| {
-                                    let is_event = entry.source.starts_with("event:");
-                                    let source_text = entry.source.clone();
-                                    view! {
-                                        <div class="virtual-iot-runtime-log-row" class:is-event=is_event>
-                                            <span class="virtual-iot-runtime-log-ts mono">{virtual_iot_short_ts(&entry.ts)}</span>
-                                            <span class="virtual-iot-runtime-log-sensor">{virtual_iot_sensor_label(&entry.sensor)}</span>
-                                            <span class="virtual-iot-runtime-log-value mono">{entry.value}</span>
-                                            <span
-                                                class="virtual-iot-runtime-log-source"
-                                                class:is-event=is_event
-                                            >{source_text}</span>
-                                        </div>
-                                    }
-                                }).collect::<Vec<_>>()}
-                            </Show>
+                    <Show when=move || !history_panel_visible.get()>
+                        <div style="display:flex; justify-content:flex-end;">
+                            <button class="btn btn-ghost btn-sm" on:click=move |_| set_history_panel_visible.set(true)>"Show sensor history"</button>
                         </div>
-                    </div>
+                    </Show>
+
+                    <Show when=move || history_panel_visible.get()>
+                        <div class="virtual-iot-runtime-log card-section">
+                            <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
+                                <div class="virtual-iot-section-title">"Recent sensor history"</div>
+                                <button
+                                    class="btn btn-ghost btn-sm"
+                                    title="Hide sensor history"
+                                    on:click=move |_| set_history_panel_visible.set(false)
+                                >"✕"</button>
+                            </div>
+                            <div class="virtual-iot-runtime-log-table">
+                                <Show
+                                    when=move || !sensor_log.get().is_empty()
+                                    fallback=move || view! { <div class="virtual-iot-runtime-log-empty">"No readings stored yet. Use a preset, slider, or scenario trigger to generate simulated telemetry."</div> }
+                                >
+                                    {move || sensor_log.get().into_iter().rev().take(20).map(|entry| {
+                                        let is_event = entry.source.starts_with("event:");
+                                        let source_text = entry.source.clone();
+                                        view! {
+                                            <div class="virtual-iot-runtime-log-row" class:is-event=is_event>
+                                                <span class="virtual-iot-runtime-log-ts mono">{virtual_iot_short_ts(&entry.ts)}</span>
+                                                <span class="virtual-iot-runtime-log-sensor">{virtual_iot_sensor_label(&entry.sensor)}</span>
+                                                <span class="virtual-iot-runtime-log-value mono">{entry.value}</span>
+                                                <span
+                                                    class="virtual-iot-runtime-log-source"
+                                                    class:is-event=is_event
+                                                >{source_text}</span>
+                                            </div>
+                                        }
+                                    }).collect::<Vec<_>>()}
+                                </Show>
+                            </div>
+                        </div>
+                    </Show>
                 </div>
             </Show>
         </div>

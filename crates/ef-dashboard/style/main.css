@@ -2990,6 +2990,35 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
     flex: 1;
     min-width: 0;
 }
+.virtual-iot-viewer.is-full-window {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    margin: 0;
+    width: 100vw;
+    height: 100vh;
+    max-height: none;
+    display: flex;
+    flex-direction: column;
+}
+.virtual-iot-viewer.is-full-window .card-header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+.virtual-iot-viewer.is-full-window .virtual-iot-workbench {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+}
+body.virtual-iot-full-window .sidebar,
+body.virtual-iot-full-window .sidebar-backdrop,
+body.virtual-iot-full-window .topbar {
+    display: none !important;
+}
+body.virtual-iot-full-window .main-content {
+    margin-left: 0 !important;
+}
 .virtual-iot-board-svg {
     width: min(360px, 100%);
     height: auto;
@@ -3326,13 +3355,14 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: auto;
-    height: 100%;
+    width: 100%;
+    min-height: 220px;
+    height: auto;
     max-width: 100%;
 }
 .virtual-iot-controller-board-wrap .virtual-iot-board-holder > svg.virtual-iot-board-svg {
-    height: 100%;
-    width: auto;
+    width: min(360px, 100%);
+    height: auto;
     max-width: 100%;
     display: block;
 }

@@ -75,6 +75,8 @@ pub struct AppState {
     pub jwt_secret: String,
     pub veeros: VeerOsConfig,
     pub integrations: IntegrationManager,
+    /// Per-device sensor event bus for live-viewer WebSocket streaming.
+    pub sensor_bus: crate::sensor_bus::SensorBus,
 }
 
 // Allow handlers to extract PgPool directly from AppState

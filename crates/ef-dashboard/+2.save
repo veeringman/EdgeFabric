@@ -1,0 +1,243 @@
+SSWORD':'edgefabric','PATH':'/usr/bin:/bin'},capture_output=True,text=True) 
+print(res.stdout) "
+ q
+ pgrep -af 'ef-api|ef-agent|trunk' 2>/dev/null
+ cd /home/vijay/rnd/projects/EdgeFabric && ps aux | grep -E 'ef-api|ef-agent|trunk' | grep -v grep
+ reset && cd /home/vijay/rnd/projects/EdgeFabric && echo "=== FRESH TERMINAL ==="
+ cd /home/vijay/rnd/projects/EdgeFabric && curl -s http://localhost:7070/health && echo "" && curl -s http://localhost:6060/health && echo ""
+ ps aux | grep -E 'ef-api|ef-agent|trunk' | grep -v grep
+ ps aux | grep -E 'ef-api|ef-agent|trunk' | grep -v grep 2>/dev/null; echo "---"; curl -s http://localhost:6060/health 2>/dev/null; echo "---"; curl -s http://localhost:7070/health 2>/dev/null
+ pgrep -a ef-api; pgrep -a ef-agent; pgrep -a trunk
+ pgrep -la "ef-" 2>&1 || echo "no ef processes"
+ ss -tlnp | grep -E '6060|7070|9080' 2>&1; echo done
+ echo "START"; ss -tlnp 2>&1 | head -30; echo "END"
+ ss -tlnp 2>&1 | grep -E '6060|7070|9080|50051' ; echo "STATUS=$?"
+ cd /home/vijay/rnd/projects/EdgeFabric && ss -tlnp 2>&1 | cat
+ netstat -tlnp 2>/dev/null | grep -E '6060|7070|9080' || ss -tlnp 2>/dev/null | grep -E '6060|7070|9080' || echo "NONE FOUND"
+ cd /home/vijay/rnd/projects/EdgeFabric && timeout 5 websocat -v ws://127.0.0.1:6060/api/v1/devices/c3ac380b-8f4e-4657-9f75-a0a46aa510b2/stream 2>&1; echo "EXIT=$?"
+ echo "TEST" && timeout 5 websocat ws://127.0.0.1:6060/api/v1/devices/c3ac380b-8f4e-4657-9f75-a0a46aa510b2/stream 2>&1 | head -20; echo "RC=$?"
+ python3 -c "
+import asyncio, websockets, json, sys
+async def test():
+    uri = 'ws://127.0.0.1:6060/api/v1/devices/c3ac380b-8f4e-4657-9f75-a0a46aa510b2/stream'
+    try:
+        async with websockets.connect(uri, open_timeout=5) as ws:
+            print('Connected!')
+            for i in range(3):
+                try:
+                    msg = await asyncio.wait_for(ws.recv(), timeout=3)
+                    if isinstance(msg, str):
+                        print(f'Text: {msg[:200]}')
+                    else:
+                        print(f'Binary: {len(msg)} bytes')
+                except asyncio.TimeoutError:
+                    print(f'Timeout waiting for msg {i}')
+                    break
+    except Exception as e:
+        print(f'Error: {e}')
+asyncio.run(test())
+" 2>&1
+ cd /home/vijay/rnd/projects/EdgeFabric && python3 << 'EOF'
+import asyncio, json, sys
+try:
+    import websockets
+except ImportError:
+    import subprocess
+    subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'websockets', '-q'])
+    import websockets
+
+async def test():
+    # Test IoT device
+    device_id = "c3ac380b-8f4e-4657-9f75-a0a46aa510b2"
+    uri = f"ws://127.0.0.1:6060/api/v1/devices/{device_id}/stream"
+    print(f"Connecting to {uri}")
+    try:
+        async with websockets.connect(uri, open_timeout=5) as ws:
+            print("Connected!")
+            for i in range(5):
+                try:
+                    msg = await asyncio.wait_for(ws.recv(), timeout=3)
+                    if isinstance(msg, str):
+                        print(f"  Text[{i}]: {msg[:300]}")
+                    else:
+                        print(f"  Binary[{i}]: {len(msg)} bytes")
+                except asyncio.TimeoutError:
+                    print(f"  Timeout waiting for msg {i}")
+                    break
+    except Exception as e:
+        print(f"Error: {type(e).__name__}: {e}")
+
+asyncio.run(test())
+EOF
+ python3 /home/vijay/rnd/projects/EdgeFabric/scripts/test_ws.py c3ac380b-8f4e-4657-9f75-a0a46aa510b2
+ TERM=dumb python3 /home/vijay/rnd/projects/EdgeFabric/scripts/test_ws.py c3ac380b-8f4e-4657-9f75-a0a46aa510b2 2>&1 | cat
+ python3 /home/vijay/rnd/projects/EdgeFabric/scripts/test_ws2.py c3ac380b-8f4e-4657-9f75-a0a46aa510b2; cat /tmp/ws_test.log
+ cat /tmp/ws_test.log 2>/dev/null; echo "---EXIT---"
+ cd /home/vijay/rnd/projects/EdgeFabric && cargo check -p ef-dashboard 2>&1 | tail -20
+ cd /home/vijay/rnd/projects/EdgeFabric && cargo check -p ef-dashboard 2>&1 | cat | tail -20
+ cd /home/vijay/rnd/projects/EdgeFabric && CARGO_TERM_COLOR=never cargo check -p ef-dashboard 2>&1 | tee /tmp/dashboard_check.log | tail -30
+ cd /home/vijay/rnd/projects/EdgeFabric && CARGO_TERM_COLOR=never cargo check -p ef-dashboard > /tmp/dashboard_check.log 2>&1; echo "EXIT=$?"
+ sshpass -p 'vijay42o' ssh -o StrictHostKeyChecking=no -o PubkeyAuthentication=no -o ConnectTimeout=5 vijay@192.168.29.5 "ps aux | grep -E 'cargo|rustc' | grep -v grep | head -5; echo '---'; ls -la ~/rnd/projects/EdgeFabric/target/debug/ef-agent 2>/dev/null && echo 'BINARY_EXISTS' || echo 'NO_BINARY_YET'"
+ sshpass -p 'vijay42o' ssh -o StrictHostKeyChecking=no -o PubkeyAuthentication=no -o ConnectTimeout=5 vijay@192.168.29.5 'ps aux | grep -E "cargo|rustc" | grep -v grep | head -5; echo "---"; ls -la ~/rnd/projects/EdgeFabric/target/debug/ef-agent 2>/dev/null && echo BINARY_EXISTS || echo NO_BINARY_YET'
+ ssh -o StrictHostKeyChecking=no -o PubkeyAuthentication=no -o ConnectTimeout=5 vijay@192.168.29.5 echo "ALIVE" 2>&1 < /dev/null; echo "RC=$?"
+ ping -c 1 -W 2 192.168.29.5; echo "PING_RC=$?"
+ sshpass -p 'vijay42o' ssh -o StrictHostKeyChecking=no -o PubkeyAuthentication=no -o ConnectTimeout=10 vijay@192.168.29.5 'ps aux | grep -E "cargo|rustc" | grep -v grep | wc -l; echo "---"; ls -la ~/rnd/projects/EdgeFabric/target/debug/ef-agent 2>/dev/null && echo BINARY_EXISTS || echo NO_BINARY_YET'
+ grep -iE 'Registered|error|register' /home/vijay/rnd/projects/EdgeFabric/logs/ef-agent-new.log | tail -15; echo "==="; wc -l /home/vijay/rnd/projects/EdgeFabric/logs/ef-agent-new.log
+ echo "=== Test 1: socat with colons in path (no pipe) ===" && timeout 3 socat -d -d STDOUT "file:/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_E4:B3:23:B5:DD:28-if00,b115200,raw,echo=0,crnl" 2>&1; echo "EXIT1=$?" && echo "=== Test 2: socat with resolved ttyACM1 (no pipe) ===" && timeout 3 socat -d -d STDOUT "file:/dev/ttyACM1,b115200,raw,echo=0,crnl" 2>&1; echo "EXIT2=$?"
+ echo "=== Test 1: socat by-id path ===" && timeout 3 socat -d -d /dev/null "file:/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_E4:B3:23:B5:DD:28-if00,b115200,raw,echo=0" 2>&1; echo "RC1=$?" && echo "=== Test 2: socat ttyACM1 path ===" && timeout 3 socat -d -d /dev/null "file:/dev/ttyACM1,b115200,raw,echo=0" 2>&1; echo "RC2=$?"
+ timeout 3 socat -d -d /dev/null "file:/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_E4:B3:23:B5:DD:28-if00,b115200,raw,echo=0" > /tmp/socat1.log 2>&1; echo "RC1=$?"; cat /tmp/socat1.log
+ cat /tmp/socat1.log 2>/dev/null; echo "---"; timeout 3 socat -d -d /dev/null "file:/dev/ttyACM1,b115200,raw,echo=0" > /tmp/socat2.log 2>&1; echo "RC2=$?"; cat /tmp/socat2.log
+ bash -c 'timeout 2 socat -d -d /dev/null "file:/dev/ttyACM1,b115200,raw,echo=0" >/tmp/s2.log 2>&1; echo "ACM1_RC=$?"' && bash -c 'timeout 2 socat -d -d /dev/null "file:/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_E4:B3:23:B5:DD:28-if00,b115200,raw,echo=0" >/tmp/s1.log 2>&1; echo "BYID_RC=$?"' && echo "--- ttyACM1 ---" && cat /tmp/s2.log && echo "--- by-id ---" && cat /tmp/s1.log
+ echo "check files:" && ls -la /tmp/s1.log /tmp/s2.log 2>&1 && echo "=== s2 (ttyACM1) ===" && cat /tmp/s2.log 2>/dev/null && echo "=== s1 (by-id) ===" && cat /tmp/s1.log 2>/dev/null
+ pwd
+ cd /home/vijay/rnd/projects/EdgeFabric && cargo build -p ef-agent -p ef-api 2>&1 | tail -20
+ sshpass -p 'vijay42o' ssh -o StrictHostKeyChecking=no -o PubkeyAuthentication=no vijay@192.168.29.5 "head -50 /tmp/ef-agent.log 2>&1"
+ sshpass -p 'vijay42o' ssh -o StrictHostKeyChecking=no -o PubkeyAuthentication=no vijay@192.168.29.5 "head -50 /tmp/ef-agent.log" 2>&1 | cat
+ sshpass -p 'vijay42o' ssh -o StrictHostKeyChecking=no -o PubkeyAuthentication=no vijay@192.168.29.5 "cat /tmp/ef-agent.log | head -50"
+ sshpass -p 'vijay42o' ssh -T -o StrictHostKeyChecking=no -o PubkeyAuthentication=no vijay@192.168.29.5 'head -50 /tmp/ef-agent.log'
+ sshpass -p 'vijay42o' ssh -T -o StrictHostKeyChecking=no -o PubkeyAuthentication=no vijay@192.168.29.5 << 'ENDSSH'
+grep -i "agent" /tmp/ef-agent.log | head -20
+ENDSSH
+ grep -iE 'iphone|ios|simulator|No such file|error 2' /home/vijay/rnd/projects/EdgeFabric/logs/ef-agent-new.log | tail -30
+ PGPASSWORD=edgefabric psql -h localhost -U edgefabric -d edgefabric -t --no-align -c "SELECT id, name, os, serial, agent_id FROM devices WHERE os IN ('ios','simulator','iphone') ORDER BY name;" 2>&1 | cat
+ PGPASSWORD=edgefabric psql -h localhost -U edgefabric -d edgefabric --no-align -t -c "SELECT id, name, os, serial, agent_id FROM devices WHERE os IN ('ios','simulator','iphone') ORDER BY name;" 2>&1
+ PGPASSWORD=edgefabric psql -h localhost -U edgefabric -d edgefabric -c "SELECT id, name, os, serial, agent_id FROM devices ORDER BY os, name;" 2>&1 | head -30
+ PGPASSWORD=edgefabric psql -h localhost -U edgefabric -d edgefabric --no-align --tuples-only --pset=pager=off -c "SELECT id, name, os, serial, agent_id FROM devices ORDER BY os, name;" 2>&1 | cat
+ export PGPASSWORD=edgefabric && psql -h localhost -U edgefabric -d edgefabric -Atc "SELECT id || '|' || name || '|' || os || '|' || serial || '|' || agent_id FROM devices ORDER BY os, name" 2>&1 | cat
+ which sshpass 2>&1; which ssh 2>&1; which xcrun 2>&1; echo "---"; tail -50 /home/vijay/rnd/projects/EdgeFabric/logs/ef-agent-new.log 2>/dev/null | grep -iE 'error|fail|spawn|ssh|simulator|ios|No such' | tail -20
+ which sshpass && which ssh && which xcrun; echo "==="; tail -100 /home/vijay/rnd/projects/EdgeFabric/logs/ef-agent-new.log | grep -iE 'error|fail|spawn|ssh|simulator|No such' | tail -20
+ echo "SSHPASS=$(which sshpass 2>&1)"; echo "SSH=$(which ssh 2>&1)"; echo "XCRUN=$(which xcrun 2>&1)"
+ printf "SSHPASS=%s\nSSH=%s\nXCRUN=%s\n" "$(command -v sshpass)" "$(command -v ssh)" "$(command -v xcrun)"
+ reset
+ bash -c 'printf "SSHPASS=%s\nSSH=%s\nXCRUN=%s\n" "$(command -v sshpass)" "$(command -v ssh)" "$(command -v xcrun)"'
+ cd /home/vijay/rnd/projects/EdgeFabric && PGPASSWORD=edgefabric psql -h localhost -U edgefabric -d edgefabric -XAtc "SELECT name, streaming_url, last_heartbeat FROM agents ORDER BY last_heartbeat DESC"
+ cd /home/vijay/rnd/projects/EdgeFabric/crates/ef-dashboard && cargo check 2>&1 | cat
+ cd /home/vijay/rnd/projects/EdgeFabric/crates/ef-dashboard && cargo check 2>&1
+ cd /home/vijay/rnd/projects/EdgeFabric/crates/ef-dashboard && cargo check 2>&1 | tail -20
+ cd /home/vijay/rnd/projects/EdgeFabric && cargo check -p ef-dashboard 2>&1 | tail -25
+ bash -c "cd /home/vijay/rnd/projects/EdgeFabric && cargo check -p ef-dashboard 2>&1 | tail -25"
+ echo "check done" && cd /home/vijay/rnd/projects/EdgeFabric && cargo check -p ef-dashboard --message-format short 2>&1 | grep -E "error|warning.*unused|Finished" | tail -10
+ echo "TEST"; rustup toolchain list 2>&1 | head -3
+ cd /home/vijay/rnd/projects/EdgeFabric && git status --short
+ cd /home/vijay/rnd/projects/EdgeFabric && git --no-pager status --short
+ cd /home/vijay/rnd/projects/EdgeFabric && git status --short 2>&1 | cat
+ cd /home/vijay/rnd/projects/EdgeFabric; git status -s 2>&1; echo "---DONE---"
+ GIT_PAGER=cat git -C /home/vijay/rnd/projects/EdgeFabric status -s 2>&1; echo EXITCODE=$?
+ GIT_PAGER="" PAGER="" git -C /home/vijay/rnd/projects/EdgeFabric diff --stat HEAD 2>&1 | head -30; echo "==="; GIT_PAGER="" PAGER="" git -C /home/vijay/rnd/projects/EdgeFabric status --porcelain 2>&1 | head -30
+
+ env -u GIT_PAGER -u PAGER git -c core.pager=cat -C /home/vijay/rnd/projects/EdgeFabric status --porcelain 2>&1 | head -40
+ bash -c 'cd /home/vijay/rnd/projects/EdgeFabric && git status --porcelain' 2>&1 
+ echo hello
+ cd /home/vijay/rnd/projects/EdgeFabric && git add -A && git status --short 2>&1 | head -30
+ wc -l /home/vijay/rnd/projects/EdgeFabric/crates/ef-dashboard/src/api.rs
+ wc -l /home/vijay/rnd/projects/EdgeFabric/crates/ef-dashboard/style/main.css
+ cat /home/vijay/rnd/projects/EdgeFabric/crates/ef-dashboard/style/main.css | wc -l
+ cd /home/vijay/rnd/projects/EdgeFabric && cargo check -p ef-core -p ef-db -p ef-api 2>&1 | tail -40
+ grep -r '"ef-dashboard"\|name.*ef-dashboard' /home/vijay/rnd/projects/EdgeFabric/crates/ef-dashboard/Cargo.toml | head -5
+ cd /home/vijay/rnd/projects/EdgeFabric && PGPASSWORD=edgefabric psql -h localhost -U edgefabric -d edgefabric -XAtc "SELECT EXISTS(SELECT 1 FROM pg_type t JOIN pg_enum e ON t.oid = e.enumtypid WHERE t.typname='device_os' AND e.enumlabel='virtual_iot');" 2>&1
+ kill 521787 2>/dev/null; sleep 0.5; echo "killed"
+ cd /home/vijay/rnd/projects/EdgeFabric && cargo check --manifest-path crates/ef-dashboard/Cargo.toml --target wasm32-unknown-unknown
+ cd /home/vijay/rnd/projects/EdgeFabric && cargo check --manifest-path crates/ef-dashboard/Cargo.toml --target wasm32-unknown-unknown 2>&1 | tail -80
+ cd /home/vijay/rnd/projects/EdgeFabric && curl -s -o /dev/null -w "%{http_code}" http://localhost:6060/health
+ cd /home/vijay/rnd/projects/EdgeFabric && pgrep -a ef-api || true
+ cd /home/vijay/rnd/projects/EdgeFabric && (curl -s -o /dev/null -w "API_HTTP=%{http_code}\n" http://localhost:6060/health; pgrep -a ef-api || true) | cat
+ cd /home/vijay/rnd/projects/EdgeFabric && cargo check --manifest-path crates/ef-dashboard/Cargo.toml --target wasm32-unknown-unknown 2>&1 | grep -E "^error|Finished" | cat
+ cd /home/vijay/rnd/projects/EdgeFabric && cargo check --manifest-path crates/ef-dashboard/Cargo.toml --target wasm32-unknown-unknown 2>&1 | grep -E "^error|Finished" | cat
+ cd /home/vijay/rnd/projects/EdgeFabric && curl -s -o /dev/null -w "API_HTTP=%{http_code}\n" http://localhost:6060/health | cat
+ cd /home/vijay/rnd/projects/EdgeFabric && pgrep -af "trunk serve|trunk" || true
+ cd /home/vijay/rnd/projects/EdgeFabric && ss -ltnp | grep ":9080\|:8080\|:8081" || true
+ cd /home/vijay/rnd/projects/EdgeFabric/crates/ef-dashboard && trunk clean
+ cd /home/vijay/rnd/projects/EdgeFabric/crates/ef-dashboard && rm -rf dist .trunk && mkdir -p dist
+ cd /home/vijay/rnd/projects/EdgeFabric && curl -s -o /dev/null -w "DASH_HTTP=%{http_code}\n" http://127.0.0.1:9080/
+ cd /home/vijay/rnd/projects/EdgeFabric && pgrep -af "trunk" || true
+ cd /home/vijay/rnd/projects/EdgeFabric && ss -ltnp | grep ':9080\|:8080\|:8081' || true
+ cd /home/vijay/rnd/projects/EdgeFabric && pkill -f "trunk" || true; pkill -f "wasm-bindgen" || true; echo "killed trunk/wasm-bindgen if running"
+ cd /home/vijay/rnd/projects/EdgeFabric/crates/ef-dashboard && rm -rf .trunk dist && trunk clean && trunk build --verbose
+ cd /home/vijay/rnd/projects/EdgeFabric && curl -s -o /dev/null -w "UI_9080_HTTP=%{http_code}\n" http://127.0.0.1:9080/ | cat
+ cd /home/vijay/rnd/projects/EdgeFabric && curl -s -o /dev/null -w "API_6060_HTTP=%{http_code}\n" http://127.0.0.1:6060/health | cat
+ cd /home/vijay/rnd/projects/EdgeFabric && pkill -f "trunk serve" || true
+ cd /home/vijay/rnd/projects/EdgeFabric/crates/ef-dashboard && trunk clean
+ set -e
+ss -ltnp | awk 'NR==1 || /:6060|:9080/'
+ set -e
+for p in 6060 9080; do
+  echo "PORT $p"
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:$p -sTCP:LISTEN || true
+  else
+    ss -ltnp | grep -E ":$p\\b" || true
+  fi
+  echo "---"
+done
+ set -e
+PIDS=$(ss -ltnp | awk '/:9080\b/ { if (match($0, /pid=[0-9]+/)) { print substr($0, RSTART+4, RLENGTH-4) } }' | sort -u)
+if [[ -n "$PIDS" ]]; then
+  echo "Killing PIDs on 9080: $PIDS"
+  kill $PIDS
+else
+  echo "No listener found on 9080"
+fi
+sleep 0.5
+echo "--- Post-check ---"
+for p in 6060 9080; do
+  echo "PORT $p"
+  ss -ltnp | grep -E ":$p\\b" || echo "free"
+  echo "---"
+done
+ set -e
+printf "ROOT_STATUS="; curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9080/
+printf "\nPROXY_HEALTH="; curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9080/health
+echo
+ ss -ltnp | grep -E ':9080\b|:6060\b' || true
+ echo -n 'ROOT='; curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9080/; echo; echo -n 'LOCALHOST='; curl -s -o /dev/null -w '%{http_code}' http://localhost:9080/; echo
+ cd /home/vijay/rnd/projects/EdgeFabric && jq empty crates/ef-dashboard/assets/board_catalog.json
+ cd /home/vijay/rnd/projects/EdgeFabric && cargo check --manifest-path crates/ef-dashboard/Cargo.toml --target wasm32-unknown-unknown
+ cd /home/vijay/rnd/projects/EdgeFabric && jq empty crates/ef-dashboard/assets/board_catalog.json && echo JSON_OK
+ cd /home/vijay/rnd/projects/EdgeFabric && cargo check --manifest-path crates/ef-dashboard/Cargo.toml --target wasm32-unknown-unknown 2>&1 | tail -80
+ cd /home/vijay/rnd/projects/EdgeFabric && CARGO_TERM_PROGRESS_WHEN=never CARGO_TERM_COLOR=never cargo check --manifest-path crates/ef-dashboard/Cargo.toml --target wasm32-unknown-unknown > /tmp/efdash-check.log 2>&1 && tail -80 /tmp/efdash-check.log
+ cd /home/vijay/rnd/projects/EdgeFabric && jq '[.controllers[] | {id, visual_family, has_visual_layout: (.visual_layout != null)}]' crates/ef-dashboard/assets/board_catalog.json
+ python3 -c "
+import json
+data = json.load(open('crates/ef-dashboard/assets/board_catalog.json'))
+for c in data['controllers']:
+    has_vl = 'visual_layout' in c
+    print(f\"{c['id']:40s} visual_family={c.get('visual_family',''):20s} has_layout={has_vl}\")
+"
+ cd /home/vijay/rnd/projects/EdgeFabric/crates/ef-dashboard/src/pages
+python3 - <<'PYEOF'
+with open('virtual_iot_designer.rs', 'r') as f:
+    content = f.read()
+
+# Step 1: Remove unused variable declarations in BoardPreview
+old_vars = """        let is_esp32 = profile.visual_family == "esp32";
+        let is_pi_sbc = profile.visual_family == "pi-sbc";
+        let is_pico = profile.visual_family == "pico";
+        let chip_label = profile.chip_label.as_str();"""
+new_vars = """        let chip_label = profile.chip_label.as_str();"""
+
+if old_vars in content:
+    content = content.replace(old_vars, new_vars, 1)
+    print("Step 1 done: removed unused vars")
+else:
+    print("Step 1 FAILED: pattern not found")
+    import sys; sys.exit(1)
+
+with open('virtual_iot_designer.rs', 'w') as f:
+    f.write(content)
+print("File written")
+PYEOF
+ python3 /tmp/patch_designer.py 2>&1 || true
+ python3 /tmp/patch_designer.py
+ cd /home/vijay/rnd/projects/EdgeFabric/crates/ef-dashboard && trunk build
+ pkill -f "trunk serve" || true
+ cd /home/vijay/rnd/projects/EdgeFabric/crates/ef-dashboard && trunk build 2>&1 | tail -60
+ cd /home/vijay/rnd/projects/EdgeFabric && cargo check --manifest-path crates/ef-dashboard/Cargo.toml --target wasm32-unknown-unknown 2>&1 | tail -80
+ pkill -f "trunk serve --address 0.0.0.0 --port 9080" || true; pkill -f "trunk serve" || true; pgrep -af "trunk serve" || true
+ command -v wasm-bindgen || true; command -v wasm-bindgen-cli || true; rustup target list --installed | rg wasm32 || true
+ ss -ltnp | rg ':9080' || true; pgrep -af 'trunk serve' || true
+ cargo install wasm-bindgen-cli --locked
+ pkill -f "trunk serve" || true; pkill -f "trunk" || true
+ echo -n ROOT=; curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9080/; echo; echo -n HEALTH=; curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9080/health; echo; pgrep -af "trunk serve" || true
+ cd /home/vijay/rnd/projects/EdgeFabric && git status --short && echo '---' && git branch --show-current && echo '---' && git remote -v | head -4
+ cd /home/vijay/rnd/projects/EdgeFabric && git add -A && git commit -m "Add Virtual IoT designer and catalog-driven board rendering" && git push
+

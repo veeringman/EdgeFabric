@@ -25,6 +25,7 @@ tonic-health = { workspace = true }
 tonic-reflection = { workspace = true }
 prost = { workspace = true }
 tokio-stream = { workspace = true }
+dashmap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
@@ -44,6 +45,7 @@ tokio-tungstenite = "0.26"
 utoipa = { workspace = true }
 utoipa-swagger-ui = { workspace = true }
 zip = "0.6"
+libc = "0.2"
 
 [build-dependencies]
 tonic-build = { workspace = true }

@@ -20,3 +20,4 @@ reqwest = { workspace = true }
 rumqttc = { workspace = true }
 base64 = { workspace = true }
 quantum = { path = "../../../VeerOS/crates/quantum", default-features = false, features = ["simulator"] }
+libc = "0.2"

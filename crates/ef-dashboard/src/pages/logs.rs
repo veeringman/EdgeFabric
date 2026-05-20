@@ -34,10 +34,7 @@ pub fn LogsPage() -> impl IntoView {
         set_log_lines.set(Vec::new());
         set_line_count.set(0);
 
-        let host = web_sys::window()
-            .and_then(|w| w.location().hostname().ok())
-            .unwrap_or_else(|| "localhost".to_string());
-        let ws_url = format!("ws://{host}:6060/api/v1/devices/{did}/logs");
+        let ws_url = format!("{}/devices/{did}/logs", crate::api::ws_base_url());
 
         let ws = match web_sys::WebSocket::new(&ws_url) {
             Ok(ws) => ws,

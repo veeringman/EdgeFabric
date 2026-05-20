@@ -40,7 +40,7 @@ pub struct CreateVirtualIotRequest {
 fn default_controller() -> String { "esp32-devkit".into() }
 fn default_region() -> String { "local".into() }
 fn default_sim_rate() -> i32 { 500 }
-fn default_provider() -> String { "veeros-vm".into() }
+fn default_provider() -> String { "veer-vm".into() }
 fn default_available_only() -> bool { true }
 fn default_auto_start() -> bool { true }
 
@@ -55,6 +55,13 @@ fn ensure_cmd_ok(action: &str, out: &CommandOutput) -> Result<(), (StatusCode, J
         if !out.stderr.is_empty() && !out.stdout.is_empty() { " | " } else { "" },
         out.stdout
     )))
+}
+
+fn normalize_backend_provider(provider: &str) -> Option<&'static str> {
+    match provider.trim().to_ascii_lowercase().as_str() {
+        "veer-vm" | "veeros-vm" | "veerm-vm" => Some("veer-vm"),
+        _ => None,
+    }
 }
 
 #[derive(Deserialize)]
@@ -113,6 +120,21 @@ pub struct SensorInjectRequest {
     /// When omitted, the backend picks a sensible default.
     #[serde(default)]
     pub source: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct ActuatorWriteRequest {
+    /// GPIO pin number (0..=29 on the simulated ESP32-C6).
+    pub pin: u32,
+    /// Digital level to drive: 0 (low) or 1 (high).
+    pub level: u32,
+}
+
+#[derive(Deserialize)]
+pub struct ScriptRunRequest {
+    /// Shell script source. Multi-line supported; each line executed by the
+    /// VeerOS shell one at a time.
+    pub source: String,
 }
 
 /// POST /api/v1/devices/virtual-iot
@@ -229,9 +251,11 @@ pub async fn create_virtual_iot_backend(
 ) -> Result<(StatusCode, Json<Value>), (StatusCode, Json<ApiError>)> {
     tracing::info!(tenant_id = %auth.tenant_id, name = %body.name, "Creating virtual IoT backend");
 
-    if body.provider != "veeros-vm" {
-        return Err(ApiError::bad_request(format!("Unsupported backend provider: {}", body.provider)));
-    }
+    let provider = normalize_backend_provider(&body.provider)
+        .ok_or_else(|| ApiError::bad_request(format!(
+            "Unsupported backend provider: {} (supported: veer-vm, veerm-vm, veeros-vm)",
+            body.provider
+        )))?;
 
     let seed = Uuid::new_v4().simple().to_string();
     let vm_name = VeerOsDriver::sanitize_vm_name(&body.name, &seed[..8]);
@@ -304,6 +328,7 @@ pub async fn create_virtual_iot_backend(
                     host: public_host,
                     port,
                     connect_command: cmd,
+                    sensor_feed_path: None,
                 }
             }
             Err(e) => {
@@ -313,6 +338,7 @@ pub async fn create_virtual_iot_backend(
                     host: extract_host(base).unwrap_or_else(|| "agent".to_string()),
                     port: 0,
                     connect_command: String::new(),
+                    sensor_feed_path: None,
                 }
             }
         }
@@ -321,9 +347,16 @@ pub async fn create_virtual_iot_backend(
             .await
             .map_err(ApiError::from_domain)?
     };
-    let backend_config = backend_json(&shell, &state.veeros.default_network_mode, &status);
+    let backend_config = backend_json(
+        provider,
+        &shell,
+        &state.veeros.default_network_mode,
+        &status,
+    );
     let capabilities = vec![
-        format!("provider:{}", body.provider),
+        format!("provider:{provider}"),
+        "runtime:folded-veerm-vm".to_string(),
+        "microcm:secure".to_string(),
         format!("target:{}", state.veeros.default_target),
         "shell:veeros".to_string(),
     ];
@@ -331,7 +364,7 @@ pub async fn create_virtual_iot_backend(
     let backend = VirtualIotBackendRepo::create(
         &state.pool,
         &body.name,
-        &body.provider,
+        provider,
         &body.controller_type,
         &{
             let mut types = body.controller_types.clone();
@@ -531,7 +564,7 @@ pub async fn get_virtual_iot_shell_info(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
     tracing::info!(tenant_id = %auth.tenant_id, device_id = %id, "Getting virtual IoT shell info");
-    let backend = attached_backend(&state, id).await?;
+    let backend = live_shell_backend(&state, id).await?;
     Ok(Json(json!({
         "backend": backend,
         "shell": shell_descriptor(&backend, id),
@@ -620,6 +653,21 @@ pub async fn inject_virtual_iot_sensor(
         .forward_sensor_event(auth.tenant_id, event)
         .await;
 
+    // Publish the sensor frame to all live-viewer WebSocket subscribers.
+    let inject_source = body.source.clone().unwrap_or_else(|| {
+        if updated.backend_id.is_some() { "ui-inject+vm".to_string() } else { "ui-inject".to_string() }
+    });
+    crate::sensor_bus::publish(
+        &state.sensor_bus,
+        id,
+        crate::sensor_bus::SensorFrame {
+            sensor: body.sensor.clone(),
+            value: body.value.clone(),
+            source: inject_source,
+            ts: chrono::Utc::now().to_rfc3339(),
+        },
+    );
+
     Ok(Json(json!({
         "device_id": id,
         "backend_id": updated.backend_id,
@@ -629,6 +677,184 @@ pub async fn inject_virtual_iot_sensor(
         "sensor_state": updated.sensor_state,
         "sensor_log": updated.sensor_log,
     })))
+}
+
+/// POST /api/v1/devices/{id}/virtual-iot/actuators
+///
+/// Drive a GPIO pin on the attached VeerOS VM. Writes `gpio write <pin> <level>\n`
+/// to the sensor FIFO; the VeerOS shell executes it and emits
+/// `[actuator] gpio.<pin>=<level>` which is parsed by the shell-tail bridge and
+/// re-broadcast on the sensor stream WebSocket as a `SensorFrame` with
+/// `sensor: "gpio_<pin>"`.
+pub async fn write_virtual_iot_actuator(
+    auth: AuthContext,
+    Path(id): Path<Uuid>,
+    State(state): State<AppState>,
+    Json(body): Json<ActuatorWriteRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    tracing::info!(
+        tenant_id = %auth.tenant_id,
+        device_id = %id,
+        pin = body.pin,
+        level = body.level,
+        "Writing virtual IoT actuator (gpio)"
+    );
+
+    let backend = attached_backend(&state, id).await.map_err(|_| {
+        ApiError::bad_request(format!(
+            "Device {id} has no running virtual-IoT backend attached"
+        ))
+    })?;
+    let vm_name = backend.vm_name.clone().ok_or_else(|| {
+        ApiError::bad_request(format!(
+            "Attached backend for device {id} has no VM name"
+        ))
+    })?;
+
+    let output = if let Some(base) = maybe_agent_base(&state, &backend).await? {
+        // Remote agent path is not yet implemented; fall through for now.
+        let _ = base;
+        VeerOsDriver::actuator_gpio_write(&state.veeros, &vm_name, body.pin, body.level)
+            .await
+            .map_err(ApiError::from_domain)?
+    } else {
+        VeerOsDriver::actuator_gpio_write(&state.veeros, &vm_name, body.pin, body.level)
+            .await
+            .map_err(ApiError::from_domain)?
+    };
+
+    let _ = DeviceRepo::update_heartbeat(&state.pool, id).await;
+
+    // Publish the actuator change directly onto the sensor bus so the Live
+    // Viewer lights up immediately, regardless of whether anyone is tailing
+    // the shell WS. The VM-echoed `[actuator]` line acts as a cross-check.
+    crate::sensor_bus::publish(
+        &state.sensor_bus,
+        id,
+        crate::sensor_bus::SensorFrame {
+            sensor: format!("gpio_{}", body.pin),
+            value: body.level.to_string(),
+            source: "ui-actuator".to_string(),
+            ts: chrono::Utc::now().to_rfc3339(),
+        },
+    );
+
+    Ok(Json(json!({
+        "device_id": id,
+        "vm_name": vm_name,
+        "pin": body.pin,
+        "level": body.level,
+        "stdout": output.stdout,
+    })))
+}
+
+/// POST /api/v1/devices/{id}/virtual-iot/scripts/run
+///
+/// Upload a VeerOS shell script and execute it on the attached VM. The script
+/// is streamed line-by-line into the sensor FIFO; the shell consumes each
+/// line, its stdout flows back through the live log, and any `[actuator]`
+/// sentinels produced by the script light up sensor tiles in the UI.
+pub async fn run_virtual_iot_script(
+    auth: AuthContext,
+    Path(id): Path<Uuid>,
+    State(state): State<AppState>,
+    Json(body): Json<ScriptRunRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    tracing::info!(
+        tenant_id = %auth.tenant_id,
+        device_id = %id,
+        bytes = body.source.len(),
+        "Running virtual IoT script"
+    );
+
+    if body.source.trim().is_empty() {
+        return Err(ApiError::bad_request("Script source is empty"));
+    }
+
+    let backend = attached_backend(&state, id).await.map_err(|_| {
+        ApiError::bad_request(format!(
+            "Device {id} has no running virtual-IoT backend attached"
+        ))
+    })?;
+    let vm_name = backend.vm_name.clone().ok_or_else(|| {
+        ApiError::bad_request(format!(
+            "Attached backend for device {id} has no VM name"
+        ))
+    })?;
+
+    let output = VeerOsDriver::script_run(&state.veeros, &vm_name, &body.source)
+        .await
+        .map_err(ApiError::from_domain)?;
+
+    let _ = DeviceRepo::update_heartbeat(&state.pool, id).await;
+
+    Ok(Json(json!({
+        "device_id": id,
+        "vm_name": vm_name,
+        "bytes": body.source.len(),
+        "lines": body.source.lines().count(),
+        "stdout": output.stdout,
+    })))
+}
+
+// ── Sensor Stream WebSocket ────────────────────────────────────────────────
+
+/// GET /api/v1/devices/{id}/virtual-iot/sensors/stream
+///
+/// Upgrades to WebSocket. Pushes `{"type":"sensor_frame","sensor":"...","value":"...","source":"...","ts":"..."}`
+/// JSON text frames to all connected clients whenever any sensor is injected
+/// (UI, scenario runner) or when the noise-model ticker fires.
+pub async fn virtual_iot_sensor_stream_ws(
+    ws: WebSocketUpgrade,
+    Path(id): Path<Uuid>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_sensor_stream(socket, id, state))
+}
+
+async fn handle_sensor_stream(socket: WebSocket, device_id: Uuid, state: AppState) {
+    let mut rx = crate::sensor_bus::subscribe(&state.sensor_bus, device_id);
+    let (mut sender, mut receiver) = socket.split();
+
+    // Forward bus frames → WS client; drop on client disconnect.
+    let mut forward = tokio::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(frame) => {
+                    let msg = match serde_json::to_string(&serde_json::json!({
+                        "type": "sensor_frame",
+                        "sensor": frame.sensor,
+                        "value": frame.value,
+                        "source": frame.source,
+                        "ts": frame.ts,
+                    })) {
+                        Ok(s) => s,
+                        Err(_) => continue,
+                    };
+                    if sender.send(Message::Text(msg.into())).await.is_err() {
+                        break;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(device_id = %device_id, skipped = n, "Sensor stream lagged — client too slow");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+
+    // Drain incoming client messages (ping/close frames) so the connection stays alive.
+    loop {
+        tokio::select! {
+            msg = receiver.next() => {
+                match msg {
+                    Some(Ok(Message::Close(_))) | None => break,
+                    _ => {}
+                }
+            }
+            _ = &mut forward => break,
+        }
+    }
 }
 
 fn default_sensor_state(enabled_sensors: &[String]) -> Value {
@@ -673,15 +899,34 @@ pub async fn virtual_iot_shell_ws(
 }
 
 async fn handle_virtual_iot_shell(socket: WebSocket, device_id: Uuid, state: AppState) {
-    let backend = match attached_backend(&state, device_id).await {
+    let backend = match live_shell_backend(&state, device_id).await {
         Ok(backend) => backend,
-        Err(_) => return,
+        Err(err) => {
+            tracing::warn!(device_id = %device_id, "live_shell_backend failed: {:?}", err);
+            return;
+        }
     };
+
+    if let Some(runtime_error) = backend_runtime_error(&backend) {
+        tracing::warn!(
+            device_id = %device_id,
+            vm_name = ?backend.vm_name,
+            agent_id = ?backend.agent_id,
+            runtime_error = %runtime_error,
+            "virtual IoT shell blocked by runtime_error"
+        );
+        let (mut ws_tx, _ws_rx) = socket.split();
+        let _ = ws_tx.send(Message::Text(json!({
+            "type": "error",
+            "message": runtime_error,
+        }).to_string().into())).await;
+        return;
+    }
 
     // When the backend was attached to a remote ef-agent, proxy the shell WS
     // to the agent's `/ws/veeros/{vm_name}/shell` endpoint. The agent runs the
-    // `veer-connect` binary against its own localhost hostfwd. Otherwise, fall
-    // back to spawning `veer-connect` locally (legacy/single-host setups).
+    // provider-reported shell command on its own host. Otherwise, fall back to
+    // spawning the provider-reported command locally.
     if let Some(agent_id) = backend.agent_id {
         proxy_shell_to_agent(socket, device_id, agent_id, backend, state).await;
     } else {
@@ -818,21 +1063,39 @@ async fn local_shell_session(
     backend: VirtualIotBackendRow,
     state: AppState,
 ) {
+    if let Some(fifo_path) = backend
+        .config
+        .get("sensor_feed_path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    {
+        // For folded VMs we always stream the fold log directly via
+        // `tail -n 0 -F <log_path>` so reconnects don't replay historical
+        // output. Any stored `connect_command` (e.g. a stale `fold logs -f`)
+        // is intentionally ignored here — it points to the wrong binary on
+        // most systems (/usr/bin/fold is GNU coreutils, not VeerOS fold).
+        let vm_name = backend.vm_name.clone().unwrap_or_default();
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+        let log_path = format!("{home}/.local/state/veeros/fold/{vm_name}.log");
+        let connect_command = format!("tail -n 0 -F {}", log_path);
+        local_folded_shell_session(
+            socket,
+            device_id,
+            &connect_command,
+            fifo_path,
+            state.sensor_bus.clone(),
+        )
+        .await;
+        return;
+    }
+
     let host = backend.shell_host.clone().unwrap_or_else(|| "localhost".into());
     let port = backend.shell_port.unwrap_or_default().to_string();
-    let veer_connect_path = resolve_veer_connect_path(&state);
-    let mut child = match Command::new(&veer_connect_path)
-        .current_dir(&state.veeros.root_dir)
-        .env("TERM", "xterm-256color")
-        .args(["shell", &host, &port])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-    {
+    let mut child = match spawn_backend_shell_command(&state, &backend) {
         Ok(child) => child,
         Err(e) => {
-            tracing::error!(device_id = %device_id, "Failed to spawn veer-connect: {e}");
+            tracing::error!(device_id = %device_id, "Failed to spawn backend shell command: {e}");
             return;
         }
     };
@@ -937,6 +1200,225 @@ async fn local_shell_session(
     let _ = writer_task.await;
 }
 
+/// Parse a single line of VeerOS shell output and, if it matches the
+/// `[actuator] <kind>.<key>=<value>` sentinel format, publish a SensorFrame
+/// on the per-device bus. Silently ignores non-matching lines.
+///
+/// Supported kinds today: `gpio`. Example line:
+///   `[actuator] gpio.15=1`
+/// becomes frame `{ sensor: "gpio_15", value: "1", source: "fold-vm" }`.
+fn parse_and_publish_actuator(
+    line: &[u8],
+    device_id: Uuid,
+    sensor_bus: &crate::sensor_bus::SensorBus,
+) {
+    const PREFIX: &[u8] = b"[actuator] ";
+    // Fast reject: every line scanned; must not allocate on the hot path.
+    if line.len() < PREFIX.len() + 3 {
+        return;
+    }
+    // Allow arbitrary leading whitespace produced by the serial console.
+    let trimmed = match line.iter().position(|b| !b.is_ascii_whitespace()) {
+        Some(i) => &line[i..],
+        None => return,
+    };
+    if !trimmed.starts_with(PREFIX) {
+        return;
+    }
+    let rest = &trimmed[PREFIX.len()..];
+    let s = match core::str::from_utf8(rest) {
+        Ok(s) => s.trim(),
+        Err(_) => return,
+    };
+    // Expected shape: `<kind>.<key>=<value>`
+    let (lhs, value) = match s.split_once('=') {
+        Some(pair) => pair,
+        None => return,
+    };
+    let (kind, key) = match lhs.split_once('.') {
+        Some(pair) => pair,
+        None => return,
+    };
+    let kind = kind.trim();
+    let key = key.trim();
+    let value = value.trim();
+    if kind.is_empty() || key.is_empty() || value.is_empty() {
+        return;
+    }
+    // Namespace the sensor key per-kind so the dashboard can route widgets.
+    // gpio -> `gpio_15`; future: pwm -> `pwm_2`, dac -> `dac_0`, etc.
+    let sensor_name = match kind {
+        "gpio" => format!("gpio_{}", key),
+        _ => format!("{}_{}", kind, key),
+    };
+    crate::sensor_bus::publish(
+        sensor_bus,
+        device_id,
+        crate::sensor_bus::SensorFrame {
+            sensor: sensor_name,
+            value: value.to_string(),
+            source: "fold-vm".to_string(),
+            ts: chrono::Utc::now().to_rfc3339(),
+        },
+    );
+}
+
+async fn local_folded_shell_session(
+    socket: WebSocket,
+    device_id: Uuid,
+    logs_command: &str,
+    fifo_path: &str,
+    sensor_bus: crate::sensor_bus::SensorBus,
+) {
+    let (mut ws_tx, mut ws_rx) = socket.split();
+
+    let _ = ws_tx.send(Message::Text(json!({
+        "type": "shell_ready",
+        "device_id": device_id,
+        "host": "localhost",
+        "port": "folded-console",
+        "hint": "Using folded console fallback until DHCP/TCP shell is available"
+    }).to_string().into())).await;
+
+    let _ = ws_tx
+        .send(Message::Text(
+            "\r\n[EdgeFabric] Connected to VeerOS folded runtime (root shell, no login).\r\n".into(),
+        ))
+        .await;
+
+    let mut parts = logs_command.split_whitespace();
+    let program = match parts.next() {
+        Some(program) => program.to_string(),
+        None => {
+            let _ = ws_tx.send(Message::Text("error: empty logs command\n".into())).await;
+            return;
+        }
+    };
+    let args: Vec<String> = parts.map(|part| part.to_string()).collect();
+
+    let mut child = match Command::new(&program)
+        .args(&args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) => {
+            let _ = ws_tx.send(Message::Text(format!("spawn failed: {error}\n").into())).await;
+            return;
+        }
+    };
+
+    let mut stdout = child.stdout.take();
+    let fifo_path = fifo_path.to_string();
+    let fifo_path_for_stdout = fifo_path.clone();
+
+    let (fifo_ready_tx, mut fifo_ready_rx) = tokio::sync::mpsc::unbounded_channel::<Result<(), String>>();
+
+    let fifo_writer = tokio::spawn(async move {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let mut attempts = 0u8;
+        let mut file = loop {
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(&fifo_path)
+            {
+                Ok(file) => break Some(tokio::fs::File::from_std(file)),
+                Err(_) if attempts < 10 => {
+                    attempts = attempts.saturating_add(1);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                }
+                Err(_) => break None,
+            }
+        };
+
+        let Some(mut file) = file.take() else {
+            let _ = fifo_ready_tx.send(Err(format!(
+                "cannot open sensor FIFO {} for shell input (VM may still be booting)",
+                fifo_path
+            )));
+            return;
+        };
+        let _ = fifo_ready_tx.send(Ok(()));
+        // Send a single newline so the VM redraws a fresh prompt line for
+        // this session. Using "\n" (not "\r") avoids appending a blank
+        // command to the shell's history. We do NOT write anything else on
+        // connect — the VeerOS shell has no login gate; it's already root.
+        let _ = tokio::io::AsyncWriteExt::write_all(&mut file, b"\n").await;
+
+        while let Some(Ok(msg)) = ws_rx.next().await {
+            let bytes = match msg {
+                Message::Text(text) => text.as_bytes().to_vec(),
+                Message::Binary(binary) => binary.to_vec(),
+                Message::Close(_) => break,
+                _ => continue,
+            };
+            if tokio::io::AsyncWriteExt::write_all(&mut file, &bytes).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let _ = fifo_path_for_stdout; // legacy: previously used for forced-logout hack
+    let stdout_task = tokio::spawn(async move {
+        let mut buf = [0u8; 4096];
+        // Line accumulator: `[actuator]` sentinel lines emitted by the VeerOS
+        // shell (feature `gpio-sim`) are parsed out and republished on the
+        // per-device SensorBus so the dashboard Live Viewer reflects GPIO
+        // state changes in real time. Format: `[actuator] gpio.<pin>=<level>`.
+        let mut line_buf: Vec<u8> = Vec::with_capacity(512);
+        if let Some(out) = stdout.as_mut() {
+            loop {
+                match out.read(&mut buf).await {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        // Feed incoming bytes into the line accumulator; dispatch
+                        // one scan per newline boundary.
+                        for &byte in &buf[..n] {
+                            if byte == b'\n' {
+                                parse_and_publish_actuator(&line_buf, device_id, &sensor_bus);
+                                line_buf.clear();
+                            } else if byte != b'\r' {
+                                // Guard against runaway growth on a stuck stream.
+                                if line_buf.len() < 4096 {
+                                    line_buf.push(byte);
+                                }
+                            }
+                        }
+                        if ws_tx.send(Message::Binary(buf[..n].to_vec().into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        }
+        ws_tx
+    });
+
+    if let Some(fifo_result) = fifo_ready_rx.recv().await {
+        if let Err(msg) = fifo_result {
+            if let Ok(mut tx) = stdout_task.await {
+                let _ = tx
+                    .send(Message::Text(format!("\r\n[EdgeFabric] {msg}\r\n").into()))
+                    .await;
+                let _ = tx.send(Message::Close(None)).await;
+            }
+            let _ = child.kill().await;
+            return;
+        }
+    }
+
+    let _ = child.wait().await;
+    fifo_writer.abort();
+    if let Ok(mut ws_tx) = stdout_task.await {
+        let _ = ws_tx.send(Message::Close(None)).await;
+    }
+}
+
 async fn attached_backend(
     state: &AppState,
     device_id: Uuid,
@@ -959,9 +1441,103 @@ async fn attached_backend(
         .ok_or_else(|| ApiError::not_found(format!("Virtual IoT backend {backend_id} not found")))
 }
 
-fn backend_json(shell: &VeerOsShellInfo, network_mode: &str, runtime_status: &str) -> Value {
+async fn live_shell_backend(
+    state: &AppState,
+    device_id: Uuid,
+) -> Result<VirtualIotBackendRow, (StatusCode, Json<ApiError>)> {
+    let backend = attached_backend(state, device_id).await?;
+    hydrate_live_shell_backend(state, backend).await
+}
+
+async fn hydrate_live_shell_backend(
+    state: &AppState,
+    mut backend: VirtualIotBackendRow,
+) -> Result<VirtualIotBackendRow, (StatusCode, Json<ApiError>)> {
+    let Some(vm_name) = backend.vm_name.clone() else {
+        return Ok(backend);
+    };
+
+    let agent_base = maybe_agent_base(state, &backend).await?;
+    let runtime_status = if let Some(base) = agent_base.as_deref() {
+        crate::veeros_proxy::vm_status(base, &vm_name)
+            .await
+            .unwrap_or_else(|_| String::from("unknown"))
+    } else {
+        VeerOsDriver::vm_status(&state.veeros, &vm_name)
+            .await
+            .unwrap_or_else(|_| String::from("unknown"))
+    };
+
+    let shell_result = if let Some(base) = agent_base.as_deref() {
+        crate::veeros_proxy::shell_info(base, &vm_name)
+            .await
+            .map(|(host, port, connect_command)| VeerOsShellInfo {
+                vm_name: vm_name.clone(),
+                host: extract_host(base).unwrap_or(host),
+                port,
+                connect_command,
+                sensor_feed_path: None, // agent handles this internally
+            })
+            .map_err(|e| format!("Agent shell_info failed: {e}"))
+    } else {
+        VeerOsDriver::shell_info(&state.veeros, &vm_name)
+            .await
+            .map_err(|e| e.to_string())
+    };
+
+    if let Some(config) = backend.config.as_object_mut() {
+        config.insert("runtime_status".into(), Value::String(runtime_status));
+        config.remove("runtime_error");
+    }
+
+    match shell_result {
+        Ok(shell) => {
+            backend.shell_host = Some(shell.host.clone());
+            backend.shell_port = Some(i32::from(shell.port));
+            if let Some(config) = backend.config.as_object_mut() {
+                config.insert("shell_host".into(), Value::String(shell.host.clone()));
+                config.insert("shell_port".into(), Value::from(shell.port));
+                config.insert("connect_command".into(), Value::String(shell.connect_command.clone()));
+                if let Some(sensor_feed_path) = shell.sensor_feed_path.clone() {
+                    config.insert("sensor_feed_path".into(), Value::String(sensor_feed_path));
+                } else {
+                    config.remove("sensor_feed_path");
+                }
+            }
+        }
+        Err(error) => {
+            tracing::warn!(
+                backend_id = %backend.id,
+                vm_name = %vm_name,
+                agent_id = ?backend.agent_id,
+                shell_error = %error,
+                "virtual IoT shell_info failed"
+            );
+            if let Some(config) = backend.config.as_object_mut() {
+                config.insert("runtime_error".into(), Value::String(error));
+            }
+        }
+    }
+
+    Ok(backend)
+}
+
+fn backend_runtime_error(backend: &VirtualIotBackendRow) -> Option<String> {
+    backend
+        .config
+        .get("runtime_error")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|msg| !msg.is_empty())
+        .map(str::to_string)
+}
+
+fn backend_json(provider: &str, shell: &VeerOsShellInfo, network_mode: &str, runtime_status: &str) -> Value {
     json!({
-        "provider": "veeros-vm",
+        "provider": provider,
+        "runtime": "folded-veerm-vm",
+        "runtime_family": "microcm",
+        "runtime_security": "secure",
         "vm_name": shell.vm_name,
         "shell_host": shell.host,
         "shell_port": shell.port,
@@ -1003,6 +1579,38 @@ fn resolve_veer_connect_path(state: &AppState) -> String {
     } else {
         format!("{}/target/debug/veer-connect", state.veeros.root_dir)
     }
+}
+
+fn spawn_backend_shell_command(
+    state: &AppState,
+    backend: &VirtualIotBackendRow,
+) -> Result<tokio::process::Child, std::io::Error> {
+    let connect_command = backend
+        .config
+        .get("connect_command")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|cmd| !cmd.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            let host = backend.shell_host.clone().unwrap_or_else(|| "localhost".into());
+            let port = backend.shell_port.unwrap_or_default().to_string();
+            format!("{} shell {} {}", resolve_veer_connect_path(state), host, port)
+        });
+
+    let mut parts = connect_command.split_whitespace();
+    let program = parts.next().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "backend connect_command is empty")
+    })?;
+
+    Command::new(program)
+        .current_dir(&state.veeros.root_dir)
+        .env("TERM", "xterm-256color")
+        .args(parts)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
 }
 
 /// Extract just the host portion from an `http(s)://host:port/...` URL.
@@ -1187,4 +1795,42 @@ pub async fn update_virtual_iot_backend(
     .ok_or_else(|| ApiError::not_found(format!("Backend {id} not found")))?;
 
     Ok(Json(json!({ "backend": updated })))
+}
+
+// ── Synthetic sensor simulation toggle ───────────────────────────────────────
+//
+// The periodic noise-model sensor ticker is disabled by default so the
+// dashboard stays quiet. Users opt in on demand via these endpoints.
+//
+//   GET  /api/v1/virtual-iot/simulation           → { "enabled": bool }
+//   POST /api/v1/virtual-iot/simulation/start     → enable the ticker
+//   POST /api/v1/virtual-iot/simulation/stop      → disable the ticker
+//
+// All handlers require an authenticated caller (any tenant).
+
+/// GET /api/v1/virtual-iot/simulation
+pub async fn get_simulation_state(
+    _auth: AuthContext,
+) -> Json<Value> {
+    Json(json!({
+        "enabled": crate::virtual_iot_runtime::simulation_enabled(),
+    }))
+}
+
+/// POST /api/v1/virtual-iot/simulation/start
+pub async fn start_simulation(
+    auth: AuthContext,
+) -> Json<Value> {
+    let was = crate::virtual_iot_runtime::set_simulation_enabled(true);
+    tracing::info!(tenant_id = %auth.tenant_id, was_enabled = was, "Synthetic sensor simulation ENABLED");
+    Json(json!({ "enabled": true, "previously_enabled": was }))
+}
+
+/// POST /api/v1/virtual-iot/simulation/stop
+pub async fn stop_simulation(
+    auth: AuthContext,
+) -> Json<Value> {
+    let was = crate::virtual_iot_runtime::set_simulation_enabled(false);
+    tracing::info!(tenant_id = %auth.tenant_id, was_enabled = was, "Synthetic sensor simulation DISABLED");
+    Json(json!({ "enabled": false, "previously_enabled": was }))
 }

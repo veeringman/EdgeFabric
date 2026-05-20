@@ -17,12 +17,10 @@ use axum::{
 use futures::{SinkExt, StreamExt};
 use serde_json::json;
 use std::process::Stdio;
-#[cfg(target_os = "macos")]
 use std::sync::OnceLock;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 /// Resolve the ffmpeg binary path once (handles non-login shells missing /usr/local/bin).
-#[cfg(target_os = "macos")]
 fn ffmpeg_path() -> &'static str {
     static PATH: OnceLock<String> = OnceLock::new();
     PATH.get_or_init(|| {

@@ -9,6 +9,56 @@ use crate::api::{
 use crate::board_config::{controller_accessories, controllers, find_controller, sensor_categories};
 use crate::components::board_layout::render_catalog_board_layout;
 
+fn extract_host_from_url(url: &str) -> Option<String> {
+    let trimmed = url.trim();
+    let without_scheme = trimmed
+        .strip_prefix("http://")
+        .or_else(|| trimmed.strip_prefix("https://"))
+        .unwrap_or(trimmed);
+    let host_port = without_scheme.split('/').next().unwrap_or_default();
+    let host = host_port.split(':').next().unwrap_or_default().trim();
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
+}
+
+fn is_local_host_label(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "local" | "localhost" | "127.0.0.1" | "::1"
+    )
+}
+
+fn format_agent_host_label(agent_id: Option<&str>, host_ip: &str) -> String {
+    let host_missing = host_ip == "unknown-host" || host_ip == "—";
+    let host_is_local = is_local_host_label(host_ip);
+
+    match agent_id {
+        None => {
+            if host_missing || host_is_local {
+                "local".to_string()
+            } else {
+                format!("local · {host_ip}")
+            }
+        }
+        Some(id) => {
+            let agent_label = if id.len() > 8 {
+                format!("agent:{}", &id[..8])
+            } else {
+                format!("agent:{id}")
+            };
+
+            if host_missing {
+                agent_label
+            } else {
+                format!("{agent_label} · {host_ip}")
+            }
+        }
+    }
+}
+
 /// Shape of the value field(s) for a given sensor — drives the input widgets
 /// in the event-step editor.
 #[derive(Clone, PartialEq)]
@@ -711,11 +761,26 @@ pub fn VirtualIotDesignerPage() -> impl IntoView {
                                             let current_attached_backend = attached_backend_id.get();
                                             data.backends.iter().cloned().map(|backend| {
                                                 let option_value = backend.id.clone();
+                                                let host_ip = backend
+                                                    .shell_host
+                                                    .clone()
+                                                    .or_else(|| {
+                                                        backend
+                                                            .agent_base_url
+                                                            .as_deref()
+                                                            .and_then(extract_host_from_url)
+                                                    })
+                                                    .unwrap_or_else(|| "unknown-host".to_string());
+                                                let agent_host_label = format_agent_host_label(
+                                                    backend.agent_id.as_deref(),
+                                                    &host_ip,
+                                                );
                                                 let label = format!(
-                                                    "{} · {} · {}{}",
+                                                    "{} · {} · {} · {}{}",
                                                     backend.name,
                                                     backend.provider,
                                                     backend.region,
+                                                    agent_host_label,
                                                     if backend.attached_device_id.is_some() && backend.id != current_attached_backend {
                                                         " · attached"
                                                     } else {

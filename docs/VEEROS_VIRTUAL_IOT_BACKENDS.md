@@ -24,7 +24,7 @@ There are now two separate entities:
 2. `virtual_iot_backends`
 
 - one row per provisioned backend
-- currently backed by `veeros-vm`
+- currently backed by `veer-vm` (folded `veerm-vm` runtime)
 - stores backend provider, compatible controller type, region, VM name, shell host/port, attachment status, and provider-specific config JSON
 
 This separation is intentional:
@@ -35,15 +35,21 @@ This separation is intentional:
 
 ## Current Provider
 
-The initial provider is `veeros-vm`.
+The canonical provider is `veer-vm`.
 
-Each backend entry maps to a VeerOS-managed VM created by the existing VeerOS orchestration surface:
+For backward compatibility, EdgeFabric also accepts these aliases on create requests:
 
-- `scripts/veeros-vm create`
-- `scripts/veeros-vm start`
-- `scripts/veeros-vm stop`
-- `scripts/veeros-vm restart`
-- `scripts/veeros-vm sensor inject`
+- `veerm-vm`
+- `veeros-vm`
+
+Each backend entry maps to a VeerOS-managed VM created by the folded microCM orchestration surface:
+
+- materialize a per-instance fold manifest
+- `target/debug/fold spawn --manifest <path>`
+- `target/debug/fold list`
+- `target/debug/fold logs <name>`
+- `target/debug/fold stop <name>`
+- `target/debug/fold rm <name> --force`
 - `veer-connect shell`
 
 EdgeFabric does not reimplement VM orchestration. It delegates to VeerOS and stores enough metadata to:

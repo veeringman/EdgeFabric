@@ -1,5 +1,5 @@
 # ── Stage 1: Build ────────────────────────────────────────────────
-FROM rust:1.86-bookworm AS builder
+FROM rust:1.88-bookworm AS builder
 
 # Install protoc (required by tonic-build)
 RUN apt-get update && apt-get install -y protobuf-compiler && rm -rf /var/lib/apt/lists/*
@@ -36,7 +36,7 @@ COPY config/ config/
 COPY migrations/ migrations/
 
 # Install sqlx-cli for migrations
-RUN cargo install sqlx-cli --no-default-features --features postgres
+RUN cargo install sqlx-cli --locked --no-default-features --features postgres
 
 # Build the actual binary
 RUN cargo build --release --bin ef-api

@@ -14,6 +14,31 @@ use crate::components::device_icon::DeviceOsIcon;
 use crate::components::status_badge::StatusBadge;
 use crate::pages::virtual_iot_shell::VirtualIotShellTerminal;
 
+struct TerminalTheme {
+    name: &'static str,
+    bg: &'static str,
+    fg: &'static str,
+    cursor: &'static str,
+    sel: &'static str,
+}
+
+const TERMINAL_THEMES: &[TerminalTheme] = &[
+    TerminalTheme { name: "Ocean Dark", bg: "#08111f", fg: "#d7e0ea", cursor: "#67e8f9", sel: "#264f78" },
+    TerminalTheme { name: "Dracula", bg: "#282a36", fg: "#f8f8f2", cursor: "#ff79c6", sel: "#44475a" },
+    TerminalTheme { name: "Solarized Dark", bg: "#002b36", fg: "#839496", cursor: "#268bd2", sel: "#073642" },
+    TerminalTheme { name: "Monokai", bg: "#272822", fg: "#f8f8f2", cursor: "#f8f8f2", sel: "#49483e" },
+    TerminalTheme { name: "Nord", bg: "#2e3440", fg: "#d8dee9", cursor: "#88c0d0", sel: "#3b4252" },
+    TerminalTheme { name: "Light", bg: "#fafafa", fg: "#383a42", cursor: "#4078f2", sel: "#c8ccd4" },
+];
+
+const TERMINAL_FONTS: &[(&str, &str)] = &[
+    ("Mono (system)", "ui-monospace, 'SF Mono', Menlo, Consolas, monospace"),
+    ("JetBrains Mono", "'JetBrains Mono', monospace"),
+    ("Fira Code", "'Fira Code', monospace"),
+    ("Hack", "'Hack', monospace"),
+    ("Cascadia Code", "'Cascadia Code', monospace"),
+];
+
 /// Device info passed from card selection to the viewer.
 #[derive(Clone, Debug)]
 struct SelectedDevice {
@@ -307,6 +332,10 @@ fn DeviceViewer(
     let (cmd_history, set_cmd_history) = signal(Vec::<String>::new());
     let (history_idx, set_history_idx) = signal(Option::<usize>::None);
     let (term_maximized, set_term_maximized) = signal(false);
+    let (reconnect_tick, set_reconnect_tick) = signal(0u32);
+    let (term_font_size, set_term_font_size) = signal(14u32);
+    let (term_theme_idx, set_term_theme_idx) = signal(0usize);
+    let (term_font_idx, set_term_font_idx) = signal(1usize);
 
     // Log panel signals
     let (log_lines, set_log_lines) = signal(Vec::<(String, String, String)>::new()); // (level, tag, message)
@@ -385,7 +414,54 @@ fn DeviceViewer(
     let last_frame_time = std::cell::Cell::new(0.0f64);
     let fps_counter = std::rc::Rc::new(std::cell::RefCell::new(Vec::<f64>::new()));
 
+    let term_set_option = |key: &str, val: &str| {
+        let js = format!(
+            "(function(){{ var t = window.__ef_xterm; if(t && t.options) {{ t.options.{key} = {val}; try{{ if(window.__ef_fit) window.__ef_fit.fit(); }}catch(e){{}} }} }})()",
+        );
+        let _ = js_sys::eval(&js);
+    };
+
     Effect::new(move || {
+        let size = term_font_size.get();
+        term_set_option("fontSize", &size.to_string());
+    });
+
+    Effect::new(move || {
+        let idx = term_font_idx.get();
+        if idx >= TERMINAL_FONTS.len() {
+            return;
+        }
+        let family = TERMINAL_FONTS[idx].1;
+        term_set_option("fontFamily", &format!("\"{}\"", family));
+    });
+
+    Effect::new(move || {
+        let idx = term_theme_idx.get();
+        if idx >= TERMINAL_THEMES.len() {
+            return;
+        }
+        let t = &TERMINAL_THEMES[idx];
+        let js = format!(
+            "(function(){{ var term=window.__ef_xterm; if(term && term.options) term.options.theme = {{ background:'{bg}', foreground:'{fg}', cursor:'{cu}', selectionBackground:'{sel}' }}; var c=document.getElementById('ef-terminal-container'); if(c) c.style.background='{bg}'; }})()",
+            bg = t.bg,
+            fg = t.fg,
+            cu = t.cursor,
+            sel = t.sel
+        );
+        let _ = js_sys::eval(&js);
+    });
+
+    Effect::new(move || {
+        let _reconnect = reconnect_tick.get();
+
+        if is_terminal {
+            if let Some(ws) = ws_handle.get_untracked() {
+                let _ = ws.close();
+            }
+            set_ws_handle.set(None);
+            set_connected.set(false);
+        }
+
         if is_terminal && term_ref.get().is_none() {
             return;
         }
@@ -403,51 +479,66 @@ fn DeviceViewer(
 
         leptos::task::spawn_local(async move {
             if is_terminal {
-                let init_js = r#"(function() {
+                let font_size = term_font_size.get_untracked();
+                let theme_idx = term_theme_idx.get_untracked();
+                let font_idx = term_font_idx.get_untracked();
+                let theme = &TERMINAL_THEMES[theme_idx.min(TERMINAL_THEMES.len().saturating_sub(1))];
+                let font = TERMINAL_FONTS[font_idx.min(TERMINAL_FONTS.len().saturating_sub(1))].1;
+                let init_js = format!(r#"(function() {{
                     if (typeof Terminal === 'undefined') return null;
                     var container = document.getElementById('ef-terminal-container');
                     if (!container) return null;
-                    if (!window.__ef_xterm) {
-                        var term = new Terminal({
-                            cursorBlink: true,
-                            fontSize: 14,
-                            fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-                            theme: {
-                                background: '#0d1117',
-                                foreground: '#c9d1d9',
-                                cursor: '#58a6ff',
-                                selectionBackground: '#264f78',
-                            },
-                            scrollback: 10000,
-                            convertEol: false,
-                        });
-                        term.open(container);
-                        if (typeof FitAddon !== 'undefined') {
-                            var fitAddon = new FitAddon.FitAddon();
-                            term.loadAddon(fitAddon);
-                            try { fitAddon.fit(); } catch (e) {}
-                            window.__ef_fit = fitAddon;
-                            try {
-                                var ro = new ResizeObserver(function() { try { fitAddon.fit(); } catch (e) {} });
-                                ro.observe(container);
-                                window.__ef_ro = ro;
-                            } catch (e) {}
-                        }
-                        if (typeof WebLinksAddon !== 'undefined') {
-                            term.loadAddon(new WebLinksAddon.WebLinksAddon());
-                        }
-                        window.__ef_xterm = term;
-                    }
+                    try {{ if (window.__ef_ro) window.__ef_ro.disconnect(); }} catch (e) {{}}
+                    try {{ if (window.__ef_xterm) window.__ef_xterm.dispose(); }} catch (e) {{}}
+                    window.__ef_ro = null;
+                    window.__ef_fit = null;
+                    window.__ef_xterm = null;
+                    window.__ef_xterm_hooked = false;
+
+                    var term = new Terminal({{
+                        cursorBlink: true,
+                        fontSize: {font_size},
+                        fontFamily: "{font}",
+                        theme: {{
+                            background: '{bg}',
+                            foreground: '{fg}',
+                            cursor: '{cu}',
+                            selectionBackground: '{sel}',
+                        }},
+                        scrollback: 10000,
+                        convertEol: false,
+                    }});
+                    term.open(container);
+                    if (typeof FitAddon !== 'undefined') {{
+                        var fitAddon = new FitAddon.FitAddon();
+                        term.loadAddon(fitAddon);
+                        try {{ fitAddon.fit(); }} catch (e) {{}}
+                        window.__ef_fit = fitAddon;
+                        try {{
+                            var ro = new ResizeObserver(function() {{ try {{ fitAddon.fit(); }} catch (e) {{}} }});
+                            ro.observe(container);
+                            window.__ef_ro = ro;
+                        }} catch (e) {{}}
+                    }}
+                    if (typeof WebLinksAddon !== 'undefined') {{
+                        term.loadAddon(new WebLinksAddon.WebLinksAddon());
+                    }}
+                    try {{ term.focus(); }} catch (e) {{}}
+                    window.__ef_xterm = term;
                     return window.__ef_xterm;
-                })()"#;
-                let _ = js_sys::eval(init_js);
+                }})()"#,
+                    font_size = font_size,
+                    font = font,
+                    bg = theme.bg,
+                    fg = theme.fg,
+                    cu = theme.cursor,
+                    sel = theme.sel,
+                );
+                let _ = js_sys::eval(&init_js);
                 let _ = term_ref.get_untracked();
             }
 
-            let host = web_sys::window()
-                .and_then(|w| w.location().hostname().ok())
-                .unwrap_or_else(|| "localhost".to_string());
-            let ws_url = format!("ws://{host}:6060/api/v1/devices/{dev_id}/stream");
+            let ws_url = format!("{}/devices/{dev_id}/stream", crate::api::ws_base_url());
 
             let ws = match web_sys::WebSocket::new(&ws_url) {
                 Ok(ws) => ws,
@@ -585,8 +676,23 @@ fn DeviceViewer(
             ws.set_onerror(Some(onerror.as_ref().unchecked_ref()));
             onerror.forget();
 
+            let onclose = Closure::wrap(Box::new(move |_: web_sys::Event| {
+                set_connected.set(false);
+            }) as Box<dyn FnMut(_)>);
+            ws.set_onclose(Some(onclose.as_ref().unchecked_ref()));
+            onclose.forget();
+
             set_ws_handle.set(Some(ws));
         });
+    });
+
+    on_cleanup(move || {
+        if let Some(ws) = ws_handle.get_untracked() {
+            let _ = ws.close();
+        }
+        let _ = js_sys::eval(
+            "(function(){ try{ if(window.__ef_ro) window.__ef_ro.disconnect(); }catch(e){} try{ if(window.__ef_xterm) window.__ef_xterm.dispose(); }catch(e){} window.__ef_ro=null; window.__ef_fit=null; window.__ef_ws=null; window.__ef_xterm=null; window.__ef_xterm_hooked=false; })()"
+        );
     });
 
     // ── Log WebSocket (connects when log_open toggles on) ─────────
@@ -609,10 +715,7 @@ fn DeviceViewer(
         let set_log_ws_handle = set_log_ws_handle.clone();
 
         leptos::task::spawn_local(async move {
-            let host = web_sys::window()
-                .and_then(|w| w.location().hostname().ok())
-                .unwrap_or_else(|| "localhost".to_string());
-            let ws_url = format!("ws://{host}:6060/api/v1/devices/{log_id}/logs");
+            let ws_url = format!("{}/devices/{log_id}/logs", crate::api::ws_base_url());
 
             let ws = match web_sys::WebSocket::new(&ws_url) {
                 Ok(ws) => ws,
@@ -1164,18 +1267,61 @@ fn DeviceViewer(
                             </div>
                         </div>
 
-                        <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem; color: var(--text-muted); font-size: 0.85rem;">
-                            <span>{move || if connected.get() { "Connected" } else { if is_ssh { "Connecting to SSH server…" } else { "Connecting to serial console…" } }}</span>
-                            {move || error.get().map(|msg| view! { <span style="color:#f85149;">{msg}</span> })}
+                        <div style="display:flex; flex-wrap:wrap; align-items:center; gap:0.5rem; margin-bottom:0.6rem; padding:0.55rem 0.6rem; border:1px solid rgba(148,163,184,0.25); border-radius:10px; background:linear-gradient(135deg, rgba(15,23,42,0.82), rgba(30,41,59,0.72));">
+                            <span style="font-weight:600; margin-right:0.4rem; color: #dbeafe;">
+                                {move || if connected.get() { "● Connected" } else { if is_ssh { "○ Connecting SSH…" } else { "○ Connecting Serial…" } }}
+                            </span>
+                            <button class="btn btn-ghost btn-sm" title="Clear terminal" on:click=move |_| {
+                                let _ = js_sys::eval("var t=window.__ef_xterm; if(t) t.write('\\x1b[2J\\x1b[H');");
+                            }>
+                                "Clear"
+                            </button>
+                            <button class="btn btn-ghost btn-sm" title="Reconnect stream" on:click=move |_| {
+                                set_reconnect_tick.update(|t| *t = t.wrapping_add(1));
+                            }>
+                                "Reconnect"
+                            </button>
+                            <div style="display:flex; align-items:center; gap:0.25rem;">
+                                <button class="btn btn-ghost btn-sm" title="Decrease font" on:click=move |_| {
+                                    set_term_font_size.update(|s| if *s > 10 { *s -= 1 });
+                                }>
+                                    "−"
+                                </button>
+                                <span style="font-size:0.76rem; min-width:2.6rem; text-align:center; color:#cbd5e1;">{move || format!("{}px", term_font_size.get())}</span>
+                                <button class="btn btn-ghost btn-sm" title="Increase font" on:click=move |_| {
+                                    set_term_font_size.update(|s| if *s < 28 { *s += 1 });
+                                }>
+                                    "+"
+                                </button>
+                            </div>
+                            <select class="select select-sm" style="font-size:0.76rem; padding:0.2rem 0.35rem;" title="Theme" on:change=move |ev| {
+                                if let Ok(idx) = event_target_value(&ev).parse::<usize>() {
+                                    set_term_theme_idx.set(idx);
+                                }
+                            }>
+                                {TERMINAL_THEMES.iter().enumerate().map(|(i, t)| view!{
+                                    <option value={i.to_string()} selected={move || term_theme_idx.get() == i}>{t.name}</option>
+                                }).collect::<Vec<_>>()}
+                            </select>
+                            <select class="select select-sm" style="font-size:0.76rem; padding:0.2rem 0.35rem;" title="Font" on:change=move |ev| {
+                                if let Ok(idx) = event_target_value(&ev).parse::<usize>() {
+                                    set_term_font_idx.set(idx);
+                                }
+                            }>
+                                {TERMINAL_FONTS.iter().enumerate().map(|(i, f)| view!{
+                                    <option value={i.to_string()} selected={move || term_font_idx.get() == i}>{f.0}</option>
+                                }).collect::<Vec<_>>()}
+                            </select>
+                            {move || error.get().map(|msg| view! { <span style="color:#fca5a5; font-size:0.78rem;">{msg}</span> })}
                         </div>
 
                         <div
                             node_ref=term_ref
                             id="ef-terminal-container"
                             style=move || if term_maximized.get() {
-                                "flex:1; min-height:0; background:#000; border-radius:6px; overflow:hidden;".to_string()
+                                "flex:1; min-height:0; background:#08111f; border-radius:12px; overflow:hidden; border:1px solid rgba(103,232,249,0.18); box-shadow: 0 12px 30px rgba(2,6,23,0.55), inset 0 1px 0 rgba(148,163,184,0.12);".to_string()
                             } else {
-                                "min-height: 400px; max-height: 600px; background: #000; border-radius: 6px; overflow: hidden;".to_string()
+                                "min-height: 400px; max-height: 600px; background: #08111f; border-radius: 12px; overflow: hidden; border:1px solid rgba(103,232,249,0.18); box-shadow: 0 12px 30px rgba(2,6,23,0.45), inset 0 1px 0 rgba(148,163,184,0.12);".to_string()
                             }
                         ></div>
 
@@ -2017,13 +2163,18 @@ fn virtual_iot_pin_anchor_y(controller_type: &str, pin: &str) -> f32 {
 }
 
 #[component]
-fn VirtualIotBoard(controller_type: String) -> impl IntoView {
+fn VirtualIotBoard(
+    controller_type: String,
+    /// Each entry: (pin_name, wire_color_hex, is_left_rail).
+    #[prop(optional)] connected_pins: Vec<(String, String, bool)>,
+) -> impl IntoView {
     let profile = board_config::find_controller(&controller_type);
     let chip_label = profile.chip_label.as_str();
     let has_wifi = profile.has_wifi;
     let pin_count = profile.pin_count;
     let board_color = profile.board_color.as_str();
     let board_title = profile.name.as_str();
+    let wiring_family = profile.wiring_family.clone();
 
     let inner = if let Some(layout_view) = render_catalog_board_layout(profile, chip_label) {
         layout_view
@@ -2060,16 +2211,91 @@ fn VirtualIotBoard(controller_type: String) -> impl IntoView {
                 <filter id="chip-shadow" x="-20%" y="-20%" width="140%" height="140%">
                     <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="rgba(0,0,0,0.45)"/>
                 </filter>
+                // Solder pad — gold ring with subtle highlight
+                <radialGradient id="pcb-pad-gold" cx="35%" cy="32%" r="65%">
+                    <stop offset="0%" stop-color="#fde68a"/>
+                    <stop offset="55%" stop-color="#d4a83a"/>
+                    <stop offset="100%" stop-color="#7a5510"/>
+                </radialGradient>
+                // IC plastic body — dark molded with top sheen
+                <linearGradient id="pcb-chip-body" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#2a2f3a"/>
+                    <stop offset="35%" stop-color="#15181f"/>
+                    <stop offset="100%" stop-color="#080a0f"/>
+                </linearGradient>
+                // USB-C metallic shell
+                <linearGradient id="pcb-usbc-shell" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%"  stop-color="#dde3eb"/>
+                    <stop offset="40%" stop-color="#8d97a6"/>
+                    <stop offset="60%" stop-color="#5b6472"/>
+                    <stop offset="100%" stop-color="#1c2230"/>
+                </linearGradient>
+                // LED specular highlight (small white blob, reused)
+                <radialGradient id="pcb-led-spec" cx="35%" cy="30%" r="55%">
+                    <stop offset="0%"  stop-color="rgba(255,255,255,0.95)"/>
+                    <stop offset="45%" stop-color="rgba(255,255,255,0.25)"/>
+                    <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
+                </radialGradient>
+                // LED dome shading — dark on bottom right for depth
+                <radialGradient id="pcb-led-dome" cx="35%" cy="30%" r="80%">
+                    <stop offset="0%"  stop-color="rgba(255,255,255,0.55)"/>
+                    <stop offset="55%" stop-color="rgba(255,255,255,0)"/>
+                    <stop offset="100%" stop-color="rgba(0,0,0,0.6)"/>
+                </radialGradient>
+                // Board edge bevel
+                <linearGradient id="pcb-edge" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%"  stop-color="rgba(255,255,255,0.22)"/>
+                    <stop offset="50%" stop-color="rgba(255,255,255,0)"/>
+                    <stop offset="100%" stop-color="rgba(0,0,0,0.45)"/>
+                </linearGradient>
+                // Soldermask gloss — strong top-down highlight for 3D feel
+                <linearGradient id="pcb-mask-gloss" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%"  stop-color="rgba(255,255,255,0.18)"/>
+                    <stop offset="35%" stop-color="rgba(255,255,255,0.04)"/>
+                    <stop offset="100%" stop-color="rgba(0,0,0,0.35)"/>
+                </linearGradient>
+                // Board drop-shadow (for the whole PCB to lift off the chassis)
+                <filter id="pcb-lift" x="-15%" y="-15%" width="130%" height="130%">
+                    <feDropShadow dx="0" dy="6" stdDeviation="5" flood-color="rgba(0,0,0,0.55)"/>
+                </filter>
+                // Silk-screen trace pattern
+                <pattern id="pcb-traces" width="36" height="36" patternUnits="userSpaceOnUse">
+                    <path d="M0 12H14M22 12H36M0 24H8M16 24H36" fill="none" stroke="rgba(96,165,250,0.06)" stroke-width="0.6"/>
+                </pattern>
+                // Copper-trace pattern — visible thin gold lines that look like routed traces
+                <pattern id="pcb-copper" width="48" height="48" patternUnits="userSpaceOnUse">
+                    <path d="M0 8 H18 L24 14 H48 M0 22 H10 L16 28 H34 L40 22 H48 M0 36 H22 L28 42 H48"
+                          fill="none" stroke="rgba(212,175,55,0.18)" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round"/>
+                </pattern>
             </defs>
 
-            <rect x="10" y="10" width="240" height="340" rx="18" fill={board_color} stroke="#111826" stroke-width="2"/>
-            <rect x="10" y="10" width="240" height="340" rx="18" fill="url(#pcb-grid)"/>
-            <rect x="10" y="10" width="240" height="340" rx="18" fill="url(#pcb-sheen)"/>
+            // Board substrate with sheen + traces + bevel
+            <g filter="url(#pcb-lift)">
+                <rect x="10" y="10" width="240" height="340" rx="18" fill={board_color} stroke="#0a1018" stroke-width="2"/>
+                // Inner soldermask — slightly inset and a touch lighter so the green pops
+                <rect x="13" y="13" width="234" height="334" rx="16" fill="rgba(255,255,255,0.05)"/>
+                <rect x="10" y="10" width="240" height="340" rx="18" fill="url(#pcb-copper)"/>
+                <rect x="10" y="10" width="240" height="340" rx="18" fill="url(#pcb-traces)"/>
+                <rect x="10" y="10" width="240" height="340" rx="18" fill="url(#pcb-grid)"/>
+                <rect x="10" y="10" width="240" height="340" rx="18" fill="url(#pcb-mask-gloss)"/>
+                // Hard inner edge — subtle dark border to give the board a milled bevel
+                <rect x="10.5" y="10.5" width="239" height="339" rx="17.5" fill="none" stroke="rgba(0,0,0,0.55)" stroke-width="1"/>
+                // Outer top bevel highlight — bright thin line on the top edge
+                <rect x="11" y="11" width="238" height="338" rx="17" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="0.6"/>
+                <rect x="10" y="10" width="240" height="340" rx="18" fill="url(#pcb-edge)" opacity="0.55"/>
+            </g>
 
-            <circle cx="28" cy="28" r="6" fill="#0c111a" stroke="#818c99" stroke-width="1.2"/>
-            <circle cx="232" cy="28" r="6" fill="#0c111a" stroke="#818c99" stroke-width="1.2"/>
-            <circle cx="28" cy="332" r="6" fill="#0c111a" stroke="#818c99" stroke-width="1.2"/>
-            <circle cx="232" cy="332" r="6" fill="#0c111a" stroke="#818c99" stroke-width="1.2"/>
+            // Mounting holes — silver outer ring + dark drilled center
+            <g>
+                <circle cx="28" cy="28" r="6" fill="#0c111a" stroke="#a9b4c2" stroke-width="1.4"/>
+                <circle cx="28" cy="28" r="2.4" fill="#04070c"/>
+                <circle cx="232" cy="28" r="6" fill="#0c111a" stroke="#a9b4c2" stroke-width="1.4"/>
+                <circle cx="232" cy="28" r="2.4" fill="#04070c"/>
+                <circle cx="28" cy="332" r="6" fill="#0c111a" stroke="#a9b4c2" stroke-width="1.4"/>
+                <circle cx="28" cy="332" r="2.4" fill="#04070c"/>
+                <circle cx="232" cy="332" r="6" fill="#0c111a" stroke="#a9b4c2" stroke-width="1.4"/>
+                <circle cx="232" cy="332" r="2.4" fill="#04070c"/>
+            </g>
 
             <text x="130" y="30" text-anchor="middle" fill="rgba(255,255,255,0.85)" font-size="8" font-family="sans-serif">{board_title}</text>
 
@@ -2077,13 +2303,54 @@ fn VirtualIotBoard(controller_type: String) -> impl IntoView {
 
             {if has_wifi {
                 view! {
-                    <g transform="translate(176, 44)">
+                    <g transform="translate(176, 320)">
                         <rect x="0" y="0" width="54" height="18" rx="4" fill="#0b315a" stroke="#2b6cb0" stroke-width="0.8"/>
                         <text x="27" y="12.5" text-anchor="middle" fill="#a5d8ff" font-size="7" font-family="sans-serif">"Wireless"</text>
                     </g>
                 }.into_any()
             } else {
                 view! { <g/> }.into_any()
+            }}
+
+            // ── Connected GPIO knobs (drawn LAST so they sit on top of pads) ──
+            <defs>
+                <radialGradient id="knob-spec" cx="35%" cy="30%" r="60%">
+                    <stop offset="0%" stop-color="rgba(255,255,255,0.95)"/>
+                    <stop offset="55%" stop-color="rgba(255,255,255,0.15)"/>
+                    <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
+                </radialGradient>
+                <radialGradient id="knob-shade" cx="35%" cy="30%" r="80%">
+                    <stop offset="0%" stop-color="rgba(255,255,255,0.45)"/>
+                    <stop offset="55%" stop-color="rgba(255,255,255,0)"/>
+                    <stop offset="100%" stop-color="rgba(0,0,0,0.6)"/>
+                </radialGradient>
+            </defs>
+            {{
+                let mut knobs: Vec<(f32, f32, String)> = Vec::new();
+                for (pin_name, color, is_left) in &connected_pins {
+                    if let Some(y) = board_config::pin_anchor_for_family(&wiring_family, pin_name) {
+                        let kx: f32 = if *is_left { 40.0 } else { 220.0 };
+                        knobs.push((kx, y, color.clone()));
+                    }
+                }
+                view! {
+                    <g>
+                        {knobs.into_iter().map(|(kx, ky, color)| view! {
+                            <g>
+                                // Drop shadow under the knob
+                                <ellipse cx={kx + 0.6} cy={ky + 1.4} rx="5.4" ry="1.7" fill="rgba(0,0,0,0.6)"/>
+                                // Colored body
+                                <circle cx={kx} cy={ky} r="5.0" fill={color.clone()} stroke="#04070c" stroke-width="0.6"/>
+                                // Domed shading
+                                <circle cx={kx} cy={ky} r="5.0" fill="url(#knob-shade)"/>
+                                // Specular highlight
+                                <circle cx={kx - 1.6} cy={ky - 1.7} r="2.0" fill="url(#knob-spec)"/>
+                                // Drilled center where the wire enters
+                                <circle cx={kx} cy={ky} r="1.1" fill="#04070c"/>
+                            </g>
+                        }).collect::<Vec<_>>()}
+                    </g>
+                }
             }}
         </svg>
     }
@@ -2106,6 +2373,11 @@ fn VirtualIotViewer(
     let (backend_attached, set_backend_attached) = signal(false);
     let (injecting_sensor, set_injecting_sensor) = signal(Option::<String>::None);
     let (inject_error, set_inject_error) = signal(Option::<String>::None);
+    let (script_source, set_script_source) = signal(String::from(
+        "# VeerOS shell script\n# Available: gpio write|read|toggle, sensor set|list, let, print, if, while, for\ngpio write 15 1\nsleep 200\ngpio write 15 0\nsleep 200\ngpio write 15 1\n",
+    ));
+    let (script_busy, set_script_busy) = signal(false);
+    let (script_status, set_script_status) = signal(Option::<String>::None);
     let (active_tab, set_active_tab) = signal("detail".to_string());
     // Once user opens the shell tab, keep the terminal mounted so switching
     // back to "Detail" and returning doesn't kill the WS / xterm session.
@@ -2150,6 +2422,66 @@ fn VirtualIotViewer(
             }
         });
     });
+
+    // ── Sensor Stream WebSocket ────────────────────────────────────
+    // Connects to /api/v1/devices/{id}/virtual-iot/sensors/stream and
+    // pushes live sensor_frame events into the sensor_values signal.
+    // Works for both simulated (software noise) and UI-inject sources.
+    {
+        let stream_device_id = device_id.clone();
+        Effect::new(move || {
+            let device_id = stream_device_id.clone();
+            spawn_local(async move {
+                let ws_url = format!(
+                    "{}/devices/{device_id}/virtual-iot/sensors/stream",
+                    crate::api::ws_base_url()
+                );
+
+                let ws = match web_sys::WebSocket::new(&ws_url) {
+                    Ok(ws) => ws,
+                    Err(_) => return,
+                };
+
+                let onmessage_set_values = set_sensor_values.clone();
+                let onmessage_set_log = set_sensor_log.clone();
+                let onmessage = Closure::wrap(Box::new(move |evt: web_sys::MessageEvent| {
+                    if let Ok(text) = evt.data().dyn_into::<js_sys::JsString>() {
+                        let s: String = text.into();
+                        if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&s) {
+                            if msg.get("type").and_then(|t| t.as_str()) == Some("sensor_frame") {
+                                let sensor = msg.get("sensor").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                let value  = msg.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                let source = msg.get("source").and_then(|v| v.as_str()).unwrap_or("stream").to_string();
+                                let ts     = msg.get("ts").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                if !sensor.is_empty() {
+                                    onmessage_set_values.update(|values| {
+                                        values.insert(sensor.clone(), value.clone());
+                                    });
+                                    onmessage_set_log.update(|log| {
+                                        log.push(VirtualIotSensorLogEntry {
+                                            ts,
+                                            sensor: sensor.clone(),
+                                            value: value.clone(),
+                                            source,
+                                        });
+                                        if log.len() > 500 {
+                                            log.drain(..100);
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }) as Box<dyn FnMut(_)>);
+                ws.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
+                onmessage.forget();
+
+                // Keep the WebSocket handle alive for the component lifetime.
+                // A closure that captures `ws` and does nothing is enough.
+                let _ws_keep = ws;
+            });
+        });
+    }
 
     let controller_name = move || virtual_iot_controller_name(&controller_type.get()).to_string();
     let sensor_count = move || enabled_sensors.get().len();
@@ -2231,6 +2563,75 @@ fn VirtualIotViewer(
             }
         });
     });
+
+    // Fire-and-forget actuator write. POSTs to /virtual-iot/actuators which
+    // writes `gpio write <pin> <level>\n` to the sensor FIFO. The live stream
+    // WS then echoes the resulting `[actuator] gpio.<pin>=<level>` back as a
+    // `sensor_frame` under sensor key `gpio_<pin>`, which drives the UI.
+    let actuator_device_id = device_id.clone();
+    let write_actuator = Callback::new(move |(pin, level): (u32, u32)| {
+        set_inject_error.set(None);
+        // Optimistic UI: update the gpio_<pin> cell immediately.
+        let sensor_key = format!("gpio_{pin}");
+        let level_text = level.to_string();
+        set_sensor_values.update(|values| {
+            values.insert(sensor_key.clone(), level_text.clone());
+        });
+        let device_id = actuator_device_id.clone();
+        spawn_local(async move {
+            let request = crate::api::ActuatorWriteRequest { pin, level };
+            let result = api::post::<crate::api::ActuatorWriteRequest, serde_json::Value>(
+                &format!("/devices/{device_id}/virtual-iot/actuators"),
+                &request,
+            )
+            .await;
+            if let Err(err) = result {
+                set_inject_error.set(Some(err));
+            }
+        });
+    });
+
+    // Fire-and-forget script run. POSTs the full source to
+    // /virtual-iot/scripts/run; output streams back via the shell WS and any
+    // `[actuator]` lines are picked up by the sensor stream.
+    let script_device_id = device_id.clone();
+    let run_script = Callback::new(move |_: ()| {
+        if script_busy.get_untracked() {
+            return;
+        }
+        let source = script_source.get_untracked();
+        if source.trim().is_empty() {
+            set_script_status.set(Some("Script is empty".into()));
+            return;
+        }
+        set_script_busy.set(true);
+        set_script_status.set(Some("Running…".into()));
+        set_inject_error.set(None);
+        let device_id = script_device_id.clone();
+        spawn_local(async move {
+            let request = crate::api::ScriptRunRequest { source };
+            let result = api::post::<crate::api::ScriptRunRequest, serde_json::Value>(
+                &format!("/devices/{device_id}/virtual-iot/scripts/run"),
+                &request,
+            )
+            .await;
+            set_script_busy.set(false);
+            match result {
+                Ok(payload) => {
+                    let lines = payload.get("lines").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let bytes = payload.get("bytes").and_then(|v| v.as_u64()).unwrap_or(0);
+                    set_script_status.set(Some(format!(
+                        "Sent {lines} line(s), {bytes} byte(s) — watch shell pane for output."
+                    )));
+                }
+                Err(err) => {
+                    set_script_status.set(Some(format!("Error: {err}")));
+                    set_inject_error.set(Some(err));
+                }
+            }
+        });
+    });
+
     let trigger_event = {
         let inject_sensor = inject_sensor;
         Callback::new(move |event: VirtualIotEventDefinition| {
@@ -2301,6 +2702,27 @@ fn VirtualIotViewer(
                                 }
                             }
                         >"IoT Runtime Shell"</button>
+                        <button
+                            type="button"
+                            role="tab"
+                            class=move || {
+                                if active_tab.get() == "scripts" { "btn btn-primary btn-sm" } else { "btn btn-ghost btn-sm" }
+                            }
+                            aria-selected=move || (active_tab.get() == "scripts").to_string()
+                            disabled=move || !backend_attached.get()
+                            title=move || {
+                                if backend_attached.get() {
+                                    "Write and run VeerOS shell scripts on the attached VM".to_string()
+                                } else {
+                                    "Attach a VeerOS backend to enable scripting".to_string()
+                                }
+                            }
+                            on:click=move |_| {
+                                if backend_attached.get_untracked() {
+                                    set_active_tab.set("scripts".to_string());
+                                }
+                            }
+                        >"Scripts"</button>
                     </div>
                 </div>
                 <div style="display:flex; gap:0.5rem; align-items:center;">
@@ -2338,6 +2760,51 @@ fn VirtualIotViewer(
                     }
                 >
                     <VirtualIotShellTerminal device_id=device_id_value.get_value() />
+                </div>
+            </Show>
+
+            <Show when=move || !loading.get() && error.get().is_none() && active_tab.get() == "scripts" && backend_attached.get()>
+                <div class="virtual-iot-workbench" style="padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem;">
+                    <div>
+                        <div class="virtual-iot-section-title">"Program the board"</div>
+                        <div class="virtual-iot-section-caption">"Write a VeerOS shell script and run it on the attached VM. Output streams into the IoT Runtime Shell pane; any gpio writes flash the onboard LED tile live."</div>
+                    </div>
+                    <textarea
+                        class="virtual-iot-script-editor"
+                        style="width: 100%; min-height: 260px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.85rem; background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 6px; padding: 0.75rem; resize: vertical; box-sizing: border-box;"
+                        prop:value=move || script_source.get()
+                        on:input=move |ev| set_script_source.set(event_target_value(&ev))
+                    />
+                    <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                        <button
+                            class="btn btn-primary btn-sm"
+                            disabled=move || script_busy.get()
+                            on:click=move |_| run_script.run(())
+                        >
+                            {move || if script_busy.get() { "Running…" } else { "▶ Run on VM" }}
+                        </button>
+                        <button
+                            class="btn btn-ghost btn-sm"
+                            on:click=move |_| set_script_source.set(String::from(
+                                "# Blink the onboard LED 3 times\nfor i in 1 2 3\n  gpio write 15 1\n  sleep 150\n  gpio write 15 0\n  sleep 150\nend\n"
+                            ))
+                        >"Load: blink LED"</button>
+                        <button
+                            class="btn btn-ghost btn-sm"
+                            on:click=move |_| set_script_source.set(String::from(
+                                "# Ramp the temperature sensor\nfor t in 2200 2400 2600 2800 3000 3200 3400\n  sensor set temperature $t\n  sleep 250\nend\n"
+                            ))
+                        >"Load: temp ramp"</button>
+                        <button
+                            class="btn btn-ghost btn-sm"
+                            on:click=move |_| set_script_source.set(String::from(
+                                "# Read all GPIO pins and list sensors\ngpio list\nsensor list\n"
+                            ))
+                        >"Load: inspect"</button>
+                        {move || script_status.get().map(|msg| view! {
+                            <span style="color:#94a3b8; font-size: 0.82rem;">{msg}</span>
+                        })}
+                    </div>
                 </div>
             </Show>
 
@@ -2422,8 +2889,8 @@ fn VirtualIotViewer(
                                             item_key=key
                                             scene_rects=scene_rects
                                             scene_ref=scene_ref
-                                            min_w=200.0
-                                            min_h=150.0
+                                            min_w=210.0
+                                            min_h=210.0
                                         >
                                             <VirtualIotSensorWorkbenchModule
                                                 module=module
@@ -2440,7 +2907,7 @@ fn VirtualIotViewer(
                                 scene_rects=scene_rects
                                 scene_ref=scene_ref
                                 min_w=300.0
-                                min_h=480.0
+                                min_h=360.0
                             >
                                 <div class="virtual-iot-controller-shell">
                                     <div class="virtual-iot-controller-led-strip">
@@ -2450,10 +2917,75 @@ fn VirtualIotViewer(
                                         <span class="virtual-iot-led virtual-iot-led-link" class:is-on=move || backend_attached.get()></span>
                                     </div>
                                     <div class="virtual-iot-controller-board-wrap">
-                                        {move || {
-                                            let current = controller_type.get();
-                                            view! { <VirtualIotBoard controller_type=current/> }
-                                        }}
+                                        <div class="virtual-iot-board-holder">
+                                            {move || {
+                                                let current = controller_type.get();
+                                                let modules = scene_modules();
+                                                let rects = scene_rects.get();
+                                                let default = [0.0_f64, 0.0, 260.0, 180.0];
+                                                let ctrl = rects.get("__controller").copied().unwrap_or(default);
+                                                let ctrl_cx = ctrl[0] + ctrl[2] / 2.0;
+                                                let mut connected: Vec<(String, String, bool)> = Vec::new();
+                                                for m in &modules {
+                                                    if m.pin == "INTERNAL" || m.pin == "EXTERNAL" || m.pin == "N/A" {
+                                                        continue;
+                                                    }
+                                                    let mr = rects.get(&m.sensor_key).copied().unwrap_or(default);
+                                                    let m_cx = mr[0] + mr[2] / 2.0;
+                                                    let is_left = m_cx < ctrl_cx;
+                                                    let color = wire_color_for_bus(&m.pin, &m.bus).to_string();
+                                                    for raw in m.pin.split('/') {
+                                                        let pin_name = raw.trim().to_string();
+                                                        if !pin_name.is_empty() {
+                                                            connected.push((pin_name, color.clone(), is_left));
+                                                        }
+                                                    }
+                                                }
+                                                view! { <VirtualIotBoard controller_type=current connected_pins=connected/> }
+                                            }}
+                                            {move || {
+                                                // Only XIAO ESP32C6 has the pin-15 onboard LED mapping.
+                                                let ct = controller_type.get();
+                                                if ct != "xiao-esp32c6" { return view! { <svg class="virtual-iot-board-live-overlay"/> }.into_any(); }
+                                                let led_on_signal = move || {
+                                                    sensor_values.get().get("gpio_15").cloned().unwrap_or_else(|| "0".into()) == "1"
+                                                };
+                                                let toggle = move |_: web_sys::MouseEvent| {
+                                                    let next: u32 = if sensor_values.get_untracked().get("gpio_15").cloned().unwrap_or_else(|| "0".into()) == "1" { 0 } else { 1 };
+                                                    write_actuator.run((15, next));
+                                                };
+                                                view! {
+                                                    <svg viewBox="0 0 260 360" class="virtual-iot-board-live-overlay" xmlns="http://www.w3.org/2000/svg">
+                                                        // Outer glow halo (visible only when LED on)
+                                                        <circle
+                                                            class="live-led-glow"
+                                                            cx="152" cy="232" r="18"
+                                                            fill="#fb923c"
+                                                            opacity=move || if led_on_signal() { "0.35" } else { "0.0" }
+                                                        />
+                                                        // Bright center dot
+                                                        <circle
+                                                            class="live-led"
+                                                            cx="152" cy="232" r="5"
+                                                            fill=move || if led_on_signal() { "#fde68a" } else { "#3a2207" }
+                                                            stroke=move || if led_on_signal() { "#fef3c7" } else { "#fb923c" }
+                                                            stroke-width="1.2"
+                                                            on:click=toggle
+                                                        >
+                                                            <title>"Onboard LED · GPIO 15 · click to toggle"</title>
+                                                        </circle>
+                                                        <text
+                                                            x="152" y="234"
+                                                            text-anchor="middle"
+                                                            fill=move || if led_on_signal() { "#7c2d12" } else { "#ffedd5" }
+                                                            font-size="4.8"
+                                                            font-family="monospace"
+                                                            pointer-events="none"
+                                                        >"LED"</text>
+                                                    </svg>
+                                                }.into_any()
+                                            }}
+                                        </div>
                                     </div>
                                     <div class="virtual-iot-controller-readout">
                                         <div class="virtual-iot-controller-title">{move || format!("{} bench harness", virtual_iot_controller_name(&controller_type.get()))}</div>
@@ -2877,11 +3409,23 @@ fn VirtualIotWorkbenchWires(
                 <filter id="viot-wire-shadow" x="-30%" y="-30%" width="160%" height="160%">
                     <feDropShadow dx="0" dy="2" stdDeviation="2.5" flood-color="rgba(0,0,0,0.45)"/>
                 </filter>
+                <radialGradient id="viot-connector-chrome" cx="35%" cy="30%" r="75%">
+                    <stop offset="0%" stop-color="#f4f7fb"/>
+                    <stop offset="35%" stop-color="#a9b4c2"/>
+                    <stop offset="70%" stop-color="#3b4554"/>
+                    <stop offset="100%" stop-color="#0a0f17"/>
+                </radialGradient>
+                <radialGradient id="viot-connector-inner" cx="35%" cy="30%" r="75%">
+                    <stop offset="0%" stop-color="rgba(255,255,255,0.55)"/>
+                    <stop offset="50%" stop-color="rgba(255,255,255,0.0)"/>
+                    <stop offset="100%" stop-color="rgba(0,0,0,0.55)"/>
+                </radialGradient>
             </defs>
             {modules.into_iter().map(|module| {
                 let key = module.sensor_key.clone();
                 let pin = module.pin.clone();
                 let bus = module.bus.clone();
+                let shape = virtual_iot_sensor_shape_kind(&key).to_string();
                 view! {
                     <g>
                         {move || {
@@ -2897,24 +3441,78 @@ fn VirtualIotWorkbenchWires(
                             } else {
                                 (ctrl[0] + ctrl[2], ctrl[1] + ctrl[3] / 2.0)
                             };
-                            let (end_x, end_y) = if is_left {
-                                (m[0] + m[2], m[1] + m[3] / 2.0)
-                            } else {
-                                (m[0], m[1] + m[3] / 2.0)
+                            // Compute the actual metallic body bounds inside the card:
+                            //   round/square/hex shells: stage is centered, width = min(180, card_w),
+                            //   square aspect (height == width). For rect shells: full card width,
+                            //   aspect 5:4 (height ≈ 0.8 × width).
+                            //   The topline (instrument name) reserves ~26 px above the stage and the
+                            //   readout reserves ~40 px below it inside the card.
+                            let topline_h = 26.0_f64;
+                            let readout_h = 40.0_f64;
+                            let avail_h = (m[3] - topline_h - readout_h).max(60.0);
+                            let (stage_w, stage_h) = match shape.as_str() {
+                                "rect" => {
+                                    let w = m[2].max(40.0);
+                                    let h = (w * 0.8).min(avail_h);
+                                    (w, h)
+                                }
+                                _ => {
+                                    let target = m[2].min(180.0).min(avail_h);
+                                    (target, target)
+                                }
                             };
-                            let mid_x = (start_x + end_x) / 2.0;
+                            let stage_cx = m[0] + m[2] / 2.0;
+                            let stage_cy = m[1] + topline_h + stage_h / 2.0;
+                            // Wire arrives at the metallic body's edge facing the controller.
+                            let end_x = if is_left {
+                                stage_cx + stage_w / 2.0  // right edge of left-side instrument
+                            } else {
+                                stage_cx - stage_w / 2.0  // left edge of right-side instrument
+                            };
+                            let end_y = stage_cy;
+                            // Inset wire endpoints so the path emerges from the back of each connector barrel.
+                            let barrel_len = 14.0_f64;
+                            let dir = if is_left { -1.0 } else { 1.0 };
+                            let wire_start_x = start_x + dir * barrel_len;
+                            let wire_end_x = end_x - dir * barrel_len;
+                            let mid_x = (wire_start_x + wire_end_x) / 2.0;
                             let d = format!(
                                 "M {:.1} {:.1} C {:.1} {:.1}, {:.1} {:.1}, {:.1} {:.1}",
-                                start_x, start_y, mid_x, start_y, mid_x, end_y, end_x, end_y,
+                                wire_start_x, start_y, mid_x, start_y, mid_x, end_y, wire_end_x, end_y,
                             );
                             let stroke = wire_color_for_bus(&pin, &bus);
                             let dash = if pin == "INTERNAL" || pin == "EXTERNAL" { "6 6" } else { "0" };
+                            // Connector barrel geometry: a small rounded rect that "plugs into" the body.
+                            let barrel_w = 16.0_f64;
+                            let barrel_h = 12.0_f64;
+                            let (s_bx, s_by) = (start_x + dir * 0.0 - if is_left { 0.0 } else { 0.0 }, start_y - barrel_h / 2.0);
+                            let s_bx = if is_left { s_bx - barrel_w + 2.0 } else { s_bx - 2.0 };
+                            let (e_bx, e_by) = (end_x, end_y - barrel_h / 2.0);
+                            let e_bx = if is_left { e_bx - 2.0 } else { e_bx - barrel_w + 2.0 };
+                            // Colored band where wire enters the barrel.
+                            let band_w = 3.0_f64;
+                            let s_band_x = if is_left { s_bx } else { s_bx + barrel_w - band_w };
+                            let e_band_x = if is_left { e_bx + barrel_w - band_w } else { e_bx };
                             view! {
                                 <>
+                                    // Wire halo + main wire
                                     <path d={d.clone()} stroke={stroke.clone()} stroke-opacity="0.22" stroke-width="9" fill="none" stroke-linecap="round"/>
-                                    <path d={d.clone()} stroke={stroke.clone()} stroke-width="3.8" stroke-dasharray={dash} fill="none" stroke-linecap="round" filter="url(#viot-wire-shadow)"/>
-                                    <circle cx={format!("{start_x:.1}")} cy={format!("{start_y:.1}")} r="5" fill="#0f172a" stroke={stroke.clone()} stroke-width="1.6"/>
-                                    <circle cx={format!("{end_x:.1}")} cy={format!("{end_y:.1}")} r="5" fill="#0a1524" stroke={stroke} stroke-width="1.6"/>
+                                    <path d={d.clone()} stroke={stroke.clone()} stroke-width="3.8" stroke-dasharray={dash.to_string()} fill="none" stroke-linecap="round" filter="url(#viot-wire-shadow)"/>
+                                    // Subtle chrome highlight along the wire
+                                    <path d={d.clone()} stroke="rgba(255,255,255,0.18)" stroke-width="1" fill="none" stroke-linecap="round"/>
+
+                                    // ── Controller-side connector (metallic barrel) ──
+                                    <rect x={format!("{s_bx:.1}")} y={format!("{s_by:.1}")} width={barrel_w} height={barrel_h} rx="2.5" fill="url(#viot-connector-chrome)" stroke="#04080e" stroke-width="0.8" filter="url(#viot-wire-shadow)"/>
+                                    <rect x={format!("{:.1}", s_bx + 1.2)} y={format!("{:.1}", s_by + 1.2)} width={format!("{:.1}", barrel_w - 2.4)} height={format!("{:.1}", barrel_h - 2.4)} rx="1.6" fill="url(#viot-connector-inner)" opacity="0.6"/>
+                                    <rect x={format!("{s_band_x:.1}")} y={format!("{:.1}", s_by + 0.8)} width={band_w} height={format!("{:.1}", barrel_h - 1.6)} rx="0.8" fill={stroke.clone()} opacity="0.95"/>
+                                    // Tiny screw on the barrel
+                                    <circle cx={format!("{:.1}", s_bx + barrel_w / 2.0)} cy={format!("{:.1}", s_by + 2.4)} r="0.9" fill="#1b2230" stroke="rgba(255,255,255,0.35)" stroke-width="0.3"/>
+
+                                    // ── Instrument-side connector (metallic barrel) ──
+                                    <rect x={format!("{e_bx:.1}")} y={format!("{e_by:.1}")} width={barrel_w} height={barrel_h} rx="2.5" fill="url(#viot-connector-chrome)" stroke="#04080e" stroke-width="0.8" filter="url(#viot-wire-shadow)"/>
+                                    <rect x={format!("{:.1}", e_bx + 1.2)} y={format!("{:.1}", e_by + 1.2)} width={format!("{:.1}", barrel_w - 2.4)} height={format!("{:.1}", barrel_h - 2.4)} rx="1.6" fill="url(#viot-connector-inner)" opacity="0.6"/>
+                                    <rect x={format!("{e_band_x:.1}")} y={format!("{:.1}", e_by + 0.8)} width={band_w} height={format!("{:.1}", barrel_h - 1.6)} rx="0.8" fill={stroke.clone()} opacity="0.95"/>
+                                    <circle cx={format!("{:.1}", e_bx + barrel_w / 2.0)} cy={format!("{:.1}", e_by + 2.4)} r="0.9" fill="#1b2230" stroke="rgba(255,255,255,0.35)" stroke-width="0.3"/>
                                 </>
                             }
                         }}
@@ -2931,87 +3529,162 @@ fn VirtualIotSensorWorkbenchModule(
     on_inject: Callback<(String, String, Option<String>)>,
     injecting_sensor: ReadSignal<Option<String>>,
 ) -> impl IntoView {
+    let (expanded, set_expanded) = signal(false);
     let sensor_key = module.sensor_key.clone();
     let reading = module.reading.clone();
     let presets = virtual_iot_sensor_presets(&sensor_key);
     let slider_spec = virtual_iot_slider_spec(&sensor_key);
     let level = virtual_iot_sensor_level(&sensor_key, &reading);
     let visual_kind = virtual_iot_sensor_visual_kind(&sensor_key).to_string();
+    let shape_kind = virtual_iot_sensor_shape_kind(&sensor_key).to_string();
     let chip_name = virtual_iot_sensor_chip_name(&sensor_key);
-    let busy_sensor_key = sensor_key.clone();
-    let busy_text_sensor_key = sensor_key.clone();
+    let busy_sensor_key = StoredValue::new(sensor_key.clone());
     let active_sensor_key = sensor_key.clone();
+    let dock_sensor_key = module.sensor_key.clone();
+    let dock_label = module.sensor_label.clone();
+    let dock_pin = module.pin.clone();
+    let dock_bus = module.bus.clone();
+    let needle_deg = -120.0 + (level * 240.0);
+    let is_digital_widget = matches!(visual_kind.as_str(), "digital" | "location");
+    let is_bar_widget = matches!(visual_kind.as_str(), "audio" | "network");
+    let is_wave_widget = visual_kind == "motion";
 
     view! {
         <div
             class="virtual-iot-module-card"
             class:is-active=move || injecting_sensor.get().as_deref() == Some(active_sensor_key.as_str())
+            class:is-expanded=move || expanded.get()
             data-kind={visual_kind.clone()}
         >
-            <div class="virtual-iot-module-header">
-                <div>
-                    <div class="virtual-iot-module-title">{module.sensor_label.clone()}</div>
+            <div class={format!("virtual-iot-module-shell shape-{}", shape_kind)}>
+                <div class="virtual-iot-module-topline">
+                    <div class="virtual-iot-module-title">{dock_label}</div>
+                    <div class="virtual-iot-module-io mono">{dock_pin}</div>
+                </div>
+
+                <button class="virtual-iot-module-visual-stage" on:click=move |_| set_expanded.update(|v| *v = !*v)>
+                    {if is_digital_widget {
+                        view! {
+                            <div class="virtual-iot-digital-screen">
+                                <div class="virtual-iot-digital-chip mono">{chip_name}</div>
+                                <div class="virtual-iot-digital-reading mono">{reading.clone()}</div>
+                                <div class="virtual-iot-digital-bus mono">{dock_bus.clone()}</div>
+                            </div>
+                        }.into_any()
+                    } else if is_bar_widget {
+                        let fill_pct = (level * 100.0).clamp(0.0, 100.0);
+                        view! {
+                            <div class="virtual-iot-bar-screen">
+                                <div class="virtual-iot-bar-rail">
+                                    <div class="virtual-iot-bar-fill" style={format!("height: {fill_pct:.1}%;")}></div>
+                                </div>
+                                <div class="virtual-iot-bar-peaks">
+                                    <span style={format!("height:{:.0}%;", (30.0 + level * 55.0).clamp(8.0, 100.0))}></span>
+                                    <span style={format!("height:{:.0}%;", (16.0 + level * 70.0).clamp(8.0, 100.0))}></span>
+                                    <span style={format!("height:{:.0}%;", (24.0 + level * 60.0).clamp(8.0, 100.0))}></span>
+                                    <span style={format!("height:{:.0}%;", (12.0 + level * 75.0).clamp(8.0, 100.0))}></span>
+                                </div>
+                                <div class="virtual-iot-bar-reading mono">{reading.clone()}</div>
+                            </div>
+                        }.into_any()
+                    } else {
+                        view! {
+                            <div class="virtual-iot-meter-dial" style={format!("--needle-deg:{needle_deg:.2}deg;")}>
+                                <div class="virtual-iot-meter-ring"></div>
+                                <div class="virtual-iot-meter-ticks">
+                                    <span></span><span></span><span></span><span></span><span></span>
+                                </div>
+                                <div class="virtual-iot-meter-needle"></div>
+                                <div class="virtual-iot-meter-core"></div>
+                                {if is_wave_widget {
+                                    view! {
+                                        <div class="virtual-iot-wave-overlay">
+                                            <span></span><span></span><span></span>
+                                        </div>
+                                    }.into_any()
+                                } else {
+                                    view! { <></> }.into_any()
+                                }}
+                                <div class="virtual-iot-meter-icon mono">{virtual_iot_sensor_visual_icon(&dock_sensor_key)}</div>
+                            </div>
+                        }.into_any()
+                    }}
+                </button>
+
+                <div class="virtual-iot-module-readout">
                     <div class="virtual-iot-module-subtitle mono">{chip_name}</div>
-                </div>
-                <div class="virtual-iot-module-io mono">{module.pin.clone()}</div>
-            </div>
-
-            <div class="virtual-iot-module-body">
-                <div class={format!("virtual-iot-module-visual {}", visual_kind)} style={format!("--level: {:.3};", level)}>
-                    <div class="virtual-iot-module-visual-inner">
-                        <span class="virtual-iot-module-icon">{virtual_iot_sensor_visual_icon(&module.sensor_key)}</span>
-                    </div>
-                    <div class="virtual-iot-module-silk mono">{chip_name}</div>
-                    <div class="virtual-iot-module-pins">
-                        <span></span><span></span><span></span><span></span>
-                    </div>
-                </div>
-                <div class="virtual-iot-module-readout-panel">
                     <div class="virtual-iot-module-reading mono">{reading.clone()}</div>
-                    <div class="virtual-iot-module-range mono">{module.bus.clone()}</div>
+                    <div class="virtual-iot-module-range mono">{dock_bus}</div>
                 </div>
-            </div>
 
-            {if let Some((min, max, step, unit)) = slider_spec {
-                let sensor_for_slider = module.sensor_key.clone();
-                let on_inject_slider = on_inject;
-                let slider_value = virtual_iot_parse_numeric(&sensor_for_slider, &reading).unwrap_or((min + max) / 2.0);
-                view! {
-                    <div class="virtual-iot-module-control-row">
-                        <input
-                            class="virtual-iot-module-slider"
-                            type="range"
-                            min={min.to_string()}
-                            max={max.to_string()}
-                            step={step.to_string()}
-                            prop:value={slider_value.to_string()}
-                            on:change=move |ev| {
-                                if let Ok(next_value) = event_target_value(&ev).parse::<f64>() {
-                                    on_inject_slider.run((sensor_for_slider.clone(), virtual_iot_format_sensor_value(&sensor_for_slider, next_value), None));
+                <div class="virtual-iot-module-tools">
+                    <button class="btn btn-ghost btn-sm" on:click=move |_| set_expanded.update(|v| *v = !*v)>
+                        {move || if expanded.get() { "Minimize" } else { "Expand" }}
+                    </button>
+                    <span class="virtual-iot-module-drag-tip mono">"drag via top handle"</span>
+                </div>
+
+                <Show when=move || expanded.get()>
+                    <div class="virtual-iot-module-expand-panel">
+                        {if let Some((min, max, step, unit)) = slider_spec {
+                            let sensor_for_slider = module.sensor_key.clone();
+                            let on_inject_slider = on_inject;
+                            let slider_value = virtual_iot_parse_numeric(&sensor_for_slider, &reading).unwrap_or((min + max) / 2.0);
+                            view! {
+                                <div class="virtual-iot-module-control-row">
+                                    <input
+                                        class="virtual-iot-module-slider"
+                                        type="range"
+                                        min={min.to_string()}
+                                        max={max.to_string()}
+                                        step={step.to_string()}
+                                        prop:value={slider_value.to_string()}
+                                        on:change=move |ev| {
+                                            if let Ok(next_value) = event_target_value(&ev).parse::<f64>() {
+                                                on_inject_slider.run((sensor_for_slider.clone(), virtual_iot_format_sensor_value(&sensor_for_slider, next_value), None));
+                                            }
+                                        }
+                                    />
+                                    <div class="virtual-iot-module-control-meta mono">{format!("{min:.0} → {max:.0} {unit}")}</div>
+                                </div>
+                            }.into_any()
+                        } else {
+                            view! { <div class="virtual-iot-module-control-meta mono">"Preset-driven simulation module"</div> }.into_any()
+                        }}
+
+                        <div class="virtual-iot-module-actions">
+                            {presets.iter().map(|(label, value)| {
+                                let sensor_key = module.sensor_key.clone();
+                                let next_value = (*value).to_string();
+                                let on_inject = on_inject;
+                                view! {
+                                    <button class="btn btn-secondary btn-sm" on:click=move |_| on_inject.run((sensor_key.clone(), next_value.clone(), None))>{*label}</button>
                                 }
-                            }
-                        />
-                        <div class="virtual-iot-module-control-meta mono">{format!("{min:.0} → {max:.0} {unit}")}</div>
+                            }).collect::<Vec<_>>()}
+                            <span class="virtual-iot-module-busy" class:is-visible=move || busy_sensor_key.with_value(|key| injecting_sensor.get().as_deref() == Some(key.as_str()))>
+                                {move || {
+                                    if busy_sensor_key.with_value(|key| injecting_sensor.get().as_deref() == Some(key.as_str())) {
+                                        "Applying…"
+                                    } else {
+                                        "Ready"
+                                    }
+                                }}
+                            </span>
+                        </div>
                     </div>
-                }.into_any()
-            } else {
-                view! { <div class="virtual-iot-module-control-meta mono">"Preset-driven simulation module"</div> }.into_any()
-            }}
-
-            <div class="virtual-iot-module-actions">
-                {presets.into_iter().map(|(label, value)| {
-                    let sensor_key = module.sensor_key.clone();
-                    let next_value = value.to_string();
-                    let on_inject = on_inject;
-                    view! {
-                        <button class="btn btn-secondary btn-sm" on:click=move |_| on_inject.run((sensor_key.clone(), next_value.clone(), None))>{label}</button>
-                    }
-                }).collect::<Vec<_>>()}
-                <span class="virtual-iot-module-busy" class:is-visible=move || injecting_sensor.get().as_deref() == Some(busy_sensor_key.as_str())>
-                    {move || if injecting_sensor.get().as_deref() == Some(busy_text_sensor_key.as_str()) { "Applying…" } else { "Ready" }}
-                </span>
+                </Show>
             </div>
         </div>
+    }
+}
+
+fn virtual_iot_sensor_shape_kind(sensor: &str) -> &'static str {
+    match virtual_iot_sensor_visual_kind(sensor) {
+        "env" | "light" | "power" => "round",
+        "audio" | "network" => "rect",
+        "digital" | "location" => "square",
+        "motion" => "hex",
+        _ => "round",
     }
 }
 

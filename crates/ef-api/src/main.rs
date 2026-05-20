@@ -15,6 +15,7 @@ mod routes;
 mod session_manager;
 mod integrations;
 mod virtual_iot_runtime;
+mod sensor_bus;
 mod veeros_proxy;
 
 #[cfg(test)]
@@ -64,7 +65,8 @@ async fn main() -> Result<()> {
 
     // Minimal Virtual IoT runtime — periodically heartbeats saved virtual devices
     // so they behave like software-backed controllers instead of going stale.
-    virtual_iot_runtime::spawn_virtual_iot_runtime(pool.clone());
+    let bus = sensor_bus::new_bus();
+    virtual_iot_runtime::spawn_virtual_iot_runtime(pool.clone(), bus.clone());
 
     let integrations = integrations::IntegrationManager::new(pool.clone());
     let state = AppState {
@@ -72,6 +74,7 @@ async fn main() -> Result<()> {
         jwt_secret: cfg.auth.jwt_secret.clone(),
         veeros: cfg.veeros.clone(),
         integrations,
+        sensor_bus: bus,
     };
 
     state.integrations.init().await;
@@ -124,6 +127,7 @@ async fn start_grpc_server(pool: sqlx::PgPool, jwt_secret: String, host: &str) -
     use proto::device::device_service_server::DeviceServiceServer;
     use proto::session::session_service_server::SessionServiceServer;
     use proto::test::test_service_server::TestServiceServer;
+    use proto::agent::agent_service_server::AgentServiceServer;
 
     let reflection_service = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
@@ -138,6 +142,9 @@ async fn start_grpc_server(pool: sqlx::PgPool, jwt_secret: String, host: &str) -
         .await;
     health_reporter
         .set_serving::<TestServiceServer<grpc::test_service::TestServiceImpl>>()
+        .await;
+    health_reporter
+        .set_serving::<AgentServiceServer<grpc::agent_service::AgentServiceImpl>>()
         .await;
 
     let interceptor = grpc::auth_interceptor::AuthInterceptor::new(pool.clone(), jwt_secret);
@@ -155,6 +162,14 @@ async fn start_grpc_server(pool: sqlx::PgPool, jwt_secret: String, host: &str) -
         interceptor,
     );
 
+    // Prototype: AgentService has no auth interceptor yet — the RegisterAgent
+    // RPC returns a session token that future revisions will bind via a
+    // dedicated interceptor.
+    let agent_hub = grpc::agent_service::AgentHub::new();
+    let agent_svc = AgentServiceServer::new(
+        grpc::agent_service::AgentServiceImpl::new(agent_hub.clone()),
+    );
+
     let grpc_addr: SocketAddr = format!("{host}:50051").parse()?;
     tracing::info!("gRPC listening on {grpc_addr}");
 
@@ -164,6 +179,7 @@ async fn start_grpc_server(pool: sqlx::PgPool, jwt_secret: String, host: &str) -
         .add_service(device_svc)
         .add_service(session_svc)
         .add_service(test_svc)
+        .add_service(agent_svc)
         .serve(grpc_addr)
         .await?;
 

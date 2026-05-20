@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package edgefabric.agent.v1;
+
+// AgentService: long-lived bidirectional channel between ef-agent and ef-api.
+//
+// Replaces polling-based HTTP heartbeat + command-fetch with streaming RPCs
+// over a single HTTP/2 connection.
+//
+// Prototype — runs in parallel with the existing HTTP control-plane client.
+service AgentService {
+  // Client-streaming: the agent pushes a stream of heartbeats on one call.
+  // Server acknowledges once when the client closes the stream (or on error).
+  rpc PushHeartbeats(stream Heartbeat) returns (HeartbeatAck);
+
+  // Server-streaming: the agent opens this once, the server pushes commands
+  // as they become available. Survives agent lifetime; reconnect on error.
+  rpc SubscribeCommands(SubscribeRequest) returns (stream Command);
+
+  // Unary: the agent reports a command result.
+  rpc ReportCommandResult(CommandResult) returns (ReportAck);
+
+  // Unary: register / refresh agent liveness (fast path without DB writes
+  // for every heartbeat).
+  rpc RegisterAgent(AgentRegistration) returns (RegisterAck);
+}
+
+message AgentRegistration {
+  string agent_id = 1;
+  string region = 2;
+  string version = 3;
+  string hostname = 4;
+  optional string streaming_url = 5;
+}
+
+message RegisterAck {
+  bool accepted = 1;
+  string session_token = 2; // opaque, bound to this gRPC channel
+  int64 server_time_unix_ms = 3;
+}
+
+message Heartbeat {
+  string agent_id = 1;
+  string device_id = 2; // uuid string
+  string status = 3;    // "available" | "busy" | "offline" | ...
+  optional double cpu_usage = 4;
+  optional double memory_usage = 5;
+  int64 timestamp_unix_ms = 6;
+}
+
+message HeartbeatAck {
+  int32 accepted = 1;
+  int32 rejected = 2;
+}
+
+message SubscribeRequest {
+  string agent_id = 1;
+  // Optional filter: only receive commands for these device ids. Empty = all.
+  repeated string device_ids = 2;
+}
+
+message Command {
+  string command_id = 1;
+  string device_id = 2;
+  string command_type = 3;
+  // JSON-encoded params (kept as string for prototype; switch to typed
+  // oneof once the command vocabulary is stable).
+  string params_json = 4;
+  int64 issued_at_unix_ms = 5;
+}
+
+message CommandResult {
+  string command_id = 1;
+  bool success = 2;
+  string stdout = 3;
+  string stderr = 4;
+  int32 exit_code = 5;
+}
+
+message ReportAck {
+  bool accepted = 1;
+}

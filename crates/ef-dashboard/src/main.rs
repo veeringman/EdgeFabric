@@ -14,6 +14,7 @@ use leptos_router::{
 use components::sidebar::Sidebar;
 use pages::{
     admin::AdminPage, builds::BuildsPage, development_ide::DevelopmentIdePage, devices::DevicesPage, discovered_hosts::DiscoveredHostsPage,
+    hw_pcb::HardwarePcbPage, hw_schematic::HardwareSchematicPage, hw_studio::HardwareStudioPage,
     integrations::IntegrationsPage, jobs::JobsPage, login::LoginPage, logs::LogsPage,
     overview::OverviewPage, quantum::QuantumPage, quantum_accelerators::QuantumAcceleratorsPage,
     quantum_designer::QuantumDesignerPage, quantum_jobs::QuantumJobsPage,
@@ -69,6 +70,12 @@ fn App() -> impl IntoView {
                 <Route path=path!("/quantum/jobs") view=move || view! { <AuthGuard><Shell><QuantumJobsPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/quantum/results/:id") view=move || view! { <AuthGuard><Shell><QuantumResultsPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/veeros/hosts") view=move || view! { <AuthGuard><Shell><DiscoveredHostsPage/></Shell></AuthGuard> }/>
+                <Route path=path!("/hw") view=move || view! { <AuthGuard><Shell><HardwareStudioPage/></Shell></AuthGuard> }/>
+                <Route path=path!("/hw/schematic") view=move || view! { <AuthGuard><Shell><HardwareSchematicPage/></Shell></AuthGuard> }/>
+                <Route path=path!("/hw/pcb") view=move || view! { <AuthGuard><Shell><HardwarePcbPage/></Shell></AuthGuard> }/>
+                <Route path=path!("/hw/library") view=move || view! { <AuthGuard><Shell><HardwareStudioPage/></Shell></AuthGuard> }/>
+                <Route path=path!("/hw/bom") view=move || view! { <AuthGuard><Shell><HardwareStudioPage/></Shell></AuthGuard> }/>
+                <Route path=path!("/hw/copilot") view=move || view! { <AuthGuard><Shell><HardwareStudioPage/></Shell></AuthGuard> }/>
             </Routes>
         </Router>
     }

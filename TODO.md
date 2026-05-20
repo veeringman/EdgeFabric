@@ -23,6 +23,12 @@ Execution plan for extending Virtual IoT + SSH infrastructure into Internet-usab
 
 ## Phase 0: Scope Lock And Delivery Baseline
 
+- [ ] New scope item: **PCB / Electronic Circuit Design** (AI-assisted + manual,
+  realistic visuals, drag-and-drop, config-driven). See
+  `PCB_DESIGN_INTEGRATION_PLAN.md` for the full plan and phased rollout.
+- [ ] New scope item: **Chip Design through Tape-Out** (RTL → sign-off,
+  open-PDK first, FPGA parity, AI co-pilot). See
+  `CHIP_DESIGN_INTEGRATION_PLAN.md` for the full plan and phased rollout.
 - [ ] Finalize scope document: support three target classes
   - Real IoT devices (network-reachable or agent-attached)
   - Generic SSH hosts

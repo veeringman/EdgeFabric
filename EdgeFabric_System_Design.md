@@ -229,6 +229,12 @@ Device → Frame Capture → Encoder → WebRTC → Browser
 - Network simulation engine
 - GPU acceleration
 - Edge-distributed clusters
+- **Electronic Circuit / PCB Design Studio** — AI-assisted + manual board
+  design with realistic 3D visuals, drag-and-drop, and config-driven
+  generation through to fabrication. See `PCB_DESIGN_INTEGRATION_PLAN.md`.
+- **Chip Design (Silicon → Tape-Out)** — RTL workspace, verification,
+  synthesis, PnR, and sign-off on open PDKs with FPGA flow parity and an
+  AI co-pilot. See `CHIP_DESIGN_INTEGRATION_PLAN.md`.
 
 ---
 

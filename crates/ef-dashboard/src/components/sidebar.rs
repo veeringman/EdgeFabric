@@ -138,6 +138,14 @@ pub fn Sidebar() -> impl IntoView {
                 <A href="/quantum/jobs"><span class="nav-icon"><NavIcon name="quantum".to_string()/></span><span>"Jobs"</span></A>
                 <A href="/veeros/hosts"><span class="nav-icon"><NavIcon name="quantum".to_string()/></span><span>"VeerOS Hosts"</span></A>
 
+                <div class="nav-section-title">"Hardware Studio"</div>
+                <A href="/hw"><span class="nav-icon"><NavIcon name="quantum".to_string()/></span><span>"Studio"</span></A>
+                <A href="/hw/schematic"><span class="nav-icon"><NavIcon name="quantum".to_string()/></span><span>"Schematic"</span></A>
+                <A href="/hw/pcb"><span class="nav-icon"><NavIcon name="quantum".to_string()/></span><span>"PCB Designer"</span></A>
+                <A href="/hw/library"><span class="nav-icon"><NavIcon name="quantum".to_string()/></span><span>"Library"</span></A>
+                <A href="/hw/bom"><span class="nav-icon"><NavIcon name="quantum".to_string()/></span><span>"BOM"</span></A>
+                <A href="/hw/copilot"><span class="nav-icon"><NavIcon name="quantum".to_string()/></span><span>"AI Co-Pilot"</span></A>
+
                 <div class="nav-section-title">"Administration"</div>
                 <A href="/admin"><span class="nav-icon"><NavIcon name="admin".to_string()/></span><span>"Admin"</span></A>
             </nav>

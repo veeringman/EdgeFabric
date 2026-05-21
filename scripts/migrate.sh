@@ -11,11 +11,9 @@ COMMAND="${1:-up}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 MIGRATIONS_DIR="$PROJECT_ROOT/migrations"
+DEFAULT_DATABASE_URL="postgres://edgefabric:edgefabric@localhost:5432/edgefabric"
 
-if [[ -z "${DATABASE_URL:-}" ]]; then
-  echo "ERROR: DATABASE_URL environment variable is required" >&2
-  exit 1
-fi
+DATABASE_URL="${DATABASE_URL:-$DEFAULT_DATABASE_URL}"
 
 # Ensure sqlx-cli is available
 if ! command -v sqlx &>/dev/null; then

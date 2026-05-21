@@ -26,6 +26,7 @@
 - [Scalability Strategy](#scalability-strategy)
 - [Failure Handling](#failure-handling)
 - [Technology Decisions](#technology-decisions)
+- [Design Studio Extension (Chip · PCB · Quantum)](#design-studio-extension-chip--pcb--quantum)
 - [Future Enhancements](#future-enhancements)
 
 ---
@@ -359,6 +360,41 @@ graph LR
 | **IoT** | MQTT (rumqttc) | Lightweight IoT protocol |
 | **Container orchestration** | Kubernetes | Virtual device scaling |
 | **Build system** | Cargo workspaces | Monorepo with shared crates |
+
+---
+
+## Design Studio Extension (Chip · PCB · Quantum)
+
+EdgeFabric extends its device-cloud control plane to cover **hardware design from RTL/schematic through verification and tape-out/manufacturing**, reusing the same Rust core, scheduler, runner/lease model, artifact store, and audit log.
+
+### Domains
+
+| Domain | Surface | Backends | Tooling |
+|--------|---------|----------|---------|
+| **Chip** | Silicon Studio · RTL workbench · Schematic Editor · Floorplan · 3D Stack-up · Tape-out checklist | **vFPGA** (veer-vm software-defined chip) · **Hardware FPGA** (Xilinx/Intel/Lattice boards) | Yosys · nextpnr · OpenROAD · Verilator · Icarus · OpenSTA · KLayout · Magic · Netgen |
+| **PCB** | PCB Studio · Schematic Editor (`PcbLib` skin) · Layout · 3D viewer · DRC/BOM/Gerber | Headless EDA jobs (no hardware lease needed) | KiCad CLI · ngspice · FreeCAD · OpenEMS · JLCPCB/PCBWay submit |
+| **Quantum** | Circuit Designer · Accelerators · Jobs · VeerOS Hosts | VeerOS qsim · vFPGA cryo-control stubs | Qiskit/Cirq bridges (planned) |
+
+### Shared Engine
+
+The dashboard ships a single **domain-agnostic schematic engine** (`crates/ef-dashboard/src/components/schematic.rs`) — instances, pins, ortho-routed wires, drag-and-drop palette, undo, JSON export. Each domain provides a `SymbolLibrary` skin (`ChipLib` today; `PcbLib` planned). The trait is `Send + Sync + 'static` so libraries can be passed to Leptos closures.
+
+### Backends as Leases
+
+Both **vFPGA** (veer-vm process) and **hardware FPGA** boards expose the same lifecycle (`provision → start → attach project → run job → stop`) and the same reservation contract as iOS build runners. They are stored in `chip_backends` and reserved via `chip_backend_leases`, with status (`idle / booting / running / error / offline`) surfaced live on `/silicon/backends`.
+
+### Job Model
+
+`ef-orchestrator` is extended with `chip.*` and `pcb.*` job kinds: `sim`, `synth`, `pnr`, `sta`, `drc`, `lvs`, `program`, `gerber`, `spice`, `3d_render`. Each job emits incremental logs (NDJSON/WebSocket) and produces typed artifacts (VCD, FST, netlist, bitstream, Gerber, ODB++, GDS, BOM) stored in the unified artifact store.
+
+### Cross-cutting
+
+- **Tenancy & RBAC**: chip projects, PCB projects, libraries, parts, and PDKs are tenant-scoped. New roles: `chip.viewer / chip.designer / chip.signoff_owner`, `pcb.viewer / pcb.designer / pcb.releaser`.
+- **IP protection**: encryption-at-rest for RTL/GDS; NDA-gated PDKs require per-tenant entitlements.
+- **AI co-pilot**: shared `ef-copilot` service with domain prompts (RTL gen, SDC suggestions, DRC explanation, footprint suggestion, BOM optimization).
+- **Observability**: shared metrics (`chip_jobs_running`, `pcb_jobs_failed_total`, `fpga_backends_online`) feed the same Prometheus/Grafana stack.
+
+See [CHIP_DESIGN_INTEGRATION_PLAN.md](../CHIP_DESIGN_INTEGRATION_PLAN.md), [PCB_DESIGN_INTEGRATION_PLAN.md](../PCB_DESIGN_INTEGRATION_PLAN.md), [QUANTUM_INTEGRATION_PLAN.md](../QUANTUM_INTEGRATION_PLAN.md), and [TODO.md](../TODO.md) for phase-by-phase execution status, full API surfaces, and migration schemas.
 
 ---
 

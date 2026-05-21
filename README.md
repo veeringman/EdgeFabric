@@ -2,33 +2,42 @@
   <img src="docs/assets/EdgeFabric_Logo.png" alt="EdgeFabric" width="420"/>
 </p>
 
-<h3 align="left">Unified device cloud to test, automate, and scale across real and virtual devices.</h3>
+<h3 align="left">Unified design-to-device cloud — circuits, chips, firmware, apps, and devices on one fabric.</h3>
 
 <p align="left">
   <a href="docs/SYSTEM_DESIGN.md">System Design</a> ·
   <a href="docs/ARCHITECTURE.md">Architecture & Diagrams</a> ·
-  <a href="docs/API_REFERENCE.md">API Reference</a>
+  <a href="docs/API_REFERENCE.md">API Reference</a> ·
+  <a href="CHIP_DESIGN_INTEGRATION_PLAN.md">Chip Design</a> ·
+  <a href="PCB_DESIGN_INTEGRATION_PLAN.md">PCB Design</a> ·
+  <a href="QUANTUM_INTEGRATION_PLAN.md">Quantum</a> ·
+  <a href="TODO.md">Roadmap</a>
 </p>
 
 ---
 
 ## Overview
 
-EdgeFabric is a next-generation device cloud platform that enables developers and QA teams to run tests, debug applications, and automate workflows across:
+EdgeFabric is an end-to-end **design-to-device** platform — a single Rust-native control plane that spans hardware design (chips, PCBs, quantum), firmware/app builds, virtual & real device fleets, and CI/CD automation:
 
+- **Chip Design** — RTL → schematic → synthesis → floorplan/PnR → tape-out, with veer-vm (virtual FPGA) and hardware FPGA backends
+- **PCB / Electronic Circuit Design** — AI-assisted schematic + layout + DRC + Gerber/ODB++ export
+- **Quantum** — superconducting-qubit design, circuit designer, accelerators, VeerOS hosts
 - **Real mobile devices** — Android & iOS
-- **Virtual devices** — Emulators & simulators
-- **IoT devices** — Hardware boards & digital twins
+- **Virtual devices** — Emulators, simulators, Virtual IoT (digital twins)
+- **IoT devices** — Hardware boards, MQTT/SSH/Serial, sensor simulation
+- **CI/CD runners** — Windows-initiated iOS builds on networked macOS SSH runners; pluggable runner classes
 
-Built in **Rust** for performance, safety, and low-level device control.
+Built in **Rust** for performance, safety, and low-level device + EDA control.
 
-## Latest Updates (2026-05-04)
+## Latest Updates (2026-05-21)
 
-- iOS coordinate mapping fixed to use logical points for WebDriverAgent input alignment.
-- iOS model enrichment now maps ProductType values to bezel profiles for accurate device framing.
-- VeerOS host discovery dedupe improved in DB and dashboard merge path.
-- VeerOS shell page updated to xterm-based UX and raw-byte websocket input/output handling.
-- Dashboard auth behavior clarified: device/discovery endpoints require valid JWT or API key.
+- **Chip Design**: shared schematic editor engine (`components/schematic.rs`) with drag-and-drop palette, ortho wire routing, undo, JSON export; chip skin with ~30 symbols.
+- **Schematic presets**: NAND2 (CMOS), SQC-Q5 superconducting transmon, RV32I 5-stage RISC-V core, PQC Kyber accelerator (AXI/FSM/TRNG/Keccak/sampler/NTT/polymul/modred/polyram).
+- **Sim / FPGA Backends** page (`/silicon/backends`): unified management of veer-vm software-defined chips (vFPGA) and hardware FPGA boards (VCU118, Alveo U280, Arty A7, …) with provision form, kind/status filters, lease + action controls.
+- **3D stack-up viewer** (`/silicon/stackup`) with isometric SVG rendering and layer toggles.
+- **PCB Design** scope locked (see `PCB_DESIGN_INTEGRATION_PLAN.md`); schematic engine reuse via `PcbLib` skin planned.
+- Earlier: iOS coordinate mapping for WebDriverAgent; ProductType→bezel mapping; VeerOS host dedupe; xterm-based VeerOS shell; auth tightening on device/discovery endpoints.
 
 ---
 
@@ -98,6 +107,12 @@ graph TB
 | **CI/CD Native** | First-class GitHub Actions, Jenkins, GitLab CI integration |
 | **Parallel Testing** | Distribute test suites across device pools automatically |
 | **IoT Support** | Firmware flashing, serial/SSH access, sensor simulation |
+| **Virtual IoT** | Digital-twin devices with VeerOS-backed simulation, controllers, scenarios |
+| **Chip Design Studio** | RTL → schematic → synth → floorplan → tape-out; veer-vm vFPGA + hardware FPGA |
+| **Schematic Editor** | Shared drag-and-drop engine; chip + PCB skins; presets for CMOS, RV32I, transmon, PQC Kyber |
+| **PCB Studio** | AI-assisted schematic + layout, DRC/ERC, Gerber/ODB++/IPC-2581 export, BOM, fab submission hooks |
+| **Quantum** | Circuit designer, accelerators, jobs queue, VeerOS hosts |
+| **iOS Build Runners** | Windows-initiated iOS builds on networked macOS SSH runners with lease scheduling |
 | **Secure Multi-Tenancy** | Per-session isolation, device wipe, RBAC, TLS everywhere |
 
 ---
@@ -115,6 +130,11 @@ graph TB
 | State store | PostgreSQL + Redis |
 | Messaging | NATS |
 | Virtual devices | QEMU/KVM, Kubernetes |
+| Virtual IoT | VeerOS veer-vm runtime (software-defined devices & vFPGA) |
+| FPGA backends | veer-vm (vFPGA) · Xilinx Vivado · Intel Quartus · Lattice Diamond/Radiant |
+| Chip EDA (open) | Yosys · nextpnr · OpenROAD · Verilator · Icarus · OpenSTA · KLayout · Magic · Netgen |
+| PCB EDA (open) | KiCad CLI · ngspice · FreeCAD · OpenEMS |
+| Dashboard | Leptos 0.7 (Rust/WASM CSR) with SVG-native schematic & 3D viewers |
 
 ---
 
@@ -136,9 +156,15 @@ graph LR
 |---------|-------------|
 | **Device Pool** | Group of real/virtual devices matching a filter |
 | **Session** | Active, isolated interaction with a single device |
-| **Scheduler** | Allocates devices by availability, type, priority |
+| **Scheduler** | Allocates devices, runners, and FPGA backends by availability, type, priority, lease |
 | **Control Plane** | Central orchestration — the Rust core |
 | **Edge Node** | Physical rack hosting real devices + local agent |
+| **Runner** | Build executor (macOS/Linux/Windows host) with capability tags (`xcode`, `simctl`, `fastlane`, …) |
+| **Virtual IoT** | Software-defined IoT device backed by a VeerOS controller profile |
+| **Chip Backend** | Simulation/emulation target — `vFPGA` (veer-vm software) or `FPGA` (hardware board) |
+| **Schematic** | Domain-agnostic graph (instances + wires) rendered by the shared editor with a `SymbolLibrary` skin |
+| **PDK** | Open or vendor process design kit (SKY130, GF180MCU, IHP-SG13G2, …) attached to chip projects |
+| **Lease** | Time-bound reservation of a runner or chip backend by a project/job |
 
 ---
 
@@ -169,14 +195,21 @@ EdgeFabric/
 ├── crates/
 │   ├── ef-core/                # Shared types, traits, errors
 │   ├── ef-api/                 # REST + gRPC API server
-│   ├── ef-scheduler/           # Device allocation engine
-│   ├── ef-orchestrator/        # Test job orchestration
+│   ├── ef-scheduler/           # Device + runner + backend allocation engine
+│   ├── ef-orchestrator/        # Test/build/EDA job orchestration
 │   ├── ef-control/             # Device control plane
 │   ├── ef-streaming/           # WebRTC streaming engine
 │   ├── ef-agent/               # Edge node agent binary
+│   ├── ef-db/                  # SQLx schema + migrations façade
+│   ├── ef-dashboard/           # Leptos 0.7 WASM dashboard (Silicon Studio, PCB, Quantum, IoT)
 │   └── ef-cli/                 # Developer CLI tool
+├── migrations/                 # PostgreSQL migrations (devices, runners, virtual-iot, …)
 ├── proto/                      # Protocol Buffer definitions
 ├── config/                     # Environment configs
+├── CHIP_DESIGN_INTEGRATION_PLAN.md
+├── PCB_DESIGN_INTEGRATION_PLAN.md
+├── QUANTUM_INTEGRATION_PLAN.md
+├── TODO.md                     # Source-of-truth roadmap for all tracks
 └── tests/                      # Integration tests
 ```
 
@@ -444,12 +477,38 @@ avahi-browse -t -r _edgefabric._tcp     # IoT (Linux)
 
 ## Roadmap
 
+Detailed phase-by-phase tracking lives in [TODO.md](TODO.md). High-level themes:
+
+**Device cloud & runners**
 - [ ] Smart AI-powered device scheduling
 - [ ] GPU-accelerated streaming
 - [ ] Advanced network simulation (latency, packet loss)
 - [ ] Visual regression testing
 - [ ] Distributed edge clusters with autonomous failover
 - [ ] Plugin system for custom device protocols
+- [x] Windows → macOS-runner iOS build path (lease-based, capability-matched)
+
+**Chip Design**
+- [x] Silicon Studio surface (RTL, Floorplan, Stack-up, Schematic Editor, Backends)
+- [x] Shared schematic engine + presets (NAND2, RV32I, SQC-Q5 transmon, PQC Kyber)
+- [ ] veer-vm vFPGA controller crate (`ef-veer`)
+- [ ] Hardware-FPGA adapters (Xilinx/Intel/Lattice) + JTAG/PCIe data plane
+- [ ] REST/WebSocket APIs under `/api/v1/chip/*` (projects, schematics, backends, jobs, PDKs)
+- [ ] OpenROAD / Yosys / nextpnr / Verilator integration
+- [ ] DRC/LVS/STA panels + tape-out sign-off checklist
+
+**PCB Design**
+- [x] PCB studio + standalone schematic + 3D viewer (legacy)
+- [ ] Migrate to shared schematic engine via `PcbLib` skin
+- [ ] 2D layout canvas, copper pour, via management, DRC
+- [ ] Gerber/ODB++/IPC-2581/STEP exporters + KiCad CLI integration
+- [ ] SPICE/SI/PI/thermal simulation
+- [ ] REST APIs under `/api/v1/pcb/*` + JLCPCB/PCBWay submit hooks
+
+**Quantum**
+- [x] Circuit designer + accelerators + jobs + VeerOS hosts pages
+- [ ] Pulse-level control schematics, T1/T2 overlays
+- [ ] PQC algorithm presets (Dilithium, Falcon, SPHINCS+)
 
 ---
 
@@ -460,6 +519,14 @@ avahi-browse -t -r _edgefabric._tcp     # IoT (Linux)
 | [System Design](docs/SYSTEM_DESIGN.md) | Detailed design: layers, modules, data flow, security |
 | [Architecture & Diagrams](docs/ARCHITECTURE.md) | All schematics: system, network, deployment, sequences |
 | [API Reference](docs/API_REFERENCE.md) | REST endpoints, gRPC services, error codes |
+| [Capability Taxonomy](docs/CAPABILITY_TAXONOMY.md) | Canonical capability tags for devices, hosts, runners |
+| [Device Registration](docs/DEVICE_REGISTRATION.md) | Onboarding real/virtual devices and runners |
+| [Virtual IoT Design](docs/VIRTUAL_IOT_DESIGN.md) | Digital-twin device model and lifecycle |
+| [VeerOS Virtual IoT Backends](docs/VEEROS_VIRTUAL_IOT_BACKENDS.md) | VeerOS-backed simulation runtime |
+| [Chip Design Integration Plan](CHIP_DESIGN_INTEGRATION_PLAN.md) | RTL → tape-out scope, phases, and APIs |
+| [PCB Design Integration Plan](PCB_DESIGN_INTEGRATION_PLAN.md) | Schematic/layout/manufacturing scope and APIs |
+| [Quantum Integration Plan](QUANTUM_INTEGRATION_PLAN.md) | Qubit design, pulses, accelerators |
+| [Roadmap (TODO.md)](TODO.md) | Phase-by-phase execution status for every track |
 | [Getting Started](#getting-started) | Quick start, install, build, deploy instructions |
 | [Device Setup](#device-setup) | Android, iOS/iPadOS, IoT device preparation |
 

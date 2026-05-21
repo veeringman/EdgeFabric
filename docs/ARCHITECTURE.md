@@ -19,6 +19,7 @@
 - [Streaming Pipeline](#streaming-pipeline)
 - [Session Lifecycle](#session-lifecycle)
 - [Deployment Topology](#deployment-topology)
+- [Design Studio (Chip · PCB · Quantum)](#design-studio-chip--pcb--quantum)
 
 ---
 
@@ -345,6 +346,80 @@ graph TB
     HUB_B --> DEV_B1
     HUB_B --> DEV_B2
 ```
+
+---
+
+## Design Studio (Chip · PCB · Quantum)
+
+EdgeFabric has expanded beyond runtime device control to cover **upstream hardware design** — chips, PCBs, and quantum circuits — sharing the same control plane, scheduler, runner/lease model, artifact store, and audit log as the device cloud.
+
+```mermaid
+graph TB
+    subgraph "Design Surface (Dashboard)"
+        STUDIO[Silicon Studio]
+        SCH[Schematic Editor<br/>shared engine + skins]
+        STACK[3D Stack-up Viewer]
+        PCB_UI[PCB Studio]
+        QUBIT[Quantum Designer]
+    end
+
+    subgraph "Domain Skins"
+        CHIPLIB[ChipLib<br/>FET · JJ · RV32I · PQC]
+        PCBLIB[PcbLib<br/>R/L/C · IC · MCU · Connectors]
+        QLIB[QuantumLib<br/>X-mon · Resonator · JJ]
+    end
+
+    subgraph "Design Services (planned)"
+        CHIP_API[/api/v1/chip/*]
+        PCB_API[/api/v1/pcb/*]
+        ORCH2[ef-orchestrator<br/>chip.* · pcb.* jobs]
+    end
+
+    subgraph "Sim / Verify / Emulate Backends"
+        VFPGA[veer-vm<br/>vFPGA process]
+        HWFPGA[Hardware FPGA<br/>VCU118 · Alveo · Arty]
+        EDA[Open EDA Tools<br/>Yosys · nextpnr · OpenROAD<br/>Verilator · OpenSTA · KLayout]
+        PCBEDA[PCB EDA<br/>KiCad CLI · ngspice · FreeCAD]
+    end
+
+    subgraph "Shared Infra (reused from device cloud)"
+        SCHED2[Scheduler + Leases]
+        ART[Artifact Store<br/>VCD · GDS · Gerber · Bitstream]
+        AUDIT[Audit Log]
+    end
+
+    STUDIO --> SCH
+    PCB_UI --> SCH
+    QUBIT --> SCH
+    SCH --> CHIPLIB
+    SCH --> PCBLIB
+    SCH --> QLIB
+
+    STUDIO --> CHIP_API
+    PCB_UI --> PCB_API
+    CHIP_API --> ORCH2
+    PCB_API --> ORCH2
+    ORCH2 --> VFPGA
+    ORCH2 --> HWFPGA
+    ORCH2 --> EDA
+    ORCH2 --> PCBEDA
+
+    ORCH2 --> SCHED2
+    VFPGA --> ART
+    HWFPGA --> ART
+    EDA --> ART
+    PCBEDA --> ART
+    ORCH2 --> AUDIT
+```
+
+**Key principles**
+
+- **One schematic engine, many skins.** `components/schematic.rs` is domain-agnostic (instances + wires + pins). Domain libraries (`ChipLib`, `PcbLib`) implement a `SymbolLibrary` trait.
+- **Backends are leased like runners.** veer-vm processes (software-defined FPGA) and physical FPGA boards both expose the same lifecycle (provision → start → attach project → run job → stop) and the same lease/reservation contract as iOS build runners.
+- **Open EDA first.** Yosys, nextpnr, OpenROAD, Verilator, OpenSTA, KLayout, Magic, Netgen on the chip side; KiCad CLI, ngspice, FreeCAD on the PCB side. Vendor tools (Vivado, Quartus, Diamond) are pluggable via the `FpgaAdapter` trait.
+- **Artifacts unified.** VCD/FST waveforms, GDS, bitstreams, Gerber/ODB++, BOMs all flow through the same artifact store and are referenced from jobs and sign-off gates.
+
+See [CHIP_DESIGN_INTEGRATION_PLAN.md](../CHIP_DESIGN_INTEGRATION_PLAN.md), [PCB_DESIGN_INTEGRATION_PLAN.md](../PCB_DESIGN_INTEGRATION_PLAN.md), [QUANTUM_INTEGRATION_PLAN.md](../QUANTUM_INTEGRATION_PLAN.md), and [TODO.md](../TODO.md) for full phase plans and APIs.
 
 ---
 

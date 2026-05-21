@@ -35,7 +35,20 @@ source "$SCRIPT_DIR/ports.env"
 
 COMMAND="${1:-help}"
 RUN_MODE="${EF_RUN_MODE:-development}"
-INFRA_MODE="${EF_INFRA_MODE:-docker}"
+OS_NAME="$(uname -s)"
+IS_MACOS=false
+if [[ "$OS_NAME" == "Darwin" ]]; then
+  IS_MACOS=true
+fi
+
+if [[ "$IS_MACOS" == "true" ]]; then
+  if [[ -n "${EF_INFRA_MODE:-}" && "${EF_INFRA_MODE}" != "local" ]]; then
+    warn "macOS always uses local infrastructure; ignoring EF_INFRA_MODE=${EF_INFRA_MODE}"
+  fi
+  INFRA_MODE="local"
+else
+  INFRA_MODE="${EF_INFRA_MODE:-docker}"
+fi
 BIN_PROFILE="${EF_BIN_PROFILE:-auto}"
 LOG_DIR="$PROJECT_ROOT/logs"
 PID_DIR="$PROJECT_ROOT/.pids"
@@ -45,6 +58,21 @@ BUILD_ON_START="${EF_BUILD_ON_START:-true}"
 BUILD_PROFILE="${EF_BUILD_PROFILE:-debug}"
 
 mkdir -p "$LOG_DIR" "$PID_DIR"
+
+run_compose() {
+  if docker compose version >/dev/null 2>&1; then
+    docker compose "$@"
+    return
+  fi
+
+  if command -v docker-compose >/dev/null 2>&1; then
+    docker-compose "$@"
+    return
+  fi
+
+  err "Docker Compose is not available. Install Docker Compose v2 plugin or docker-compose binary."
+  return 127
+}
 
 # ── Determine binary path ────────────────────────────────────────
 resolve_bin_dir() {
@@ -80,8 +108,10 @@ BIN_DIR="$(resolve_bin_dir)"
 # ── Helper functions ──────────────────────────────────────────────
 build_service_binary() {
   local pkg="$1"
+  local build_on_start_lc
+  build_on_start_lc="$(printf '%s' "$BUILD_ON_START" | tr '[:upper:]' '[:lower:]')"
 
-  if [[ "${BUILD_ON_START,,}" != "true" ]]; then
+  if [[ "$build_on_start_lc" != "true" ]]; then
     info "Skipping build for $pkg (EF_BUILD_ON_START=$BUILD_ON_START)"
     return
   fi
@@ -278,12 +308,18 @@ deploy_infra_auto() {
 # ── Commands ──────────────────────────────────────────────────────
 
 deploy_infra() {
+  if [[ "$IS_MACOS" == "true" ]]; then
+    warn "macOS is configured for local infrastructure; running infra-local instead of Docker Compose"
+    deploy_infra_local
+    return
+  fi
+
   info "Starting infrastructure services via Docker Compose..."
   if ! command -v docker &>/dev/null; then
     err "Docker not found. Run: ./scripts/install.sh"
     exit 1
   fi
-  docker compose up -d postgres redis nats coturn
+  run_compose up -d postgres redis nats coturn
   echo ""
   wait_for_port "$EF_PORT_POSTGRES" "PostgreSQL"
   wait_for_port "$EF_PORT_REDIS" "Redis"
@@ -396,8 +432,18 @@ deploy_agent() {
 }
 
 deploy_docker() {
+  if [[ "$IS_MACOS" == "true" ]]; then
+    warn "macOS is configured for local runtime; running all-local instead of Docker Compose"
+    INFRA_MODE="local"
+    deploy_infra_auto
+    deploy_api
+    deploy_agent
+    deploy_dashboard
+    return
+  fi
+
   info "Starting full stack via Docker Compose..."
-  docker compose --profile full up -d --build
+  run_compose --profile full up -d --build
   ok "Full Docker Compose stack running"
   echo ""
   info "  API:     http://localhost:8080"
@@ -419,9 +465,9 @@ stop_infra() {
   stop_process "ef-coturn" 2>/dev/null || true
   stop_process "ef-nats" 2>/dev/null || true
 
-  if command -v docker &>/dev/null && docker compose ps --quiet 2>/dev/null | grep -q .; then
+  if command -v docker &>/dev/null && run_compose ps --quiet 2>/dev/null | grep -q .; then
     info "Stopping Docker Compose infra services..."
-    docker compose stop postgres redis nats coturn >/dev/null 2>&1 || true
+    run_compose stop postgres redis nats coturn >/dev/null 2>&1 || true
   fi
 
   if command -v brew &>/dev/null && [[ -f "$LOCAL_INFRA_BREW_FILE" ]]; then
@@ -481,7 +527,7 @@ show_status() {
 
   # Infrastructure (Docker) — pager disabled
   if command -v docker &>/dev/null; then
-    PAGER=cat DOCKER_CLI_HINTS=false docker compose ps --format 'table {{.Service}}\t{{.State}}\t{{.Status}}' 2>/dev/null | cat || true
+    PAGER=cat DOCKER_CLI_HINTS=false run_compose ps --format 'table {{.Service}}\t{{.State}}\t{{.Status}}' 2>/dev/null | cat || true
   fi
 
   echo ""
@@ -529,7 +575,7 @@ follow_logs() {
     agent|ef-agent)     tail -F "$LOG_DIR/ef-agent.log" ;;
     dash|ef-dashboard)  tail -F "$LOG_DIR/ef-dashboard.log" ;;
     all|"")             tail -F "$LOG_DIR"/ef-*.log ;;
-    infra|docker)       PAGER=cat docker compose logs -f --tail=100 ;;
+    infra|docker)       PAGER=cat run_compose logs -f --tail=100 ;;
     *) err "Unknown service for logs: $svc (api|agent|dashboard|infra|all)"; exit 1 ;;
   esac
 }
@@ -541,7 +587,7 @@ restart_service() {
     api|ef-api)         stop_process ef-api;       deploy_api ;;
     agent|ef-agent)     stop_process ef-agent;     deploy_agent ;;
     dash|dashboard|ef-dashboard)  stop_process ef-dashboard; deploy_dashboard ;;
-    infra)              docker compose restart postgres redis nats coturn ;;
+    infra)              run_compose restart postgres redis nats coturn ;;
     all|"")
       stop_process ef-dashboard; stop_process ef-agent; stop_process ef-api
       deploy_infra; deploy_api; deploy_agent; deploy_dashboard
@@ -637,7 +683,7 @@ case "$COMMAND" in
     echo "  dashboard          Start the dashboard (Trunk dev server)"
     echo "  all                Start everything (infra + api + agent + dashboard)"
     echo "  all-local          Start everything with local infra (no Docker)"
-    echo "  docker             Start full stack via Docker Compose"
+    echo "  docker             Start full stack via Docker Compose (macOS: runs all-local)"
     echo "  restart <svc>      Restart api|agent|dashboard|infra|all"
     echo "  logs <svc>         Tail logs for api|agent|dashboard|infra|all"
     echo "  stop               Stop all EdgeFabric services"
@@ -649,7 +695,7 @@ case "$COMMAND" in
     echo ""
     echo "Environment:"
     echo "  EF_RUN_MODE                    development|production (default: development)"
-    echo "  EF_INFRA_MODE                  docker|local (default: docker; used by api/all)"
+    echo "  EF_INFRA_MODE                  docker|local (Linux default: docker; macOS: always local)"
     echo "  EF__AGENT__AGENT_ID            Agent identifier (default: hostname)"
     echo "  EF__AGENT__REGION              Agent region (default: local)"
     echo "  EF__AGENT__CONTROL_PLANE_URL   API endpoint (default: \$EF_URL_API)"

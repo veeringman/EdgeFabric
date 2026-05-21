@@ -19,6 +19,11 @@ use pages::{
     overview::OverviewPage, quantum::QuantumPage, quantum_accelerators::QuantumAcceleratorsPage,
     quantum_designer::QuantumDesignerPage, quantum_jobs::QuantumJobsPage,
     quantum_results::QuantumResultsPage, sessions::SessionsPage, sessions_live::LiveSessionsPage,
+    si_backends::SiliconBackendsPage,
+    si_floorplan::SiliconFloorplanPage, si_qubit::SiliconQubitPage, si_rtl::SiliconRtlPage,
+    si_schematic::SiliconSchematicPage,
+    si_stackup::SiliconStackupPage,
+    si_studio::SiliconStudioPage, si_synth::SiliconSynthPage, si_tapeout::SiliconTapeoutPage,
     veeros_shell::VeerosShellPage, virtual_iot_backends::VirtualIotBackendsPage,
     virtual_iot_designer::VirtualIotDesignerPage, virtual_iot_shell::VirtualIotShellPage,
 };
@@ -71,6 +76,15 @@ fn App() -> impl IntoView {
                 <Route path=path!("/quantum/results/:id") view=move || view! { <AuthGuard><Shell><QuantumResultsPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/veeros/hosts") view=move || view! { <AuthGuard><Shell><DiscoveredHostsPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/hw") view=move || view! { <AuthGuard><Shell><HardwareStudioPage/></Shell></AuthGuard> }/>
+                <Route path=path!("/silicon") view=move || view! { <AuthGuard><Shell><SiliconStudioPage/></Shell></AuthGuard> }/>
+                <Route path=path!("/silicon/rtl") view=move || view! { <AuthGuard><Shell><SiliconRtlPage/></Shell></AuthGuard> }/>
+                <Route path=path!("/silicon/floorplan") view=move || view! { <AuthGuard><Shell><SiliconFloorplanPage/></Shell></AuthGuard> }/>
+                <Route path=path!("/silicon/synth") view=move || view! { <AuthGuard><Shell><SiliconSynthPage/></Shell></AuthGuard> }/>
+                <Route path=path!("/silicon/tapeout") view=move || view! { <AuthGuard><Shell><SiliconTapeoutPage/></Shell></AuthGuard> }/>
+                <Route path=path!("/silicon/stackup") view=move || view! { <AuthGuard><Shell><SiliconStackupPage/></Shell></AuthGuard> }/>
+                <Route path=path!("/silicon/schematic") view=move || view! { <AuthGuard><Shell><SiliconSchematicPage/></Shell></AuthGuard> }/>
+                <Route path=path!("/silicon/backends") view=move || view! { <AuthGuard><Shell><SiliconBackendsPage/></Shell></AuthGuard> }/>
+                <Route path=path!("/silicon/projects/sqc-q5") view=move || view! { <AuthGuard><Shell><SiliconQubitPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/hw/schematic") view=move || view! { <AuthGuard><Shell><HardwareSchematicPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/hw/pcb") view=move || view! { <AuthGuard><Shell><HardwarePcbPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/hw/library") view=move || view! { <AuthGuard><Shell><HardwareStudioPage/></Shell></AuthGuard> }/>
@@ -124,8 +138,11 @@ fn Shell(children: Children) -> impl IntoView {
                             </svg>
                         </button>
                         <img class="topbar-logo" src="/logo.png" alt="EdgeFabric" />
-                        <span class="topbar-title topbar-title-full">"Multi-Platform Build, Test & Deploy Orchestration · iOS · IoT · Quantum"</span>
-                        <span class="topbar-title topbar-title-short">"Build · Test · Deploy"</span>
+                        <div class="topbar-title-stack topbar-title-full">
+                            <span class="topbar-title topbar-title-primary">"Multi-Platform Design, Build, Test & Deploy"</span>
+                            <span class="topbar-title topbar-title-secondary">"Orchestration and Management · iOS · Android · IoT · Quantum · PCB · Silicon"</span>
+                        </div>
+                        <span class="topbar-title topbar-title-short">"Design · Build · Test · Deploy · Manage"</span>
                     </div>
                     <div class="topbar-actions">
                         <span class="topbar-status">

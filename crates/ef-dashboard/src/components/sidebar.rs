@@ -78,6 +78,14 @@ fn NavIcon(name: String) -> impl IntoView {
                 </svg>
             }
             .into_any(),
+            "silicon" => view! {
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="6" y="6" width="12" height="12" rx="1"/>
+                    <rect x="9.5" y="9.5" width="5" height="5"/>
+                    <path d="M9 3v3M12 3v3M15 3v3M9 18v3M12 18v3M15 18v3M3 9h3M3 12h3M3 15h3M18 9h3M18 12h3M18 15h3"/>
+                </svg>
+            }
+            .into_any(),
             "admin" => view! {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="12" r="3"/>
@@ -137,6 +145,17 @@ pub fn Sidebar() -> impl IntoView {
                 <A href="/quantum/designer"><span class="nav-icon"><NavIcon name="quantum".to_string()/></span><span>"Circuit Designer"</span></A>
                 <A href="/quantum/jobs"><span class="nav-icon"><NavIcon name="quantum".to_string()/></span><span>"Jobs"</span></A>
                 <A href="/veeros/hosts"><span class="nav-icon"><NavIcon name="quantum".to_string()/></span><span>"VeerOS Hosts"</span></A>
+
+                <div class="nav-section-title">"Chip Design"</div>
+                <A href="/silicon"><span class="nav-icon"><NavIcon name="silicon".to_string()/></span><span>"Silicon Studio"</span></A>
+                <A href="/silicon/rtl"><span class="nav-icon"><NavIcon name="silicon".to_string()/></span><span>"RTL Workspace"</span></A>
+                <A href="/silicon/floorplan"><span class="nav-icon"><NavIcon name="silicon".to_string()/></span><span>"Floorplan & PnR"</span></A>
+                <A href="/silicon/synth"><span class="nav-icon"><NavIcon name="silicon".to_string()/></span><span>"Synthesis & QoR"</span></A>
+                <A href="/silicon/tapeout"><span class="nav-icon"><NavIcon name="silicon".to_string()/></span><span>"Tape-out"</span></A>
+                <A href="/silicon/stackup"><span class="nav-icon"><NavIcon name="silicon".to_string()/></span><span>"3D Stack-up Viewer"</span></A>
+                <A href="/silicon/schematic"><span class="nav-icon"><NavIcon name="silicon".to_string()/></span><span>"Schematic Editor"</span></A>
+                <A href="/silicon/backends"><span class="nav-icon"><NavIcon name="silicon".to_string()/></span><span>"Sim / FPGA Backends"</span></A>
+                <A href="/silicon/projects/sqc-q5"><span class="nav-icon"><NavIcon name="silicon".to_string()/></span><span>"SQC-Q5 (Qubit Chip)"</span></A>
 
                 <div class="nav-section-title">"Hardware Studio"</div>
                 <A href="/hw"><span class="nav-icon"><NavIcon name="quantum".to_string()/></span><span>"Studio"</span></A>

@@ -1009,4 +1009,40 @@ X-RateLimit-Reset: 1712400000
 
 ---
 
+## Design Studio APIs (Planned)
+
+The following API surfaces are planned for the Design Studio extension. Detailed
+specifications and status are tracked in [TODO.md](../TODO.md) under the
+**Chip Design Track · Phase F** and **PCB Design Track · Phase G** sections.
+
+### Chip Design — `/api/v1/chip/*`
+
+| Group | Endpoints |
+|-------|-----------|
+| Projects | `GET/POST /projects`, `GET/PATCH/DELETE /projects/{id}` |
+| Schematics | `GET/POST /projects/{id}/schematics`, `GET /projects/{id}/schematics/{rev}`, `POST .../export` |
+| RTL sources | `GET /projects/{id}/rtl`, `PUT /projects/{id}/rtl/{path}`, `POST /projects/{id}/lint` |
+| Backends | `GET/POST /backends`, `GET/DELETE /backends/{id}`, `POST /backends/{id}/{start,stop,recover,attach}`, `POST/DELETE /backends/{id}/lease` |
+| Jobs | `POST /jobs`, `GET /jobs/{id}`, `GET /jobs/{id}/{logs,artifacts}`, `POST /jobs/{id}/cancel` |
+| PDKs | `GET /pdks`, `POST /pdks/install` |
+| Streams | WS `/backends/{id}/console`, WS `/jobs/{id}/waveform` |
+| Webhooks | `chip.job.completed`, `chip.backend.status_changed`, `chip.signoff.gate_passed` |
+
+### PCB Design — `/api/v1/pcb/*`
+
+| Group | Endpoints |
+|-------|-----------|
+| Projects | `GET/POST /projects`, `GET/PATCH/DELETE /projects/{id}` |
+| Schematic / Layout | `GET/POST /projects/{id}/schematic`, `GET/POST /projects/{id}/layout` |
+| Verification | `POST /projects/{id}/{erc,drc}`, `POST /projects/{id}/sim` |
+| Export | `POST /projects/{id}/export` (`gerber`, `odb`, `ipc2581`, `stl`, `step`) |
+| BOM | `GET /projects/{id}/bom` |
+| Jobs | `GET /jobs/{id}`, `GET /jobs/{id}/{logs,artifacts}`, `POST /jobs/{id}/cancel` |
+| Libraries / Parts | `GET /libraries`, `POST /libraries/import`, `GET /parts?q=` |
+| Webhooks | `pcb.export.completed`, `pcb.drc.failed`, `pcb.fab.submitted` |
+
+All Design Studio endpoints follow the same auth, tenant-scoping, idempotency, pagination, error contract, and rate-limit conventions documented above for device/runner/build APIs.
+
+---
+
 <p align="center"><i>Back to <a href="../README.md">README</a> · <a href="SYSTEM_DESIGN.md">System Design</a> · <a href="ARCHITECTURE.md">Architecture & Diagrams</a></i></p>

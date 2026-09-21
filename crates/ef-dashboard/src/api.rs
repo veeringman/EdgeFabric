@@ -14,26 +14,13 @@ fn base_url() -> String {
 }
 
 pub fn ws_base_url() -> String {
-    let Some(window) = web_sys::window() else {
-        return "ws://127.0.0.1:6060/api/v1".to_string();
-    };
-
-    let hostname = window
-        .location()
-        .hostname()
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "127.0.0.1".to_string());
-
-    let scheme = window
-        .location()
-        .protocol()
-        .ok()
-        .map(|p| if p == "https:" { "wss" } else { "ws" })
-        .unwrap_or("ws");
-
-    // Direct API WS is more stable than Trunk's WS proxy for terminal streams.
-    format!("{scheme}://{hostname}:6060/api/v1")
+    let origin = web_sys::window()
+        .and_then(|w| w.location().origin().ok())
+        .unwrap_or_else(|| "http://127.0.0.1:9080".to_string());
+    let ws_origin = origin
+        .replace("https://", "wss://")
+        .replace("http://", "ws://");
+    format!("{ws_origin}/api/v1")
 }
 
 fn token() -> Option<String> {
@@ -986,6 +973,8 @@ pub struct QSimulateRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub qasm: Option<String>,
     pub shots: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed: Option<u64>,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -1447,4 +1436,266 @@ pub async fn list_delivery_attempts(
         path.push_str(&encoded.as_string().unwrap_or_default());
     }
     get::<DeliveryAttemptsResponse>(&path).await
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct MlNodeListResponse {
+    #[serde(default)]
+    pub nodes: Vec<MlNode>,
+    #[serde(default)]
+    pub total: usize,
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct MlNode {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub runner_id: String,
+    #[serde(default)]
+    pub chip: String,
+    pub cpu_cores: Option<i32>,
+    pub gpu_cores: Option<i32>,
+    pub ane_cores: Option<i32>,
+    pub unified_memory_gb: Option<i32>,
+    #[serde(default)]
+    pub link_mbps: i32,
+    #[serde(default)]
+    pub mlx_version: String,
+    pub free_memory_gb: Option<f64>,
+    #[serde(default)]
+    pub worker_host: String,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    #[serde(default)]
+    pub status: String,
+    pub last_heartbeat_at: Option<String>,
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct MlClusterListResponse {
+    #[serde(default)]
+    pub clusters: Vec<MlClusterEnvelope>,
+    #[serde(default)]
+    pub total: usize,
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct MlClusterEnvelope {
+    pub cluster: MlCluster,
+    #[serde(default)]
+    pub members: Vec<MlClusterMember>,
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct MlCluster {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub role: String,
+    #[serde(default)]
+    pub rank0_url: String,
+    #[serde(default)]
+    pub status: String,
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct MlClusterMember {
+    #[serde(default)]
+    pub runner_id: String,
+    #[serde(default)]
+    pub rank: i32,
+    #[serde(default)]
+    pub dataplane_host: String,
+    #[serde(default)]
+    pub dataplane_port: i32,
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct MlJobListResponse {
+    #[serde(default)]
+    pub jobs: Vec<MlJob>,
+    #[serde(default)]
+    pub total: usize,
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct MlJob {
+    #[serde(default)]
+    pub id: String,
+    pub cluster_id: Option<String>,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub model_id: String,
+    #[serde(default)]
+    pub quantization: String,
+    #[serde(default)]
+    pub context_length: i32,
+    #[serde(default)]
+    pub metrics: serde_json::Value,
+    pub error_message: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct CreateMlClusterRequest {
+    pub name: String,
+    pub role: String,
+    pub size: usize,
+    pub interconnect_cidrs: Vec<String>,
+    pub required_capabilities: Vec<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct CreateMlJobRequest {
+    pub cluster_id: String,
+    pub kind: String,
+    pub model_id: String,
+    pub quantization: String,
+    pub context_length: i32,
+    pub n_layers: i32,
+    pub hidden_size: i32,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct MlChatRequest {
+    pub model: String,
+    pub messages: Vec<MlChatMessage>,
+    pub max_tokens: u32,
+    pub cluster_id: String,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct MlChatMessage {
+    pub role: String,
+    pub content: String,
+}
+
+pub async fn list_ml_nodes() -> Result<MlNodeListResponse, String> {
+    get("/ml/nodes").await
+}
+
+pub async fn list_ml_clusters() -> Result<MlClusterListResponse, String> {
+    get("/ml/clusters").await
+}
+
+pub async fn list_ml_jobs() -> Result<MlJobListResponse, String> {
+    get("/ml/jobs").await
+}
+
+pub async fn create_ml_cluster(req: &CreateMlClusterRequest) -> Result<serde_json::Value, String> {
+    post("/ml/clusters", req).await
+}
+
+pub async fn create_ml_job(req: &CreateMlJobRequest) -> Result<serde_json::Value, String> {
+    post("/ml/jobs", req).await
+}
+
+pub async fn ml_chat(req: &MlChatRequest) -> Result<serde_json::Value, String> {
+    post("/ml/v1/chat/completions", req).await
+}
+
+pub async fn cancel_ml_job(id: &str) -> Result<serde_json::Value, String> {
+    post(&format!("/ml/jobs/{id}/cancel"), &serde_json::json!({})).await
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct ResourceListResponse {
+    #[serde(default)]
+    pub resources: Vec<ResourceItem>,
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct ResourceItem {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub platform: String,
+    #[serde(default)]
+    pub arch: String,
+    #[serde(default)]
+    pub filename: String,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub install_hint: String,
+    #[serde(default)]
+    pub available: bool,
+    pub size_bytes: Option<u64>,
+    #[serde(default)]
+    pub download_path: String,
+}
+
+pub async fn list_resources() -> Result<ResourceListResponse, String> {
+    match get("/resources").await {
+        Ok(resp) => Ok(resp),
+        Err(_) => Ok(fallback_resources()),
+    }
+}
+
+fn fallback_resources() -> ResourceListResponse {
+    ResourceListResponse {
+        resources: vec![
+            ResourceItem {
+                id: "host-macos-arm64".into(),
+                name: "Host worker — macOS Apple Silicon".into(),
+                kind: "host-package".into(),
+                platform: "macos".into(),
+                arch: "aarch64".into(),
+                filename: "edgefabric-host-aarch64-apple-darwin.tar.gz".into(),
+                summary: "Install on a Mac mini or MacBook: OpenSSH, VeerSetu overlay, and ef host join.".into(),
+                install_hint: "tar xzf edgefabric-host-aarch64-apple-darwin.tar.gz && export EF_API_KEY=… && ./install.sh".into(),
+                available: true,
+                size_bytes: None,
+                download_path: "/downloads/edgefabric-host-aarch64-apple-darwin.tar.gz".into(),
+            },
+            ResourceItem {
+                id: "host-linux-x64".into(),
+                name: "Host worker — Linux x86_64".into(),
+                kind: "host-package".into(),
+                platform: "linux".into(),
+                arch: "x86_64".into(),
+                filename: "edgefabric-host-x86_64-unknown-linux-gnu.tar.gz".into(),
+                summary: "Same generic SSH worker for Linux servers.".into(),
+                install_hint: "Unpack and run ./install.sh with EF_API_KEY.".into(),
+                available: true,
+                size_bytes: None,
+                download_path: "/downloads/edgefabric-host-x86_64-unknown-linux-gnu.tar.gz".into(),
+            },
+            ResourceItem {
+                id: "host-linux-arm64".into(),
+                name: "Host worker — Linux ARM64".into(),
+                kind: "host-package".into(),
+                platform: "linux".into(),
+                arch: "aarch64".into(),
+                filename: "edgefabric-host-aarch64-unknown-linux-gnu.tar.gz".into(),
+                summary: "ARM Linux servers and cloud instances.".into(),
+                install_hint: "Unpack and run ./install.sh with EF_API_KEY.".into(),
+                available: false,
+                size_bytes: None,
+                download_path: "/api/v1/resources/files/edgefabric-host-aarch64-unknown-linux-gnu.tar.gz".into(),
+            },
+            ResourceItem {
+                id: "host-windows-x64".into(),
+                name: "Host worker — Windows x64".into(),
+                kind: "host-package".into(),
+                platform: "windows".into(),
+                arch: "x86_64".into(),
+                filename: "edgefabric-host-x86_64-pc-windows-msvc.zip".into(),
+                summary: "Windows OpenSSH Server plus ef host join.".into(),
+                install_hint: "Expand the zip, then ef host join --api-key …".into(),
+                available: false,
+                size_bytes: None,
+                download_path: "/api/v1/resources/files/edgefabric-host-x86_64-pc-windows-msvc.zip".into(),
+            },
+        ],
+    }
 }

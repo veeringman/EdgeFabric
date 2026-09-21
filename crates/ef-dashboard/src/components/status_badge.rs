@@ -10,7 +10,7 @@ pub fn StatusBadge(#[prop(into)] status: String) -> impl IntoView {
         "active" => "badge active",
         "error" | "failed" => "badge failed",
         "passed" | "completed" | "succeeded" => "badge passed",
-        "running" | "executing" => "badge running",
+        "running" | "executing" | "serving" => "badge running",
         "queued" | "pending" | "requested" | "provisioning" => "badge queued",
         "cancelled" | "canceled" => "badge offline",
         _ => "badge",

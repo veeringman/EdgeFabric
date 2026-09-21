@@ -5,6 +5,7 @@ pub mod device;
 pub mod discovered_host;
 pub mod integration;
 pub mod job;
+pub mod ml;
 pub mod runner;
 pub mod session;
 pub mod tenant;

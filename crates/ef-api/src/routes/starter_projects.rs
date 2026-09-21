@@ -277,6 +277,7 @@ pub async fn create_ios_starter_project(
         required_capabilities: required_caps,
         required_labels: vec![],
         lease_ttl_seconds: 3600,
+        runner_class: None,
     };
 
     match scheduler
@@ -475,8 +476,6 @@ async fn ssh_exec(host: &str, port: i32, user: &str, script: &str) -> std::io::R
             "-p",
             &port.to_string(),
             &target,
-            "sh",
-            "-lc",
             script,
         ])
         .output()

@@ -10,6 +10,7 @@ use ef_core::device::DeviceFilter;
 use ef_core::error::{EdgeFabricError, Result};
 use ef_db::repo::device::{DeviceRepo, DeviceRow};
 use ef_db::repo::runner::{RunnerLeaseRow, RunnerRepo, RunnerRow};
+
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -23,6 +24,7 @@ pub struct RunnerFilter {
     pub required_capabilities: Vec<String>,
     pub required_labels: Vec<String>,
     pub lease_ttl_seconds: i64,
+    pub runner_class: Option<String>,
 }
 
 impl Scheduler {
@@ -126,6 +128,7 @@ impl Scheduler {
             filter.region.as_deref(),
             build_job_id,
             filter.lease_ttl_seconds,
+            filter.runner_class.as_deref(),
         )
         .await?
         {
@@ -145,5 +148,30 @@ impl Scheduler {
             tracing::warn!(lease_id = %lease_id, "Runner lease release skipped (not found or already non-active)");
         }
         Ok(())
+    }
+
+    /// Lease `size` matching runners for one ML cluster (pipeline / replica / DiLoCo).
+    pub async fn allocate_runner_set(
+        &self,
+        tenant_id: Uuid,
+        filter: &RunnerFilter,
+        size: usize,
+    ) -> Result<Vec<(RunnerRow, RunnerLeaseRow)>> {
+        if size == 0 {
+            return Err(EdgeFabricError::NoMatchingDevices);
+        }
+        let mut out = Vec::with_capacity(size);
+        for _ in 0..size {
+            match self.allocate_runner(tenant_id, filter, None).await {
+                Ok(pair) => out.push(pair),
+                Err(e) => {
+                    for (_, lease) in &out {
+                        let _ = self.release_runner_lease(lease.id).await;
+                    }
+                    return Err(e);
+                }
+            }
+        }
+        Ok(out)
     }
 }

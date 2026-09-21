@@ -70,6 +70,7 @@ pub fn spawn_stale_device_checker(
                    SET status = 'offline'::device_status, updated_at = now()
                    WHERE status IN ('available'::device_status, 'busy'::device_status)
                      AND os <> 'virtual_iot'::device_os
+                     AND os <> 'ssh'::device_os
                      AND (last_heartbeat IS NULL OR last_heartbeat < $1)"#,
             )
             .bind(cutoff)

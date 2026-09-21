@@ -57,6 +57,7 @@ pub fn DevicesPage() -> impl IntoView {
                     <option value="iot">"IoT"</option>
                     <option value="virtual_iot">"Virtual IoT"</option>
                     <option value="veeros">"VeerOS"</option>
+                    <option value="ssh">"SSH hosts (macOS / Linux / Windows)"</option>
                 </select>
             </div>
             <div class="form-group">
@@ -71,6 +72,7 @@ pub fn DevicesPage() -> impl IntoView {
             </div>
             <button class="btn btn-ghost btn-sm" style="align-self: flex-end" on:click=do_refresh>"↻ Refresh"</button>
             <a href="/virtual-iot/new" class="btn btn-primary btn-sm" style="align-self: flex-end">"+ New Virtual IoT"</a>
+            <a href="/resources" class="btn btn-ghost btn-sm" style="align-self: flex-end">"Host installer"</a>
         </div>
 
         <div class="card">
@@ -198,6 +200,11 @@ fn DeviceTable(
                         let is_agent_cap = agent_caps.contains(cap) && !device_caps.contains(cap);
                         let cap_color = match cap.as_str() {
                             "xcode" => "badge-blue",
+                            "macos_deploy" | "macos_runner" => "badge-blue",
+                            "linux_runner" | "linux_deploy" => "badge-green",
+                            "windows_runner" | "windows_deploy" | "msbuild" | "powershell" | "wsl" => "badge-orange",
+                            "cuda" | "docker" => "badge-purple",
+                            "mlx" | "llm_infer" | "llm_train" | "ane" => "badge-purple",
                             "gradle" => "badge-green",
                             "cargo" => "badge-orange",
                             "ssh" => "badge-gray",

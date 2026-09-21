@@ -420,6 +420,7 @@ pub async fn submit_ios_build(
         required_capabilities: required_caps,
         required_labels: body.required_runner_labels.clone(),
         lease_ttl_seconds: body.lease_ttl_seconds.unwrap_or(1800),
+        runner_class: None,
     };
 
     let (runner, lease) = match scheduler
@@ -619,6 +620,7 @@ pub async fn submit_iot_deploy(
         required_capabilities: required_caps,
         required_labels: body.required_runner_labels.clone(),
         lease_ttl_seconds: body.lease_ttl_seconds.unwrap_or(1800),
+        runner_class: None,
     };
 
     let (runner, lease) = match scheduler
@@ -803,6 +805,7 @@ pub async fn submit_quantum_program(
         required_capabilities: required_caps,
         required_labels: body.required_runner_labels.clone(),
         lease_ttl_seconds: body.lease_ttl_seconds.unwrap_or(1800),
+        runner_class: None,
     };
 
     let (runner, lease) = match scheduler

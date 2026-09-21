@@ -10,7 +10,9 @@ use crate::api::{
 };
 use crate::board_config;
 use crate::components::board_layout::render_catalog_board_layout;
+use crate::components::board_twin_3d::BoardTwin3d;
 use crate::components::device_icon::DeviceOsIcon;
+use crate::components::phone_twin_3d::{PhoneTwin3d, phone_twin_pick, LIVE_SCREEN_IMG_ID};
 use crate::components::status_badge::StatusBadge;
 use crate::pages::virtual_iot_shell::VirtualIotShellTerminal;
 
@@ -94,7 +96,9 @@ fn detect_ipad_pro_variant(product_type: &str) -> Option<String> {
 
 /// Extract the bezel style from capabilities (e.g. "bezel:iphone-modern" → "iphone-modern").
 /// Returns a sensible default based on OS version if not set.
-fn bezel_from_caps(caps: &[String], os: &str, os_version: &str) -> String {
+/// `device_name` is a fallback signal — simulators often carry no model
+/// capability, but their simctl name (e.g. "iPhone 18 Pro") identifies them.
+fn bezel_from_caps(caps: &[String], os: &str, os_version: &str, device_name: &str) -> String {
     for cap in caps {
         if let Some(val) = cap.strip_prefix("bezel:") {
             return val.to_string();
@@ -113,6 +117,30 @@ fn bezel_from_caps(caps: &[String], os: &str, os_version: &str) -> String {
             .unwrap_or_default();
         let is_ipad = os == "ipados" || model_lower.contains("ipad") || product_lower.starts_with("ipad");
         let is_mini = model_lower.contains("mini") || product_lower.contains("mini");
+        let name_lower = device_name.to_lowercase();
+        // iPhone 18 family (2026): smaller Dynamic Island, A20 Pro — 3D twin ready.
+        // Name match comes first: simulators often expose no model capability.
+        if !is_ipad
+            && (name_lower.contains("duo")
+                || model_lower.contains("duo")
+                || product_lower.contains("duo"))
+        {
+            return "iphone-duo".into();
+        }
+        if !is_ipad
+            && ((name_lower.contains("fold") || model_lower.contains("fold"))
+                && !name_lower.contains("galaxy")
+                && !model_lower.contains("galaxy"))
+        {
+            return "iphone-duo".into();
+        }
+        if !is_ipad
+            && (name_lower.contains("18")
+                || model_lower.contains("18")
+                || product_lower.contains("iphone18"))
+        {
+            return "iphone-18-pro".into();
+        }
         if is_ipad {
             let ver: f32 = os_version.split('.').next().unwrap_or("0").parse().unwrap_or(0.0);
             if is_mini {
@@ -344,17 +372,41 @@ fn DeviceViewer(
     let (log_filter, set_log_filter) = signal(String::from("all"));
     let (log_ws_handle, set_log_ws_handle) = signal(Option::<web_sys::WebSocket>::None);
 
-    let initial_bezel = bezel_from_caps(&device_capabilities, &device_os, &device_os_version);
+    let initial_bezel =
+        bezel_from_caps(&device_capabilities, &device_os, &device_os_version, &device_name);
     let default_landscape = initial_bezel.starts_with("ipad")
         || matches!(
             initial_bezel.as_str(),
             "galaxy-tab" | "pixel-tablet" | "android-tablet"
         );
-    let (bezel_style, set_bezel_style) = signal(initial_bezel);
+    let (bezel_style, set_bezel_style) = signal(initial_bezel.clone());
 
     // Orientation toggle (portrait / landscape) — iOS & Android only.
     // Tablets default to landscape; phones default to portrait.
     let (landscape, set_landscape) = signal(default_landscape);
+
+    // 2D bezel vs 3D twin view. iPhone 18 Pro / Duo open directly in 3D;
+    // every other model keeps its original 2D view, with 3D as an extra.
+    let open_in_3d = matches!(initial_bezel.as_str(), "iphone-18-pro" | "iphone-duo");
+    let (phone_view, set_phone_view) = signal(
+        if open_in_3d {
+            "3d".to_string()
+        } else {
+            "2d".to_string()
+        },
+    );
+    // iPhone Duo fold amount: 1 = fully open, 0 = closed on the cover display.
+    let (duo_fold, set_duo_fold) = signal(1.0f64);
+    // 3D model key derived from the bezel (generic body for older bezels).
+    let (twin_model, set_twin_model) = signal("iphone-generic".to_string());
+    Effect::new(move || {
+        let m = match bezel_style.get().as_str() {
+            "iphone-18-pro" => "iphone-18-pro",
+            "iphone-duo" => "iphone-duo",
+            _ => "iphone-generic",
+        };
+        set_twin_model.set(m.to_string());
+    });
 
     // Watch pairing signals
     let (watch_style, set_watch_style) = signal(String::from("none"));
@@ -854,6 +906,47 @@ fn DeviceViewer(
     };
 
     let on_pointer_cancel = move |_: web_sys::PointerEvent| {
+        set_touch_start.set(None);
+    };
+
+    // 3D-twin touch: raycast the tap/swipe onto the live screens via
+    // EfPhoneTwin.pick (returns device pixels), then reuse send_input.
+    let on_phone3d_down = move |evt: web_sys::PointerEvent| {
+        evt.prevent_default();
+        let now = js_sys::Date::now();
+        set_touch_start.set(Some((evt.client_x() as f64, evt.client_y() as f64, now)));
+    };
+
+    let on_phone3d_up = move |evt: web_sys::PointerEvent| {
+        evt.prevent_default();
+        if let Some((sx, sy, start_time)) = touch_start.get_untracked() {
+            let ex = evt.client_x() as f64;
+            let ey = evt.client_y() as f64;
+            let dx = ex - sx;
+            let dy = ey - sy;
+            let dist = (dx * dx + dy * dy).sqrt();
+            let elapsed = js_sys::Date::now() - start_time;
+
+            if dist < 10.0 {
+                if let Some((x, y)) = phone_twin_pick(ex, ey) {
+                    send_input("tap", Some(serde_json::json!({"x": x, "y": y})));
+                }
+            } else if let (Some((x1, y1)), Some((x2, y2))) =
+                (phone_twin_pick(sx, sy), phone_twin_pick(ex, ey))
+            {
+                let duration = (elapsed as i64).max(100).min(1000);
+                send_input(
+                    "swipe",
+                    Some(serde_json::json!({
+                        "x1": x1, "y1": y1, "x2": x2, "y2": y2, "duration": duration
+                    })),
+                );
+            }
+        }
+        set_touch_start.set(None);
+    };
+
+    let on_phone3d_cancel = move |_: web_sys::PointerEvent| {
         set_touch_start.set(None);
     };
 
@@ -1447,6 +1540,20 @@ fn DeviceViewer(
                     format!("transform: translate({x:.1}px, {y:.1}px);")
                 }
             >
+                <div style="display:flex; justify-content:center; margin-bottom:0.5rem;">
+                    <div class="phone-view-seg" role="tablist" aria-label="Phone view">
+                        <button
+                            class:is-active=move || phone_view.get() == "2d"
+                            on:click=move |_| set_phone_view.set("2d".to_string())
+                            title="Original bezel view"
+                        >"2D"</button>
+                        <button
+                            class:is-active=move || phone_view.get() == "3d"
+                            on:click=move |_| set_phone_view.set("3d".to_string())
+                            title="Realistic 3D twin with live screen"
+                        >"3D"</button>
+                    </div>
+                </div>
                 <div class={move || {
                     let bezel = bezel_style.get();
                     if is_tablet_bezel_style(&bezel) {
@@ -1456,7 +1563,11 @@ fn DeviceViewer(
                     } else {
                         "phone-wrapper"
                     }
-                }}>
+                }}
+                    // Kept mounted in 3D mode (display:none) so the live
+                    // screenshot <img> keeps feeding the 3D screen texture.
+                    style:display=move || if phone_view.get() == "3d" { "none".to_string() } else { "".to_string() }
+                >
                 <div
                     class={move || if is_android { format!("phone-frame android {}", bezel_style.get()) } else { format!("phone-frame ios {}", bezel_style.get()) }}
                     on:pointerdown=on_phone_drag_start
@@ -1483,7 +1594,8 @@ fn DeviceViewer(
                         view! {
                             <div class={move || format!("phone-notch {}", match bezel_style.get().as_str() {
                                 "iphone-3g" | "iphone-4" | "iphone-5" | "iphone-classic" => "ios-classic-top",
-                                "iphone-notch" | "iphone-modern" | "iphone-mini" => "ios-notch",
+                                "iphone-notch" | "iphone-modern" | "iphone-mini" | "iphone-18-pro" => "ios-notch",
+                                "iphone-duo" => "duo-cover-top",
                                 "ipad-classic" | "ipad-mini-classic" => "ipad-classic-top",
                                 "ipad-pro-classic" => "ipad-pro-classic-top",
                                 "ipad-pro-10" => "ipad-pro-10-top",
@@ -1497,6 +1609,8 @@ fn DeviceViewer(
                                 {move || match bezel_style.get().as_str() {
                                     "iphone-3g" | "iphone-4" | "iphone-5" | "iphone-classic" => view! { <div class="phone-speaker"></div> }.into_any(),
                                     "iphone-island" => view! { <div class="dynamic-island"></div> }.into_any(),
+                                    "iphone-18-pro" => view! { <div class="dynamic-island is-sm"></div> }.into_any(),
+                                    "iphone-duo" => view! { <div class="duo-cover-cam"></div> }.into_any(),
                                     "iphone-mini" => view! { <div class="ios-notch-cutout mini-notch"></div> }.into_any(),
                                     "ipad-classic" | "ipad-mini-classic" | "ipad-pro-classic" | "ipad-pro-10" => view! { <div class="ipad-camera-dot"></div> }.into_any(),
                                     "ipad-air" | "ipad-pro" | "ipad-pro-11" | "ipad-pro-12" | "ipad-pro-m4" | "ipad-pro-m4-13" | "ipad-mini-modern" => view! { <div class="ipad-camera-dot"></div> }.into_any(),
@@ -1533,6 +1647,7 @@ fn DeviceViewer(
                             }
                         >
                             <img node_ref=img_ref
+                                 id=LIVE_SCREEN_IMG_ID
                                  draggable="false"
                                  style="width: 100%; height: 100%; object-fit: cover; user-select: none; -webkit-user-drag: none; color: transparent;"
                                  alt=""
@@ -1624,6 +1739,40 @@ fn DeviceViewer(
                     }.into_any()
                 }}
             </div>
+            </div>
+
+            // ── 3D twin (live screen as device texture; original 2D stays mounted) ──
+            <div style:display=move || if phone_view.get() == "3d" { "".to_string() } else { "none".to_string() }>
+                <div
+                    class="phone-screen"
+                    style="touch-action: none; cursor: crosshair; max-width: 560px; margin: 0 auto;"
+                    on:pointerdown=on_phone3d_down
+                    on:pointerup=on_phone3d_up
+                    on:pointercancel=on_phone3d_cancel
+                >
+                    <PhoneTwin3d
+                        model=twin_model
+                        frame_tick=frame_count
+                        resolution=resolution
+                        fold=duo_fold
+                    />
+                </div>
+                <Show when=move || bezel_style.get() == "iphone-duo">
+                    <div class="fold-control" style="max-width: 560px; margin: 0.5rem auto 0;">
+                        <button class="btn btn-ghost btn-sm" on:click=move |_| set_duo_fold.set(0.0)>"Fold"</button>
+                        <input
+                            type="range" min="0" max="1" step="0.01"
+                            prop:value=move || duo_fold.get().to_string()
+                            on:input=move |ev| {
+                                if let Ok(v) = event_target_value(&ev).parse::<f64>() {
+                                    set_duo_fold.set(v.clamp(0.0, 1.0));
+                                }
+                            }
+                            title="Duo fold: closed ↔ open"
+                        />
+                        <button class="btn btn-ghost btn-sm" on:click=move |_| set_duo_fold.set(1.0)>"Open"</button>
+                    </div>
+                </Show>
             </div>
 
             // ── Paired Watch ──
@@ -1824,6 +1973,8 @@ fn DeviceViewer(
                                             <option value="iphone-modern" selected=move || bezel_style.get() == "iphone-modern">"iPhone 12–14 (Modern)"</option>
                                             <option value="iphone-mini" selected=move || bezel_style.get() == "iphone-mini">"iPhone 12/13 mini"</option>
                                             <option value="iphone-island" selected=move || bezel_style.get() == "iphone-island">"iPhone 15/16 (Dynamic Island)"</option>
+                                            <option value="iphone-18-pro" selected=move || bezel_style.get() == "iphone-18-pro">"iPhone 18 Pro (3D-ready)"</option>
+                                            <option value="iphone-duo" selected=move || bezel_style.get() == "iphone-duo">"iPhone Duo Foldable (3D)"</option>
                                             <option value="ipad-classic" selected=move || bezel_style.get() == "ipad-classic">"iPad (Home Button)"</option>
                                             <option value="ipad-air" selected=move || bezel_style.get() == "ipad-air">"iPad Air / 10th Gen"</option>
                                             <option value="ipad-pro" selected=move || bezel_style.get() == "ipad-pro">"iPad Pro"</option>
@@ -2384,6 +2535,8 @@ fn VirtualIotViewer(
     // Once user opens the shell tab, keep the terminal mounted so switching
     // back to "Detail" and returning doesn't kill the WS / xterm session.
     let (shell_opened, set_shell_opened) = signal(false);
+    // 3D twin event pulse: set to a sensor key to flash its node, cleared shortly after.
+    let (twin_pulse, set_twin_pulse) = signal(Option::<String>::None);
     let device_id_value = StoredValue::new(device_id.clone());
 
     // When detail pane is expanded, toggle a body class so shell chrome
@@ -2660,8 +2813,18 @@ fn VirtualIotViewer(
 
     let trigger_event = {
         let inject_sensor = inject_sensor;
+        let set_twin_pulse = set_twin_pulse;
         Callback::new(move |event: VirtualIotEventDefinition| {
             let source_tag = format!("event:{}", event.name);
+            // Flash the first stepped sensor in the 3D twin, then clear.
+            if let Some(first) = event.steps.iter().find(|s| !s.sensor.trim().is_empty()) {
+                let key = first.sensor.clone();
+                set_twin_pulse.set(Some(key));
+                set_timeout(
+                    move || set_twin_pulse.set(None),
+                    std::time::Duration::from_millis(900),
+                );
+            }
             for step in event.steps {
                 if step.sensor.trim().is_empty() || step.value.trim().is_empty() {
                     continue;
@@ -2916,6 +3079,19 @@ fn VirtualIotViewer(
                             </div>
                         </div>
                     </Show>
+
+                    <div class="virtual-iot-events-rack">
+                        <div>
+                            <div class="virtual-iot-section-title">"3D twin — live"</div>
+                            <div class="virtual-iot-section-caption">"Realistic WebGL twin bound to the live sensor stream (glow = level, tilt = accelerometer, flash = scenario playback). Switch to 2D for the precise schematic."</div>
+                        </div>
+                        <BoardTwin3d
+                            controller=controller_type
+                            enabled_sensors=enabled_sensors
+                            sensor_values=sensor_values
+                            pulse=twin_pulse
+                        />
+                    </div>
 
                     <Show
                         when=move || !enabled_sensors.get().is_empty()
@@ -3967,5 +4143,56 @@ fn VirtualIotWiringDiagram(
                 }
             }).collect::<Vec<_>>()}
         </svg>
+    }
+}
+
+#[cfg(test)]
+mod bezel_tests {
+    use super::bezel_from_caps;
+
+    fn caps(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn sim_without_model_cap_uses_device_name() {
+        // Booted iPhone 18 Pro simulator: caps are just {simctl}.
+        assert_eq!(
+            bezel_from_caps(&caps(&["simctl"]), "ios", "27.0", "iPhone 18 Pro"),
+            "iphone-18-pro"
+        );
+    }
+
+    #[test]
+    fn duo_detected_by_name() {
+        assert_eq!(
+            bezel_from_caps(&caps(&["simctl"]), "ios", "27.0", "iPhone Duo"),
+            "iphone-duo"
+        );
+    }
+
+    #[test]
+    fn older_iphones_unaffected() {
+        assert_eq!(
+            bezel_from_caps(&caps(&["simctl"]), "ios", "17.4", "iPhone 15 Pro"),
+            "iphone-island"
+        );
+        assert_eq!(
+            bezel_from_caps(&caps(&["simctl"]), "ios", "16.1", "iPhone 14"),
+            "iphone-island"
+        );
+    }
+
+    #[test]
+    fn explicit_bezel_cap_still_wins() {
+        assert_eq!(
+            bezel_from_caps(
+                &caps(&["simctl", "bezel:iphone-notch"]),
+                "ios",
+                "27.0",
+                "iPhone 18 Pro"
+            ),
+            "iphone-notch"
+        );
     }
 }

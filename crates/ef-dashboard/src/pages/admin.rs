@@ -199,6 +199,8 @@ fn AddDeviceForm(
                     <option value="android">"Android"</option>
                     <option value="ios">"iOS"</option>
                     <option value="iot">"IoT"</option>
+                    <option value="ssh">"SSH host"</option>
+                    <option value="veeros">"VeerOS"</option>
                 </select>
             </div>
             <div class="form-group">

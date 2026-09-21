@@ -130,7 +130,15 @@ impl VeerOsDriver {
                 return Some(found);
             }
         }
-        if Self::command_exists("fold") {
+        // PATH fallback: verify it is the VeerOS fold runtime, not macOS's
+        // built-in text-folding utility (which rejects --version).
+        if Self::command_exists("fold")
+            && std::process::Command::new("fold")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        {
             return Some("fold".to_string());
         }
         None
@@ -350,15 +358,27 @@ impl VeerOsDriver {
             let kernel = Self::kernel_path_for_fold_runtime(cfg, target).ok_or_else(|| {
                 EdgeFabricError::Internal(format!("kernel image not found for target {target}"))
             })?;
-            let tap = match net_mode {
-                "" | "nat" | "bridge" => "tap0",
-                other => other,
+            // Network args are platform-specific: veer-vm on macOS uses
+            // entitlement-free user-mode networking (`--net user`), while
+            // Linux attaches a pre-created TAP interface (`--tap tapN`).
+            // (normalize_net_mode maps macOS modes to "user", which must NOT
+            // be passed through as a TAP device name.)
+            let net_args = if std::env::consts::OS == "macos" {
+                "  \"--net\", \"user\",\n".to_string()
+            } else {
+                let tap = match net_mode {
+                    "" | "nat" | "bridge" | "user" => "tap0",
+                    other => other,
+                };
+                format!("  \"--tap\", \"{tap}\",\n")
             };
             let manifest_path = Self::fold_manifest_path(vm_name);
             let fifo_path = Self::sensor_fifo_path(vm_name);
+            // workdir must exist: fold chdirs into it before spawning, so use
+            // the resolved checkout (cfg.root_dir may be a Linux default).
+            let workdir = Self::resolved_root_dir(cfg);
             let manifest = format!(
-                "name = \"{vm_name}\"\ncmd  = \"{veer_vm}\"\nargs = [\n  \"--arch\", \"riscv32\",\n  \"--kernel\", \"{kernel}\",\n  \"--memory\", \"{memory_mb}\",\n  \"--tap\", \"{tap}\",\n  \"--sensor-feed\", \"{fifo_path}\",\n]\nhostname = \"{hostname}\"\nworkdir  = \"{}\"\n\n[env]\nPATH = \"/usr/local/bin:/usr/bin:/bin\"\nTERM = \"xterm-256color\"\n\n[namespaces]\npid   = true\nmount = true\nuts   = true\nipc   = true\nnet   = false\nuser  = true\n\n[seccomp]\nprofile = \"default\"\n",
-                cfg.root_dir,
+                "name = \"{vm_name}\"\ncmd  = \"{veer_vm}\"\nargs = [\n  \"--arch\", \"riscv32\",\n  \"--kernel\", \"{kernel}\",\n  \"--memory\", \"{memory_mb}\",\n{net_args}  \"--sensor-feed\", \"{fifo_path}\",\n]\nhostname = \"{hostname}\"\nworkdir  = \"{workdir}\"\n\n[env]\nPATH = \"/usr/local/bin:/usr/bin:/bin\"\nTERM = \"xterm-256color\"\n\n[namespaces]\npid   = true\nmount = true\nuts   = true\nipc   = true\nnet   = false\nuser  = true\n\n[seccomp]\nprofile = \"default\"\n",
             );
             // Ensure the sensor FIFO exists before fold spawns veer-vm.
             Self::ensure_sensor_fifo(&fifo_path).await?;
@@ -1095,57 +1115,251 @@ impl VeerOsDriver {
         }
     }
 
+    /// Simulator-native gate set. Everything the parser emits must be in this
+    /// list — the VeerOS state-vector backend rejects anything else.
+    /// Multi-qubit / parametric QASM gates are decomposed into these.
     fn parse_quantum_circuit_from_qasm(qasm: &str) -> Result<Circuit> {
-        let mut qubits = 2usize;
+        use quantum::circuit::{CircuitOp, FixedQ16, Gate};
 
+        let mut qubits = 2usize;
         for line in qasm.lines() {
             let trimmed = line.trim();
-            if trimmed.starts_with("qubit[") && trimmed.contains(']') {
-                if let (Some(start), Some(end)) = (trimmed.find('['), trimmed.find(']')) {
-                    if let Ok(count) = trimmed[start + 1..end].parse::<usize>() {
-                        qubits = count;
-                    }
-                }
+            if let Some(count) = Self::parse_reg_size(trimmed, "qreg")
+                .or_else(|| Self::parse_reg_size(trimmed, "qubit"))
+            {
+                qubits = count;
+                break;
             }
+        }
+        if qubits == 0 || qubits > 12 {
+            return Err(EdgeFabricError::Internal(format!(
+                "simulator supports 1–12 qubits, found declaration for {qubits}"
+            )));
         }
 
         let mut circuit = Circuit::new(qubits as u16);
+        // Single mutable emitter (separate closures would clash-borrow `circuit`).
+        let mut push = |op: CircuitOp| -> Result<()> {
+            circuit.push_op(op).map_err(|_| {
+                EdgeFabricError::Internal("circuit exceeds simulator operation limit".into())
+            })
+        };
+        // Bounds-checked 1-qubit emission + parametric Rz.
+        macro_rules! g1 {
+            ($gate:expr, $q:expr) => {{
+                Self::check_qidx(qubits, $q)?;
+                push(CircuitOp::gate1($gate, $q as u16))?;
+            }};
+        }
+        macro_rules! rz1 {
+            ($q:expr, $theta:expr) => {{
+                Self::check_qidx(qubits, $q)?;
+                push(CircuitOp::gate1(
+                    Gate::Rz(FixedQ16(($theta * 65536.0) as i32)),
+                    $q as u16,
+                ))?;
+            }};
+        }
+
         for line in qasm.lines() {
             let trimmed = line.trim();
             if trimmed.is_empty()
                 || trimmed.starts_with("//")
                 || trimmed.starts_with("OPENQASM")
                 || trimmed.starts_with("include")
+                || trimmed.starts_with("qreg")
+                || trimmed.starts_with("creg")
                 || trimmed.starts_with("qubit[")
                 || trimmed.starts_with("bit[")
             {
                 continue;
             }
 
-            if let Some(gate_part) = trimmed.split(' ').next() {
-                match gate_part {
-                    "h" | "x" | "y" | "z" => {
-                        if let Some(idx) = Self::extract_qubit_index(trimmed) {
-                            circuit = match gate_part {
-                                "h" => circuit.h(idx as u16),
-                                "x" => circuit.x(idx as u16),
-                                "y" => circuit.y(idx as u16),
-                                "z" => circuit.z(idx as u16),
-                                _ => circuit,
-                            };
-                        }
+            // Split "name(params) q[..],...;" into (name, params, rest).
+            let (mut name, params, rest) = Self::split_gate_line(trimmed);
+            name.make_ascii_lowercase();
+            let qidx: Vec<usize> = Self::extract_all_qubit_indices(&rest);
+            let need = |n: usize| -> Result<()> {
+                if qidx.len() < n {
+                    return Err(EdgeFabricError::Internal(format!(
+                        "gate '{name}' needs {n} qubit operand(s): {trimmed}"
+                    )));
+                }
+                for &q in qidx.iter().take(n) {
+                    Self::check_qidx(qubits, q)?;
+                }
+                Ok(())
+            };
+
+            match name.as_str() {
+                "h" => {
+                    need(1)?;
+                    g1!(Gate::H, qidx[0]);
+                }
+                "x" => {
+                    need(1)?;
+                    g1!(Gate::X, qidx[0]);
+                }
+                "z" => {
+                    need(1)?;
+                    g1!(Gate::Z, qidx[0]);
+                }
+                // Y ≡ X·Z up to (unobservable) global phase.
+                "y" => {
+                    need(1)?;
+                    g1!(Gate::X, qidx[0]);
+                    g1!(Gate::Z, qidx[0]);
+                }
+                "s" => {
+                    need(1)?;
+                    g1!(Gate::S, qidx[0]);
+                }
+                "sdg" | "si" => {
+                    need(1)?;
+                    g1!(Gate::Sdg, qidx[0]);
+                }
+                "t" => {
+                    need(1)?;
+                    g1!(Gate::T, qidx[0]);
+                }
+                "tdg" | "ti" => {
+                    need(1)?;
+                    g1!(Gate::Tdg, qidx[0]);
+                }
+                "rx" => {
+                    need(1)?;
+                    let theta = Self::parse_angle_param(&params, 0, trimmed)?;
+                    // Rx(θ) = H·Rz(θ)·H
+                    g1!(Gate::H, qidx[0]);
+                    rz1!(qidx[0], theta);
+                    g1!(Gate::H, qidx[0]);
+                }
+                "ry" => {
+                    need(1)?;
+                    let theta = Self::parse_angle_param(&params, 0, trimmed)?;
+                    // Ry(θ) = S·H·Rz(θ)·H·Sdg
+                    g1!(Gate::S, qidx[0]);
+                    g1!(Gate::H, qidx[0]);
+                    rz1!(qidx[0], theta);
+                    g1!(Gate::H, qidx[0]);
+                    g1!(Gate::Sdg, qidx[0]);
+                }
+                "rz" => {
+                    need(1)?;
+                    let theta = Self::parse_angle_param(&params, 0, trimmed)?;
+                    rz1!(qidx[0], theta);
+                }
+                "u" | "u3" => {
+                    need(1)?;
+                    let (theta, phi, lam) = Self::parse_u_params(&params, trimmed)?;
+                    // U(θ,φ,λ) = Rz(φ)·Ry(θ)·Rz(λ) up to global phase.
+                    rz1!(qidx[0], phi);
+                    g1!(Gate::S, qidx[0]);
+                    g1!(Gate::H, qidx[0]);
+                    rz1!(qidx[0], theta);
+                    g1!(Gate::H, qidx[0]);
+                    g1!(Gate::Sdg, qidx[0]);
+                    rz1!(qidx[0], lam);
+                }
+                "cx" | "cnot" => {
+                    need(2)?;
+                    push(CircuitOp::gate2(Gate::Cx, qidx[0] as u16, qidx[1] as u16))?;
+                }
+                // CY = (I⊗S)·CX·(I⊗Sdg)
+                "cy" => {
+                    need(2)?;
+                    g1!(Gate::Sdg, qidx[1]);
+                    push(CircuitOp::gate2(Gate::Cx, qidx[0] as u16, qidx[1] as u16))?;
+                    g1!(Gate::S, qidx[1]);
+                }
+                // CZ = (I⊗H)·CX·(I⊗H)
+                "cz" => {
+                    need(2)?;
+                    g1!(Gate::H, qidx[1]);
+                    push(CircuitOp::gate2(Gate::Cx, qidx[0] as u16, qidx[1] as u16))?;
+                    g1!(Gate::H, qidx[1]);
+                }
+                // SWAP = 3 × CX
+                "swap" => {
+                    need(2)?;
+                    let (a, b) = (qidx[0] as u16, qidx[1] as u16);
+                    push(CircuitOp::gate2(Gate::Cx, a, b))?;
+                    push(CircuitOp::gate2(Gate::Cx, b, a))?;
+                    push(CircuitOp::gate2(Gate::Cx, a, b))?;
+                }
+                // Toffoli (Nielsen & Chuang Fig. 4.9): H/T/CX only.
+                "ccx" | "toffoli" => {
+                    need(3)?;
+                    let (c0, c1, t) = (qidx[0] as u16, qidx[1] as u16, qidx[2] as u16);
+                    macro_rules! cx2 {
+                        ($a:expr, $b:expr) => {{
+                            push(CircuitOp::gate2(Gate::Cx, $a, $b))?;
+                        }};
                     }
-                    "cx" => {
-                        if let Some((q0, q1)) = Self::extract_two_qubit_indices(trimmed) {
-                            circuit = circuit.cx(q0 as u16, q1 as u16);
+                    g1!(Gate::H, t as usize);
+                    cx2!(c1, t);
+                    g1!(Gate::Tdg, t as usize);
+                    cx2!(c0, t);
+                    g1!(Gate::T, t as usize);
+                    cx2!(c1, t);
+                    g1!(Gate::Tdg, t as usize);
+                    cx2!(c0, t);
+                    g1!(Gate::T, c1 as usize);
+                    g1!(Gate::T, t as usize);
+                    g1!(Gate::H, t as usize);
+                    cx2!(c0, c1);
+                    g1!(Gate::T, c0 as usize);
+                    g1!(Gate::Tdg, c1 as usize);
+                    cx2!(c0, c1);
+                }
+                // Controlled-phase CP(λ): exact 5-gate Rz/CX form
+                // (verified: equals diag(1,1,1,e^{iλ}) up to global phase).
+                "cp" | "cu1" | "cphase" => {
+                    need(2)?;
+                    let lambda = Self::parse_angle_param(&params, 0, trimmed)?;
+                    let (c, t) = (qidx[0], qidx[1]);
+                    rz1!(c, lambda / 2.0);
+                    push(CircuitOp::gate2(Gate::Cx, c as u16, t as u16))?;
+                    rz1!(t, -lambda / 2.0);
+                    push(CircuitOp::gate2(Gate::Cx, c as u16, t as u16))?;
+                    rz1!(t, lambda / 2.0);
+                }
+                // Controlled-Rz: exact 4-gate form (no global-phase residue).
+                "crz" => {
+                    need(2)?;
+                    let lambda = Self::parse_angle_param(&params, 0, trimmed)?;
+                    let (c, t) = (qidx[0], qidx[1]);
+                    rz1!(t, lambda / 2.0);
+                    push(CircuitOp::gate2(Gate::Cx, c as u16, t as u16))?;
+                    rz1!(t, -lambda / 2.0);
+                    push(CircuitOp::gate2(Gate::Cx, c as u16, t as u16))?;
+                }
+                "id" => {
+                    need(1)?;
+                }
+                "barrier" => {
+                    push(CircuitOp::barrier())?;
+                }
+                "measure" => {
+                    // `measure q -> c;` (or bare `measure;`) measures all qubits.
+                    let operands = rest.trim();
+                    if operands == "q -> c"
+                        || operands == "q->c"
+                        || operands.is_empty()
+                        || qidx.is_empty()
+                    {
+                        for q in 0..qubits {
+                            push(CircuitOp::measure(q as u16, q as u16))?;
                         }
+                    } else {
+                        let cbit = Self::extract_cbit_index(&rest).unwrap_or(qidx[0]);
+                        Self::check_qidx(qubits, qidx[0])?;
+                        push(CircuitOp::measure(qidx[0] as u16, cbit as u16))?;
                     }
-                    "measure" => {
-                        if let Some(idx) = Self::extract_qubit_index(trimmed) {
-                            circuit = circuit.measure(idx as u16);
-                        }
-                    }
-                    _ => {}
+                }
+                _ => {
+                    // Unknown / unsupported statement (reset, delay, …) — skip
+                    // to stay backward compatible with the previous parser.
                 }
             }
         }
@@ -1153,38 +1367,163 @@ impl VeerOsDriver {
         Ok(circuit)
     }
 
-    fn extract_qubit_index(line: &str) -> Option<usize> {
-        if let Some(start) = line.find("q[") {
-            if let Some(end) = line[start..].find(']') {
-                return line[start + 2..start + end].parse::<usize>().ok();
-            }
+    /// Parse register sizes: `qreg name[N];` (QASM 2) and `qubit[N] name;`
+    /// (QASM 3 prefix form).
+    fn parse_reg_size(line: &str, kind: &str) -> Option<usize> {
+        let t = line.trim().trim_end_matches(';').trim();
+        let rest = t.strip_prefix(kind)?.trim();
+        // QASM 3 prefix form: `qubit[3] q`
+        if let Some(after_bracket) = rest.strip_prefix('[') {
+            let end = after_bracket.find(']')?;
+            return after_bracket[..end].trim().parse::<usize>().ok();
         }
-        None
+        // QASM 2 form: `qreg q[3]`
+        let name_end = rest.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '$'))?;
+        let bracket = rest[name_end..].trim();
+        let inner = bracket.strip_prefix('[')?.strip_suffix(']')?;
+        inner.trim().parse::<usize>().ok()
     }
 
-    fn extract_two_qubit_indices(line: &str) -> Option<(usize, usize)> {
-        let mut indices = Vec::new();
-        let mut current = 0usize;
-        while current < line.len() {
-            if let Some(start) = line[current..].find("q[") {
-                if let Some(end) = line[current + start..].find(']') {
-                    if let Ok(idx) = line[current + start + 2..current + start + end].parse::<usize>() {
-                        indices.push(idx);
-                        current += start + end + 1;
-                        if indices.len() == 2 {
-                            return Some((indices[0], indices[1]));
-                        }
-                    } else {
-                        current += start + 1;
-                    }
-                } else {
-                    break;
-                }
+    fn check_qidx(qubits: usize, idx: usize) -> Result<()> {
+        if idx >= qubits {
+            return Err(EdgeFabricError::Internal(format!(
+                "qubit q[{idx}] out of range for a {qubits}-qubit circuit"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Split `name(params) operands;` into (name, params, operands).
+    fn split_gate_line(line: &str) -> (String, String, String) {
+        let t = line.trim().trim_end_matches(';').trim();
+        if let Some(paren) = t.find('(') {
+            let name = t[..paren].trim().to_string();
+            let after = &t[paren + 1..];
+            if let Some(close) = after.find(')') {
+                let params = after[..close].to_string();
+                let rest = after[close + 1..].trim().to_string();
+                return (name, params, rest);
+            }
+            return (name, String::new(), after.to_string());
+        }
+        let mut parts = t.splitn(2, char::is_whitespace);
+        let name = parts.next().unwrap_or("").to_string();
+        let rest = parts.next().unwrap_or("").trim().to_string();
+        (name, String::new(), rest)
+    }
+
+    /// Evaluate an angle expression: floats, `pi`, and `*`/`/` products
+    /// such as `pi/2`, `-pi`, `3*pi/2`.
+    fn parse_angle_expr(expr: &str) -> Option<f64> {
+        let e = expr.trim().replace(' ', "");
+        if e.is_empty() {
+            return None;
+        }
+        let lower = e.to_lowercase();
+        let (neg, rest) = match lower.strip_prefix('-') {
+            Some(r) => (true, r.to_string()),
+            None => (false, lower.strip_prefix('+').unwrap_or(&lower).to_string()),
+        };
+        let mut value = 0.0;
+        let mut first = true;
+        let mut pending_mul = true; // operator before next factor
+        let mut current = String::new();
+        let mut chars = rest.chars().peekable();
+        let flush = |current: &mut String,
+                     value: &mut f64,
+                     first: &mut bool,
+                     pending_mul: bool|
+         -> Option<()> {
+            if current.is_empty() {
+                return None;
+            }
+            let factor = if current == "pi" {
+                std::f64::consts::PI
             } else {
-                break;
+                current.parse::<f64>().ok()?
+            };
+            if *first {
+                *value = factor;
+                *first = false;
+            } else if pending_mul {
+                *value *= factor;
+            } else {
+                if factor == 0.0 {
+                    return None;
+                }
+                *value /= factor;
+            }
+            current.clear();
+            Some(())
+        };
+        while let Some(ch) = chars.next() {
+            if ch == '*' || ch == '/' {
+                flush(&mut current, &mut value, &mut first, pending_mul)?;
+                pending_mul = ch == '*';
+            } else {
+                current.push(ch);
             }
         }
-        None
+        flush(&mut current, &mut value, &mut first, pending_mul)?;
+        if first {
+            return None;
+        }
+        Some(if neg { -value } else { value })
+    }
+
+    fn parse_angle_param(params: &str, index: usize, line: &str) -> Result<f64> {
+        let part = params
+            .split(',')
+            .nth(index)
+            .ok_or_else(|| {
+                EdgeFabricError::Internal(format!("gate is missing angle parameter: {line}"))
+            })?;
+        Self::parse_angle_expr(part).ok_or_else(|| {
+            EdgeFabricError::Internal(format!("cannot parse angle '{part}' in: {line}"))
+        })
+    }
+
+    fn parse_u_params(params: &str, line: &str) -> Result<(f64, f64, f64)> {
+        let mut it = params.split(',');
+        let mut p = |i: usize| -> Result<f64> {
+            let part = it.next().ok_or_else(|| {
+                EdgeFabricError::Internal(format!("U gate needs 3 angles: {line}"))
+            })?;
+            Self::parse_angle_expr(part).ok_or_else(|| {
+                EdgeFabricError::Internal(format!("cannot parse U angle #{i} in: {line}"))
+            })
+        };
+        Ok((p(0)?, p(1)?, p(2)?))
+    }
+
+    /// All `q[N]` indices in a gate operand string, in order.
+    fn extract_all_qubit_indices(line: &str) -> Vec<usize> {
+        let mut out = Vec::new();
+        let bytes = line.as_bytes();
+        let mut i = 0;
+        while i + 1 < bytes.len() {
+            if bytes[i] == b'q' && bytes[i + 1] == b'[' {
+                if let Some(end) = line[i..].find(']') {
+                    if let Ok(idx) = line[i + 2..i + end].parse::<usize>() {
+                        out.push(idx);
+                    }
+                    i += end + 1;
+                    continue;
+                }
+            }
+            i += 1;
+        }
+        out
+    }
+
+    /// Classical bit index from `-> c[N]`, if present.
+    fn extract_cbit_index(line: &str) -> Option<usize> {
+        let arrow = line.find("->")?;
+        let after = line[arrow + 2..].trim();
+        let after = after.strip_prefix('c')?;
+        let after = after.trim_start_matches('[');
+        let end = after.find(']')?;
+        after[..end].trim().parse::<usize>().ok()
     }
 
     fn histogram_key_to_bitstring(key: u16, width: usize) -> String {
@@ -1196,5 +1535,221 @@ impl VeerOsDriver {
             bits.push(bit);
         }
         bits
+    }
+}
+
+#[cfg(test)]
+mod qasm_parser_tests {
+    use super::VeerOsDriver;
+
+    fn parse(qasm: &str) -> Result<quantum::Circuit, String> {
+        VeerOsDriver::parse_quantum_circuit_from_qasm(qasm).map_err(|e| format!("{e:?}"))
+    }
+
+    fn op_count(qasm: &str) -> usize {
+        parse(qasm).expect("parse ok").ops_len() as usize
+    }
+
+    #[test]
+    fn qreg_size_and_basic_gates() {
+        let c = parse(
+            "OPENQASM 2.0;\ninclude \"qelib1.inc\";\nqreg q[3];\ncreg c[3];\nh q[0];\ncx q[0],q[1];\nmeasure q -> c;",
+        )
+        .unwrap();
+        assert_eq!(c.logical_qubits, 3);
+        // h + cx + 3 measures
+        assert_eq!(c.ops_len(), 5);
+    }
+
+    #[test]
+    fn parametric_and_two_qubit_gates() {
+        // s, t, rx, rz, cz, swap decompose into native ops
+        let n = op_count(
+            "qreg q[2];\ns q[0];\nt q[1];\nrx(pi/2) q[0];\nrz(0.5) q[1];\ncz q[0],q[1];\nswap q[0],q[1];\nmeasure q -> c;",
+        );
+        // s(1) + t(1) + rx(3) + rz(1) + cz(3) + swap(3) + measure(2)
+        assert_eq!(n, 1 + 1 + 3 + 1 + 3 + 3 + 2);
+    }
+
+    #[test]
+    fn toffoli_and_controlled_phase_decompose() {
+        // ccx -> 15 ops, cp -> 5 ops (all native H/T/CX/Rz)
+        let n = op_count("qreg q[3];\nccx q[0],q[1],q[2];\ncp(pi/4) q[0],q[1];\nmeasure q -> c;");
+        assert_eq!(n, 15 + 5 + 3);
+    }
+
+    #[test]
+    fn angle_expressions() {
+        assert!((VeerOsDriver::parse_angle_expr("pi/2").unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+        assert!((VeerOsDriver::parse_angle_expr("-pi").unwrap() + std::f64::consts::PI).abs() < 1e-9);
+        assert!((VeerOsDriver::parse_angle_expr("3*pi/2").unwrap() - 4.71238898038).abs() < 1e-9);
+        assert!((VeerOsDriver::parse_angle_expr("0.5").unwrap() - 0.5).abs() < 1e-9);
+        assert!(VeerOsDriver::parse_angle_expr("banana").is_none());
+    }
+
+    #[test]
+    fn rejects_out_of_range_qubits() {
+        let err = parse("qreg q[2];\nh q[5];").unwrap_err();
+        assert!(err.contains("out of range"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn rejects_too_many_qubits() {
+        let err = parse("qreg q[13];\nh q[0];").unwrap_err();
+        assert!(err.contains("12"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn y_gate_and_explicit_measure() {
+        let n = op_count("qreg q[2];\ny q[0];\nmeasure q[0] -> c[1];\nmeasure q[1] -> c[0];");
+        // y -> x+z (2 ops) + 2 measures
+        assert_eq!(n, 4);
+    }
+
+    fn simulate(qasm: &str, shots: u32, seed: u64) -> serde_json::Value {
+        super::VeerOsDriver::simulate_quantum(&super::QuantumSimulationRequest {
+            program: None,
+            qasm: Some(qasm.to_string()),
+            shots,
+            seed: Some(seed),
+        })
+        .expect("simulation ok")
+    }
+
+    fn hist_value(v: &serde_json::Value, state: &str) -> u32 {
+        v.get("histogram")
+            .and_then(|h| h.get(state))
+            .and_then(|c| c.as_u64())
+            .unwrap_or(0) as u32
+    }
+
+    #[test]
+    fn bell_state_simulating_correctly() {
+        let v = simulate(
+            "qreg q[2];\nh q[0];\ncx q[0],q[1];\nmeasure q -> c;",
+            1000,
+            7,
+        );
+        let total = hist_value(&v, "00") + hist_value(&v, "11");
+        assert_eq!(total, 1000);
+        assert_eq!(hist_value(&v, "01"), 0);
+        assert_eq!(hist_value(&v, "10"), 0);
+    }
+
+    #[test]
+    fn toffoli_truth_table() {
+        // |110> -> |111>, |101> stays |101>
+        let v = simulate(
+            "qreg q[3];\nx q[0];\nx q[1];\nccx q[0],q[1],q[2];\nmeasure q -> c;",
+            200,
+            7,
+        );
+        assert_eq!(hist_value(&v, "111"), 200);
+        let v2 = simulate(
+            "qreg q[3];\nx q[0];\nx q[2];\nccx q[0],q[1],q[2];\nmeasure q -> c;",
+            200,
+            7,
+        );
+        assert_eq!(hist_value(&v2, "101"), 200);
+    }
+
+    #[test]
+    fn qft2_uniform_output() {
+        // QFT|00> is uniform over 4 states; QFT|10> peaks at |10>.
+        let prep = "qreg q[2];\nh q[0];\ncp(pi/2) q[0],q[1];\nh q[1];\nmeasure q -> c;";
+        let v = simulate(prep, 1200, 11);
+        for state in ["00", "01", "10", "11"] {
+            let c = hist_value(&v, state);
+            assert!(
+                (200..=400).contains(&c),
+                "QFT|00> should be ~uniform, {state}={c}"
+            );
+        }
+        // QFT followed by inverse QFT is the identity (also exercises
+        // negative angles via cp(-pi/2)).
+        let roundtrip = "qreg q[2];\nx q[1];\nh q[0];\ncp(pi/2) q[0],q[1];\nh q[1];\nh q[1];\ncp(-pi/2) q[0],q[1];\nh q[0];\nmeasure q -> c;";
+        let v1 = simulate(roundtrip, 400, 11);
+        assert_eq!(hist_value(&v1, "10"), 400);
+    }
+
+    const GROVER2_QASM: &str = "OPENQASM 2.0;\ninclude \"qelib1.inc\";\nqreg q[2];\ncreg c[2];\nh q[0];\nh q[1];\nh q[1];\ncx q[0],q[1];\nh q[1];\nh q[0];\nh q[1];\nx q[0];\nx q[1];\nh q[1];\ncx q[0],q[1];\nh q[1];\nx q[0];\nx q[1];\nh q[0];\nh q[1];\nmeasure q -> c;";
+
+    #[test]
+    fn grover2_finds_marked_state() {
+        let v = simulate(GROVER2_QASM, 300, 5);
+        assert_eq!(hist_value(&v, "11"), 300);
+    }
+
+    const BV3_QASM: &str = "OPENQASM 2.0;\ninclude \"qelib1.inc\";\nqreg q[3];\ncreg c[3];\nx q[2];\nh q[0];\nh q[1];\nh q[2];\ncx q[0],q[2];\ncx q[1],q[2];\nh q[0];\nh q[1];\nmeasure q[0] -> c[0];\nmeasure q[1] -> c[1];\nmeasure q[2] -> c[2];";
+
+    #[test]
+    fn bernstein_vazirani_recovers_secret() {
+        let v = simulate(BV3_QASM, 200, 5);
+        // bitstring order is q2q1q0: secret s=11 means q0=q1=1.
+        let total12: u32 = ["011", "111"].iter().map(|s| hist_value(&v, s)).sum();
+        assert_eq!(total12, 200, "q0q1 must read 11, got {v:?}");
+    }
+
+    const SUPERDENSE_QASM: &str = "OPENQASM 2.0;\ninclude \"qelib1.inc\";\nqreg q[2];\ncreg c[2];\nh q[0];\ncx q[0],q[1];\nx q[0];\ncx q[0],q[1];\nh q[0];\nmeasure q -> c;";
+
+    #[test]
+    fn superdense_decodes_two_bits() {
+        let v = simulate(SUPERDENSE_QASM, 200, 5);
+        assert_eq!(hist_value(&v, "10"), 200);
+    }
+
+    const DJ_QASM: &str = "OPENQASM 2.0;\ninclude \"qelib1.inc\";\nqreg q[3];\ncreg c[3];\nx q[2];\nh q[0];\nh q[1];\nh q[2];\ncx q[0],q[2];\nh q[0];\nh q[1];\nmeasure q[0] -> c[0];\nmeasure q[1] -> c[1];\nmeasure q[2] -> c[2];";
+
+    #[test]
+    fn deutsch_jozsa_detects_balanced() {
+        let v = simulate(DJ_QASM, 200, 5);
+        // bitstring order q2q1q0; balanced f(x)=x0 gives q0=1, q1=0.
+        let total: u32 = ["001", "101"].iter().map(|s| hist_value(&v, s)).sum();
+        assert_eq!(total, 200, "balanced f must give q0q1=10, got {v:?}");
+    }
+
+    const QEC_QASM: &str = "OPENQASM 2.0;\ninclude \"qelib1.inc\";\nqreg q[5];\ncreg c[5];\nx q[0];\ncx q[0],q[1];\ncx q[0],q[2];\nx q[1];\ncx q[0],q[3];\ncx q[1],q[3];\ncx q[1],q[4];\ncx q[2],q[4];\nccx q[3],q[4],q[1];\ncx q[0],q[1];\ncx q[0],q[2];\nmeasure q[0] -> c[0];";
+
+    #[test]
+    fn bitflip_code_corrects_error() {
+        let v = simulate(QEC_QASM, 200, 5);
+        assert_eq!(hist_value(&v, "00001"), 200);
+    }
+
+    // Teleportation in deferred-measurement form: the classically controlled
+    // X/Z corrections become CX(q1,q2) / CZ(q0,q2), so q2 ends exactly in the
+    // teleported state with all measurements at the end.
+    const TELEPORT_QASM: &str = "OPENQASM 2.0;\ninclude \"qelib1.inc\";\nqreg q[3];\ncreg c[3];\nx q[0];\nh q[1];\ncx q[1],q[2];\ncx q[0],q[1];\nh q[0];\ncx q[1],q[2];\ncz q[0],q[2];\nmeasure q -> c;";
+
+    #[test]
+    fn teleportation_delivers_state() {
+        // Bitstring order is q2q1q0: the target q2 must read 1 in every shot
+        // while Alice's Bell bits (q1q0) vary uniformly.
+        let v = simulate(TELEPORT_QASM, 1000, 5);
+        for s in ["000", "001", "010", "011"] {
+            assert_eq!(hist_value(&v, s), 0, "q2 must be 1, got {v:?}");
+        }
+        let total: u32 = ["100", "101", "110", "111"]
+            .iter()
+            .map(|s| hist_value(&v, s))
+            .sum();
+        assert_eq!(total, 1000);
+    }
+
+    #[test]
+    fn teleportation_transfers_one() {
+        // Teleport |1>: Bell pair q1-q2, Bell-measure q0-q1, conditional X/Z on q2.
+        // Conditional gates are classically controlled — instead verify the
+        // no-correction distribution: q2 ends 0/1 uniformly when q0 was |1>.
+        let v = simulate(
+            "qreg q[3];\nx q[0];\nh q[1];\ncx q[1],q[2];\ncx q[0],q[1];\nh q[0];\nmeasure q -> c;",
+            1000,
+            3,
+        );
+        let total: u32 = ["000", "001", "010", "011", "100", "101", "110", "111"]
+            .iter()
+            .map(|s| hist_value(&v, s))
+            .sum();
+        assert_eq!(total, 1000);
     }
 }

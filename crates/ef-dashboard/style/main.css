@@ -3754,3 +3754,38 @@ body.virtual-iot-full-window .main-content {
     .backends-table { table-layout: auto; min-width: 720px; }
     .backends-table td.cell-mono { max-width: none; }
 }
+
+.muted { color: var(--text-muted); }
+
+.resources-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1rem;
+}
+.resource-card h3 { font-size: 1.05rem; margin-bottom: 0.35rem; }
+.resource-card-kicker {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+    margin-bottom: 0.35rem;
+}
+.resources-steps {
+    margin: 0 0 1rem 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    color: var(--text-secondary);
+}
+.resources-snippet {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    margin: 0.75rem 0;
+}

@@ -1,5 +1,6 @@
 pub mod devices;
 pub mod jobs;
+pub mod ml;
 pub mod sessions;
 pub mod streaming;
 pub mod agent;
@@ -10,6 +11,7 @@ pub mod runners;
 pub mod builds;
 pub mod integrations;
 pub mod starter_projects;
+pub mod resources;
 
 use axum::{Json, Router, extract::State, http::StatusCode, routing::{get, post, put}};
 use serde::Deserialize;
@@ -91,6 +93,16 @@ pub fn api_router() -> Router<AppState> {
         .route("/runners/{id}/drain", post(runners::drain_runner))
         .route("/runners/{id}/probe", post(runners::probe_runner))
         .route("/runners/leases/{id}/release", post(runners::release_runner_lease))
+        // M6 Mini ML fabric
+        .route("/ml/nodes", get(ml::list_nodes))
+        .route("/ml/nodes/heartbeat", post(ml::node_heartbeat))
+        .route("/ml/clusters", get(ml::list_clusters).post(ml::create_cluster))
+        .route("/ml/clusters/{id}", get(ml::get_cluster))
+        .route("/ml/jobs", get(ml::list_jobs).post(ml::create_job))
+        .route("/ml/jobs/{id}", get(ml::get_job))
+        .route("/ml/jobs/{id}/cancel", post(ml::cancel_job))
+        .route("/ml/jobs/{id}/metrics", post(ml::report_job_metrics))
+        .route("/ml/v1/chat/completions", post(ml::chat_completions))
         // iOS build execution
         .route("/builds", get(builds::list_builds))
         .route("/builds/ios", post(builds::submit_ios_build))
@@ -122,6 +134,9 @@ pub fn api_router() -> Router<AppState> {
         .route("/integrations/cloud/sinks/{id}", axum::routing::delete(integrations::delete_cloud_sink))
         .route("/integrations/delivery-attempts", get(integrations::list_delivery_attempts))
         .route("/integrations/sensors/events", post(integrations::ingest_sensor_event))
+        // Host installer catalog (public — binaries only, no secrets)
+        .route("/resources", get(resources::list_resources))
+        .route("/resources/files/{name}", get(resources::download_resource))
 }
 
 #[utoipa::path(get, path = "/health", tag = "health",

@@ -1056,6 +1056,14 @@
 .iphone-mini .phone-screen {
     aspect-ratio: 9 / 18;
 }
+/* iPhone 18 Pro — exact panel ratio (1206×2622) so the stream fills edge-to-edge */
+.iphone-18-pro .phone-screen {
+    aspect-ratio: 1206 / 2622;
+}
+/* iPhone Duo closed — cover display ratio (1398×2034) */
+.iphone-duo .phone-screen {
+    aspect-ratio: 1398 / 2034;
+}
 /* iPad classic — landscape 4:3 */
 .ipad-classic .phone-screen {
     aspect-ratio: 4 / 3;

@@ -341,6 +341,17 @@ docker compose --profile full up -d     # infra + API + agent
 docker compose down -v                  # tear down
 ```
 
+### EC2 (eGenie R&D host)
+
+Same SSH host and deploy pattern as [eGenie](../egenie/deploy/ec2/README.md) (`100.52.147.238`, `VeerSetuHost.pem`):
+
+```bash
+cp deploy/ec2/host.env.example deploy/ec2/host.env
+./deploy/ec2/deploy-edgefabric.sh
+```
+
+See [deploy/ec2/README.md](deploy/ec2/README.md) for BUILD_MODE, DNS (`edgefabric.veerlabs.solutions`), and optional `DEPLOY_AGENT=1`.
+
 ### Agent-Only Deployment (Edge Node)
 
 When the API server runs elsewhere (e.g., cloud), deploy just the agent:

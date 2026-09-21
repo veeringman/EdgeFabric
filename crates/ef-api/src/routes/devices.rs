@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 use crate::middleware::auth_extractor::{AppState, AuthContext};
 use crate::middleware::error_response::ApiError;
+use crate::routes::runners::ensure_ssh_host_runner;
 
 use ef_db::repo::device::DeviceRepo;
 
@@ -107,6 +108,12 @@ pub async fn create_device(
         tracing::error!("Failed to upsert device: {e}");
         ApiError::internal("Failed to create device")
     })?;
+
+    if device.os == "ssh" || device.os == "veeros" {
+        if let Err(e) = ensure_ssh_host_runner(&state.pool, auth.tenant_id, &device).await {
+            tracing::warn!(error = %e, device_id = %device.id, "Failed to ensure generic host runner for SSH device");
+        }
+    }
 
     Ok((StatusCode::CREATED, Json(json!({ "device": device }))))
 }

@@ -1436,6 +1436,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "ef-ml-worker"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum 0.8.9",
+ "bytes",
+ "chrono",
+ "clap",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "ef-orchestrator"
 version = "0.1.0"
 dependencies = [

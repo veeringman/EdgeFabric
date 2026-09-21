@@ -13,6 +13,7 @@
 ## Table of Contents
 
 - [Authentication](#authentication)
+- [Resources / host installers](#resources--host-installers)
 - [Devices API](#devices-api)
 - [Runners API](#runners-api)
 - [Builds API](#builds-api)
@@ -62,6 +63,22 @@ Content-Type: application/json
 ```
 
 Local development commonly uses `efdev-key-00000000` as the API key.
+
+---
+
+## Resources / host installers
+
+Public catalog of worker packages (no auth). Used by the dashboard **Downloads** page.
+
+```http
+GET /api/v1/resources
+```
+
+```http
+GET /api/v1/resources/files/edgefabric-host-aarch64-apple-darwin.tar.gz
+```
+
+Files are served from `EF_RESOURCES_DIR`, `/var/www/edgefabric-dashboard/downloads`, or `dist/host`. Publish a package with `scripts/package-host.sh`.
 
 ---
 
@@ -172,7 +189,7 @@ GET /api/v1/devices/{device_id}/health
 
 ## Runners API
 
-Runner APIs provide tenant-scoped registration and management of SSH/macOS CI runners.
+Runner APIs provide tenant-scoped registration of generic SSH hosts (macOS, Linux, Windows). Workloads match on capabilities, not runner class.
 
 ### Register Runner
 
@@ -182,17 +199,19 @@ Authorization: Bearer <jwt_token>
 Content-Type: application/json
 
 {
-  "name": "mac-mini-runner-01",
+  "name": "lab-host-01",
   "device_id": "f2b6f0d6-9fa9-4d86-b14c-77ff9f4d3b66",
-  "runner_class": "ios-build",
-  "host_os": "macos",
-  "architecture": "arm64",
+  "runner_class": "generic",
+  "host_os": "linux",
+  "architecture": "x86_64",
   "region": "in-lab",
-  "labels": ["ios", "team-a"],
-  "capabilities": ["ssh", "cicd_runner", "xcode"],
+  "labels": ["gpu", "team-a"],
+  "capabilities": ["ssh", "cicd_runner", "linux_runner"],
   "max_concurrency": 2
 }
 ```
+
+`host_os` is `macos`, `linux`, or `windows`. `runner_class` other than `generic` (`mlx-cluster`, `ios`, `linux`, `windows`) is normalized to `generic`.
 
 `device_id` should point to an already discovered/registered host from ef-agent and dashboard inventory.
 When `host` is omitted and `device_id` is provided, EdgeFabric derives `host:port` from device metadata (`serial` or `ip_address`).
@@ -265,10 +284,111 @@ Current probe mode performs:
 - SSH authentication probe (batch mode, key-based)
 - Toolchain checks for runner capabilities:
   - Apple: `xcode`, `simctl`, `fastlane`, `codesign`, `cocoapods`, `swiftpm`
-  - Linux/IoT: `linux_runner`, `iot_toolchain`, `esp32`, `rpi`, `iot_deploy`
+  - Linux: `linux_runner`, `linux_deploy`, `docker`, `cuda`, `iot_toolchain`, `esp32`, `rpi`, `iot_deploy`
+  - Windows: `windows_runner`, `windows_deploy`, `msbuild`, `powershell`, `wsl`, `docker`, `cuda`
   - Quantum/VeerOS: `quantum_sdk`, `quantum_simulator`, `veeros_host`
+  - ML: `mlx`, `ane`, `llm_infer`, `llm_train`, `pipeline_pp` (macOS MLX or Linux/Windows Ollama/CUDA)
+  - Shared host roles: `macos_runner`, `macos_deploy`, `linux_runner`, `windows_runner`
+
+Probe also records `hardware` (`chip`, `cpu_cores`, `gpu_cores`, `ane_cores`, `unified_memory_gb`, `link_mbps`, `mlx_version`, `os`) for SSH hosts.
 
 Probe metadata and discovered capabilities are stored in runner health and returned in the response.
+
+Register any SSH host as `"runner_class": "generic"` with `"host_os": "macos" | "linux" | "windows"`. `"mlx-cluster"` / `"linux"` / `"windows"` class names are stored as `generic`. The same host can be an ML node, CI runner, and app deploy target.
+
+---
+
+## ML Cluster API (M6 Mini fabric)
+
+LAN pipeline-parallel inference and training. Activation traffic stays on 2.5 GbE; VeerSetu is for enrollment and publishing rank-0 only.
+
+### List / heartbeat nodes
+
+```http
+GET /api/v1/ml/nodes
+POST /api/v1/ml/nodes/heartbeat
+Authorization: Bearer <jwt_token>
+```
+
+Heartbeat body:
+
+```json
+{
+  "runner_id": "f2b6f0d6-9fa9-4d86-b14c-77ff9f4d3b66",
+  "worker_host": "192.168.29.41",
+  "worker_http_port": 8090,
+  "worker_dataplane_port": 8091,
+  "free_memory_gb": 18.5,
+  "pipeline_rank": 0
+}
+```
+
+Response includes `assignment` (`cluster`, `rank`, `members`, `job`) so `ef-ml-worker` can load the active job.
+
+### Create cluster (leases N runners)
+
+```http
+POST /api/v1/ml/clusters
+Authorization: Bearer <jwt_token>
+Content-Type: application/json
+
+{
+  "name": "lab-minis",
+  "role": "pipeline",
+  "size": 3,
+  "interconnect_cidrs": ["192.168.29.0/24"],
+  "required_capabilities": ["mlx", "llm_infer", "pipeline_pp"]
+}
+```
+
+`role` is `pipeline` | `replica` | `diloco`. Omit `size` and pass `runner_ids` to lease specific Minis.
+
+```http
+GET /api/v1/ml/clusters
+GET /api/v1/ml/clusters/{cluster_id}
+```
+
+### Jobs
+
+```http
+POST /api/v1/ml/jobs
+Authorization: Bearer <jwt_token>
+Content-Type: application/json
+
+{
+  "cluster_id": "d2a81f42-95fb-4fb2-8e1f-85fe067feab4",
+  "kind": "infer_serve",
+  "model_id": "toy-pp",
+  "quantization": "q4",
+  "context_length": 2048,
+  "n_layers": 12,
+  "hidden_size": 256
+}
+```
+
+`kind`: `infer_serve` | `train_lora` | `train_diloco` | `train_pipeline`.
+
+```http
+GET /api/v1/ml/jobs
+GET /api/v1/ml/jobs/{job_id}
+POST /api/v1/ml/jobs/{job_id}/metrics
+POST /api/v1/ml/jobs/{job_id}/cancel
+```
+
+### OpenAI-compatible gateway (proxies rank-0 on LAN)
+
+```http
+POST /api/v1/ml/v1/chat/completions
+Authorization: Bearer <jwt_token>
+Content-Type: application/json
+
+{
+  "model": "toy-pp",
+  "messages": [{"role": "user", "content": "hello"}],
+  "max_tokens": 32,
+  "cluster_id": "d2a81f42-95fb-4fb2-8e1f-85fe067feab4"
+}
+```
 
 ### Allocate Runner Lease
 

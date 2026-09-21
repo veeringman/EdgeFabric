@@ -29,6 +29,9 @@ pub struct SimulateRequest {
     /// Number of measurement shots (default 1024)
     #[serde(default = "default_shots")]
     pub shots: u32,
+    /// Optional PRNG seed for reproducible histograms
+    #[serde(default)]
+    pub seed: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -138,6 +141,7 @@ pub async fn simulate_on_agent(
         "program": body.program,
         "qasm": body.qasm,
         "shots": body.shots,
+        "seed": body.seed,
     });
 
     let result = veeros_proxy::quantum_simulate(&base, req_body)

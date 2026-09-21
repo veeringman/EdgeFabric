@@ -86,6 +86,14 @@ fn NavIcon(name: String) -> impl IntoView {
                 </svg>
             }
             .into_any(),
+            "download" => view! {
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 3v12"/>
+                    <path d="m7 11 5 5 5-5"/>
+                    <path d="M5 21h14"/>
+                </svg>
+            }
+            .into_any(),
             "admin" => view! {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="12" r="3"/>
@@ -126,13 +134,15 @@ pub fn Sidebar() -> impl IntoView {
             <nav class="sidebar-nav" on:click=close>
                 <div class="nav-section-title">"Core Platform"</div>
                 <A href="/"><span class="nav-icon"><NavIcon name="overview".to_string()/></span><span>"Overview"</span></A>
-                <A href="/devices"><span class="nav-icon"><NavIcon name="devices".to_string()/></span><span>"Devices"</span></A>
+                <A href="/devices"><span class="nav-icon"><NavIcon name="devices".to_string()/></span><span>"Devices & Hosts"</span></A>
                 <A href="/sessions"><span class="nav-icon"><NavIcon name="sessions".to_string()/></span><span>"Sessions"</span></A>
                 <A href="/sessions/live"><span class="nav-icon"><NavIcon name="live".to_string()/></span><span>"Live Viewer"</span></A>
                 <A href="/jobs"><span class="nav-icon"><NavIcon name="jobs".to_string()/></span><span>"Test Jobs"</span></A>
+                <A href="/ml"><span class="nav-icon"><NavIcon name="jobs".to_string()/></span><span>"ML Fabric"</span></A>
                 <A href="/builds"><span class="nav-icon"><NavIcon name="builds".to_string()/></span><span>"Builds"</span></A>
                 <A href="/development/ide"><span class="nav-icon"><NavIcon name="builds".to_string()/></span><span>"Development IDE"</span></A>
                 <A href="/logs"><span class="nav-icon"><NavIcon name="logs".to_string()/></span><span>"Logs"</span></A>
+                <A href="/resources"><span class="nav-icon"><NavIcon name="download".to_string()/></span><span>"Downloads"</span></A>
 
                 <div class="nav-section-title">"IoT & Integrations"</div>
                 <A href="/virtual-iot/new"><span class="nav-icon"><NavIcon name="iot".to_string()/></span><span>"IoT Designer"</span></A>

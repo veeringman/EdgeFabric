@@ -10,6 +10,7 @@ members = [
     "crates/ef-streaming",
     "crates/ef-agent",
     "crates/ef-cli",
+    "crates/ef-ml-worker",
 ]
 # WASM crate — build with `trunk` from crates/ef-dashboard, excluded from default workspace builds.
 exclude = ["crates/ef-dashboard"]
@@ -119,3 +120,4 @@ ef-control = { path = "crates/ef-control" }
 ef-streaming = { path = "crates/ef-streaming" }
 ef-agent = { path = "crates/ef-agent" }
 ef-cli = { path = "crates/ef-cli" }
+ef-ml-worker = { path = "crates/ef-ml-worker" }

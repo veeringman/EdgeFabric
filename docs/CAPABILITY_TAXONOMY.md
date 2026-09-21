@@ -20,8 +20,10 @@ The capability model applies to:
 
 - Virtual IoT devices (`os = virtual_iot`)
 - Real IoT endpoints (`os = iot`)
-- SSH hosts (`os = ssh`)
-- macOS build runners (typically `os = ssh` + runner capabilities)
+- SSH hosts (`os = ssh`) — generic workers for macOS, Linux, and Windows
+- macOS hosts used for iOS builds, macOS app deploy, and ML
+- Linux hosts used for IoT/firmware, VeerOS/quantum, CUDA/LLM, and Linux app deploy
+- Windows hosts used for MSBuild/.NET, WSL, CUDA/LLM, and Windows app deploy
 
 ## Naming Rules
 
@@ -56,11 +58,21 @@ The capability model applies to:
 
 | Capability | Meaning | Typical Targets |
 |---|---|---|
-| `cicd_runner` | Host is eligible to execute scheduled build/test jobs | ssh runners |
+| `cicd_runner` | Host is eligible to execute scheduled build/test jobs | ssh hosts |
+| `macos_runner` | Host is a macOS SSH worker (Apple Silicon or Intel) | macOS hosts |
+| `macos_deploy` | Host can install/sign/run macOS or iOS apps (`xcodebuild` / `codesign`) | macOS hosts |
 | `artifact_upload` | Host can publish artifacts back to EdgeFabric artifact APIs | ssh runners |
 | `workspace_bootstrap` | Host supports deterministic build workspace bootstrap | ssh runners |
 | `concurrency_control` | Host supports tracked concurrent leases | ssh runners |
-| `linux_runner` | Runner host is Linux-based and suitable for IoT/edge workloads | linux ssh runners |
+| `linux_runner` | Host is a Linux SSH worker (server, workstation, or SBC) | linux ssh hosts |
+| `linux_deploy` | Host can install/start Linux services or copy artifacts (`systemctl` / `scp`) | linux ssh hosts |
+| `windows_runner` | Host is a Windows SSH worker (OpenSSH) | windows ssh hosts |
+| `windows_deploy` | Host can build/install Windows apps (`dotnet` / `msbuild`) | windows ssh hosts |
+| `msbuild` | MSBuild is available | windows ssh hosts |
+| `powershell` | PowerShell is available for remote scripts | windows ssh hosts |
+| `wsl` | Windows Subsystem for Linux is installed | windows ssh hosts |
+| `docker` | Docker CLI is available | linux, windows, macos hosts |
+| `cuda` | NVIDIA GPU toolchain (`nvidia-smi`) is available | linux, windows hosts |
 | `iot_toolchain` | Runner has embedded build toolchains for IoT firmware/apps | linux ssh runners |
 | `iot_deploy` | Runner can deploy built artifacts to IoT/Virtual IoT targets | linux ssh runners |
 | `esp32` | Runner has ESP-IDF/PlatformIO/esptool capabilities | esp32 workflows |
@@ -86,7 +98,17 @@ The capability model applies to:
 | `webhook_events` | Resource emits integration webhooks | platform integration |
 | `public_api` | Resource is exposed via documented public integration APIs | platform integration |
 
-### 6) Quantum And VeerOS
+### 6) Apple Silicon ML Cluster
+
+| Capability | Meaning | Typical Targets |
+|---|---|---|
+| `mlx` | MLX (or compatible) runtime is importable for GPU/ANE workloads | macOS M-series Minis |
+| `ane` | Apple Neural Engine / GPU Neural Accelerators are available | Apple Silicon hosts |
+| `llm_infer` | Host can serve LLM inference (replica or pipeline stage) | macOS SSH hosts |
+| `llm_train` | Host can run LoRA / DiLoCo / pipeline fine-tune jobs | macOS SSH hosts |
+| `pipeline_pp` | Host can participate in LAN pipeline-parallel collectives | macOS SSH hosts |
+
+### 7) Quantum And VeerOS
 
 | Capability | Meaning | Typical Targets |
 |---|---|---|
@@ -128,7 +150,9 @@ Optional:
 - `sensor_inject`
 - `ws_stream`
 
-### Generic SSH Host
+### Generic SSH Host (shared worker)
+
+One SSH host is one `generic` runner linked to one `os=ssh` device. Workloads are selected by **capabilities**, not by a separate runner class.
 
 Required:
 
@@ -136,9 +160,31 @@ Required:
 - `tenant_scoped`
 - `audit_trail`
 
-Optional:
+Optional (any OS):
 
 - `cicd_runner`
+- `docker`
+- `cuda`
+- `llm_infer`, `llm_train`, `pipeline_pp`
+
+Optional (macOS):
+
+- `macos_runner`, `macos_deploy`
+- `xcode`, `simctl`, `codesign`, `swiftpm`
+- `mlx`, `ane`
+
+Optional (Linux):
+
+- `linux_runner`, `linux_deploy`
+- `iot_toolchain`, `iot_deploy`, `esp32`, `rpi`
+- `veeros_host`, `quantum_sdk`
+
+Optional (Windows):
+
+- `windows_runner`, `windows_deploy`
+- `msbuild`, `powershell`, `wsl`
+
+`runner_class = mlx-cluster` is accepted as an alias and stored as `generic`.
 
 ### Linux IoT Runner (ESP32C6/RPi)
 
@@ -176,25 +222,69 @@ Optional:
 - `quantum_simulator`
 - `quantum_hardware`
 
-### macOS iOS Build Runner
+### macOS Host (ML + iOS build + macOS deploy)
 
 Required:
 
 - `ssh`
+- `macos_runner`
 - `cicd_runner`
+- `tenant_scoped`
+- `audit_trail`
+
+For ML jobs also:
+
+- `mlx`
+- `llm_infer`
+
+For iOS / macOS app jobs also:
+
 - `xcode`
+- `macos_deploy`
 - `artifact_upload`
 - `workspace_bootstrap`
+
+Optional:
+
+- `ane`, `llm_train`, `pipeline_pp`
+- `simctl`, `codesign`, `fastlane`, `cocoapods`, `swiftpm`
+
+Register as `runner_class = generic` (or omit). Probe records hardware in `last_probe_result.hardware` and upserts `ml_nodes` when ML capabilities or host hardware are present. The same host is the Devices SSH target and the scheduler lease target.
+
+### Linux Host (IoT / VeerOS / CUDA / Linux deploy)
+
+Required:
+
+- `ssh`
+- `linux_runner`
+- `cicd_runner`
 - `tenant_scoped`
 - `audit_trail`
 
 Optional:
 
-- `simctl`
-- `codesign`
-- `fastlane`
-- `cocoapods`
-- `swiftpm`
+- `linux_deploy`, `docker`, `cuda`
+- `iot_toolchain`, `iot_deploy`, `esp32`, `rpi`
+- `veeros_host`, `quantum_sdk`, `quantum_simulator`
+- `llm_infer`, `llm_train` (Ollama, PyTorch, or `ef-ml-worker`)
+
+### Windows Host (MSBuild / .NET / WSL / CUDA)
+
+Required:
+
+- `ssh` (OpenSSH Server)
+- `windows_runner`
+- `cicd_runner`
+- `tenant_scoped`
+- `audit_trail`
+
+Optional:
+
+- `windows_deploy`, `msbuild`, `powershell`, `wsl`
+- `docker`, `cuda`
+- `llm_infer` (Ollama or NVIDIA)
+
+Windows probes use `where.exe` / `cmd.exe` so they work under PowerShell or cmd over SSH.
 
 ## Scheduler Matching Rules
 
@@ -206,15 +296,32 @@ Example iOS build request constraints:
 - optional preference: `codesign`, `fastlane`
 - optional labels: region, team, environment
 
-Example IoT deploy request constraints:
+Example Linux app / IoT deploy request constraints:
 
-- required: `cicd_runner`, `linux_runner`, `iot_toolchain`, `iot_deploy`, `artifact_upload`
+- required: `cicd_runner`, `linux_runner`, `linux_deploy` (or `iot_deploy`)
 - board specific: `esp32` or `rpi`
+- GPU: `cuda`
+
+Example Windows app deploy request constraints:
+
+- required: `ssh`, `windows_runner`, `windows_deploy`
+- optional: `msbuild`, `wsl`, `cuda`
 
 Example quantum program request constraints:
 
 - required: `cicd_runner`, `linux_runner`, `veeros_host`, `quantum_sdk`
 - backend specific: `quantum_simulator` (virtual) or `quantum_hardware` (real)
+
+Example M6 Mini ML cluster request constraints:
+
+- required: `mlx`, `llm_infer` (any `generic` online SSH host)
+- pipeline shard: `pipeline_pp`
+- training: `llm_train`
+- optional preference: `ane`, `unified_memory_gb >= 32` (probe hardware, not a capability string)
+
+Example macOS app deploy request constraints:
+
+- required: `ssh`, `macos_runner`, `macos_deploy`, `codesign`
 
 ## Public API Contract Guidance
 
@@ -248,7 +355,7 @@ Before introducing a new capability:
 
 ## Versioning
 
-Taxonomy version: `v1` (initial).
+Taxonomy version: `v1.1` (ML cluster capabilities).
 
 Any breaking rename requires:
 

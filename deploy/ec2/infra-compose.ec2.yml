@@ -1,0 +1,50 @@
+# EdgeFabric infrastructure on EC2 (localhost only — shared with eGenie host).
+# Postgres uses 5435 (5432 = host Postgres for eGenie/AuthBuddy).
+# Started by deploy-edgefabric.sh via: docker compose -f deploy/ec2/infra-compose.ec2.yml up -d
+
+name: edgefabric
+
+services:
+  postgres:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: edgefabric
+      POSTGRES_PASSWORD: edgefabric
+      POSTGRES_DB: edgefabric
+    ports:
+      - "127.0.0.1:5435:5432"
+    volumes:
+      - edgefabric-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U edgefabric"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-bookworm
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  nats:
+    image: nats:2-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
+    command: ["--jetstream", "--http_port", "8222"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8222/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  edgefabric-pgdata:

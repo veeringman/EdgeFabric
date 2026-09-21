@@ -1,8 +1,10 @@
 use leptos::prelude::*;
+use std::collections::HashMap;
 
 use crate::api::{self, AgentListResponse, CreateVirtualIotBackendRequest, UpdateVirtualIotBackendRequest,
     VirtualIotBackend, VirtualIotBackendEnvelope, VirtualIotBackendListResponse};
-use crate::board_config::controllers;
+use crate::board_config::{controllers, sensor_profile};
+use crate::components::board_twin_3d::BoardTwin3d;
 use crate::components::status_badge::StatusBadge;
 
 fn extract_host_from_url(url: &str) -> Option<String> {
@@ -77,6 +79,33 @@ pub fn VirtualIotBackendsPage() -> impl IntoView {
     let (auto_start, set_auto_start) = signal(true);
     let (saving, set_saving) = signal(false);
     let (error, set_error) = signal(Option::<String>::None);
+
+    // ── 3D twin preview (first selected controller + representative sensors) ──
+    let (twin_controller, set_twin_controller) = signal("esp32-devkit".to_string());
+    let (twin_sensors, _) = signal(vec![
+        "temperature".to_string(),
+        "humidity".to_string(),
+        "accel_xyz".to_string(),
+        "ambient_light".to_string(),
+        "gps".to_string(),
+        "battery_voltage".to_string(),
+        "wifi_rssi".to_string(),
+    ]);
+    let (twin_values, set_twin_values) = signal(HashMap::<String, String>::new());
+    Effect::new(move || {
+        let first = selected_controllers
+            .get()
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "esp32-devkit".to_string());
+        set_twin_controller.set(first);
+        let map: HashMap<String, String> = twin_sensors
+            .get_untracked()
+            .iter()
+            .map(|s| (s.clone(), sensor_profile(s).preview.clone()))
+            .collect();
+        set_twin_values.set(map);
+    });
 
     // ── edit modal ───────────────────────────────────────────────────────────
     let editing: RwSignal<Option<VirtualIotBackend>> = RwSignal::new(None);
@@ -346,6 +375,16 @@ pub fn VirtualIotBackendsPage() -> impl IntoView {
                                 }
                             }).collect::<Vec<_>>()}
                         </div>
+                    </div>
+                    <div class="form-group">
+                        <label>"3D Twin Preview"</label>
+                        <BoardTwin3d
+                            controller=twin_controller
+                            enabled_sensors=twin_sensors
+                            sensor_values=twin_values
+                            mini=true
+                        />
+                        <small style="color:var(--text-muted);">"Live preview of the first selected controller."</small>
                     </div>
                     <div class="form-group">
                         <label>"Region"</label>

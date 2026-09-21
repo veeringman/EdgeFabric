@@ -1,0 +1,28 @@
+[package]
+name = "ef-ml-worker"
+description = "EdgeFabric ML worker for M6 Mini LAN pipeline inference and training"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "ef-ml-worker"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+uuid = { workspace = true }
+reqwest = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+bytes = { workspace = true }
+tower-http = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

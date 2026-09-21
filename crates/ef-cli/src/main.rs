@@ -49,6 +49,36 @@ enum Commands {
 
     /// Check API server health
     Health,
+
+    /// Enroll this machine as a generic host worker (macOS / Linux / Windows)
+    #[command(subcommand)]
+    Host(HostCmd),
+}
+
+#[derive(Subcommand)]
+enum HostCmd {
+    /// Register this computer with EdgeFabric (SSH worker)
+    Join {
+        /// Tenant API key
+        #[arg(long)]
+        api_key: String,
+        /// Display / node name (defaults to hostname)
+        #[arg(long)]
+        name: Option<String>,
+        /// SSH username EdgeFabric should use
+        #[arg(long)]
+        ssh_user: Option<String>,
+        /// Local sshd port
+        #[arg(long, default_value_t = 22)]
+        ssh_port: u16,
+        #[arg(long, default_value = "default")]
+        region: String,
+        /// Advertise ML capabilities (start ef-ml-worker separately)
+        #[arg(long)]
+        with_ml: bool,
+    },
+    /// Show local join state
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -168,6 +198,33 @@ async fn main() -> Result<()> {
         Commands::Health => {
             commands::health::check(base_url, format).await?;
         }
+        Commands::Host(sub) => match sub {
+            HostCmd::Join {
+                api_key,
+                name,
+                ssh_user,
+                ssh_port,
+                region,
+                with_ml,
+            } => {
+                commands::host::join(
+                    base_url,
+                    commands::host::JoinOpts {
+                        api_key,
+                        name,
+                        ssh_user,
+                        ssh_port,
+                        region,
+                        with_ml,
+                    },
+                    format,
+                )
+                .await?;
+            }
+            HostCmd::Status => {
+                commands::host::status(base_url, format).await?;
+            }
+        },
         Commands::Devices(sub) => {
             let api = client::ApiClient::new(base_url)?;
             match sub {

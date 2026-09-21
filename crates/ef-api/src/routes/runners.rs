@@ -72,11 +72,112 @@ fn default_region() -> String { "default".to_string() }
 fn default_max_concurrency() -> i32 { 1 }
 fn default_true() -> bool { true }
 
+fn normalize_runner_class(raw: &str) -> String {
+    match raw.trim() {
+        "" | "mlx-cluster" | "ios" | "macos" | "macos-runner" | "linux" | "linux-runner"
+        | "windows" | "windows-runner" => "generic".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn normalize_host_os(raw: &str) -> String {
+    let s = raw.trim().to_ascii_lowercase();
+    if s.contains("darwin") || s.contains("mac") {
+        "macos".to_string()
+    } else if s.contains("win") || s.contains("mingw") || s.contains("cygwin") || s.contains("msys")
+    {
+        "windows".to_string()
+    } else {
+        "linux".to_string()
+    }
+}
+
+fn merge_caps(dst: &mut Vec<String>, extra: &[&str]) {
+    for cap in extra {
+        if !dst.iter().any(|c| c == cap) {
+            dst.push((*cap).to_string());
+        }
+    }
+    dst.sort();
+    dst.dedup();
+}
+
+fn seed_macos_host_capabilities(caps: &mut Vec<String>) {
+    merge_caps(
+        caps,
+        &[
+            "ssh",
+            "cicd_runner",
+            "macos_runner",
+            "artifact_upload",
+            "workspace_bootstrap",
+        ],
+    );
+}
+
+fn seed_linux_host_capabilities(caps: &mut Vec<String>) {
+    merge_caps(
+        caps,
+        &[
+            "ssh",
+            "cicd_runner",
+            "linux_runner",
+            "artifact_upload",
+            "workspace_bootstrap",
+        ],
+    );
+}
+
+fn seed_windows_host_capabilities(caps: &mut Vec<String>) {
+    merge_caps(
+        caps,
+        &[
+            "ssh",
+            "cicd_runner",
+            "windows_runner",
+            "artifact_upload",
+            "workspace_bootstrap",
+        ],
+    );
+}
+
+fn seed_host_capabilities_for_os(host_os: &str, caps: &mut Vec<String>) {
+    match host_os {
+        "macos" => seed_macos_host_capabilities(caps),
+        "windows" => seed_windows_host_capabilities(caps),
+        _ => seed_linux_host_capabilities(caps),
+    }
+}
+
+fn classify_uname(os_name: &str) -> Option<&'static str> {
+    let s = os_name.to_ascii_lowercase();
+    if s.contains("darwin") {
+        Some("macos")
+    } else if s.contains("linux") {
+        Some("linux")
+    } else if s.contains("mingw")
+        || s.contains("cygwin")
+        || s.contains("msys")
+        || s.contains("windows")
+        || s.contains("microsoft")
+    {
+        Some("windows")
+    } else {
+        None
+    }
+}
+
 fn parse_host_port_from_serial(serial: &str) -> Option<(String, i32)> {
     let s = serial.trim();
     if s.is_empty() {
         return None;
     }
+
+    let s = if let Some((_, rest)) = s.rsplit_once('@') {
+        rest
+    } else {
+        s
+    };
 
     if let Some((h, p)) = s.rsplit_once(':') {
         if !h.is_empty() {
@@ -131,8 +232,6 @@ async fn ssh_exec_with_port(host: &str, port: i32, user: &str, script: &str) -> 
                 "-p",
                 &port_s,
                 &target,
-                "sh",
-                "-lc",
                 script,
             ])
             .output(),
@@ -231,27 +330,103 @@ pub async fn register_runner(
     }
     merged_capabilities.sort();
     merged_capabilities.dedup();
+    let runner_class = normalize_runner_class(&body.runner_class);
+    let host_os = normalize_host_os(&body.host_os);
+    seed_host_capabilities_for_os(&host_os, &mut merged_capabilities);
+    if body
+        .capabilities
+        .iter()
+        .any(|c| c == "mlx" || c == "llm_infer")
+        || body.runner_class.trim() == "mlx-cluster"
+    {
+        merge_caps(
+            &mut merged_capabilities,
+            &["ssh", "mlx", "llm_infer", "pipeline_pp"],
+        );
+        if host_os == "macos" {
+            merge_caps(&mut merged_capabilities, &["ane"]);
+        }
+    }
 
-    let runner = RunnerRepo::create(
-        &state.pool,
-        auth.tenant_id,
-        body.device_id,
-        body.name.trim(),
-        body.runner_class.trim(),
-        &host,
-        port,
-        body.host_os.trim(),
-        body.architecture.trim(),
-        body.region.trim(),
-        &body.labels,
-        &merged_capabilities,
-        body.max_concurrency,
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!(tenant_id = %auth.tenant_id, error = %e, "Failed to register runner");
-        ApiError::internal("Failed to register runner")
-    })?;
+    let existing = if let Some(device_id) = body.device_id {
+        RunnerRepo::find_by_device_id(&state.pool, device_id)
+            .await
+            .map_err(|_| ApiError::internal("Database error"))?
+    } else {
+        None
+    };
+    let existing = match existing {
+        Some(row) => Some(row),
+        None => RunnerRepo::find_by_host_port(&state.pool, auth.tenant_id, &host, port)
+            .await
+            .map_err(|_| ApiError::internal("Database error"))?,
+    };
+
+    let runner = if let Some(existing) = existing {
+        RunnerRepo::update_registration(
+            &state.pool,
+            existing.id,
+            body.device_id,
+            body.name.trim(),
+            &runner_class,
+            &host,
+            port,
+            &host_os,
+            body.architecture.trim(),
+            body.region.trim(),
+            &body.labels,
+            &merged_capabilities,
+            body.max_concurrency,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!(tenant_id = %auth.tenant_id, error = %e, "Failed to update runner");
+            ApiError::internal("Failed to register runner")
+        })?
+        .unwrap_or(existing)
+    } else {
+        RunnerRepo::create(
+            &state.pool,
+            auth.tenant_id,
+            body.device_id,
+            body.name.trim(),
+            &runner_class,
+            &host,
+            port,
+            &host_os,
+            body.architecture.trim(),
+            body.region.trim(),
+            &body.labels,
+            &merged_capabilities,
+            body.max_concurrency,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!(tenant_id = %auth.tenant_id, error = %e, "Failed to register runner");
+            ApiError::internal("Failed to register runner")
+        })?
+    };
+
+    let mut runner = runner;
+    if runner.device_id.is_none() {
+        let serial = format!("{}:{}", host, port);
+        if let Ok(dev) = DeviceRepo::upsert(
+            &state.pool,
+            body.name.trim(),
+            Some(serial.as_str()),
+            "ssh",
+            &host_os,
+            "real",
+            body.region.trim(),
+            &merged_capabilities,
+        )
+        .await
+        {
+            if let Ok(Some(linked)) = RunnerRepo::link_device(&state.pool, runner.id, dev.id).await {
+                runner = linked;
+            }
+        }
+    }
 
     Ok((StatusCode::CREATED, Json(json!({ "runner": runner }))))
 }
@@ -361,6 +536,9 @@ pub async fn probe_runner(
             "admin".to_string(),
             "root".to_string(),
             "user".to_string(),
+            "ubuntu".to_string(),
+            "ec2-user".to_string(),
+            "Administrator".to_string(),
         ]
     };
 
@@ -397,24 +575,30 @@ pub async fn probe_runner(
     }
 
     if let Some(user) = ssh_authenticated_as.clone() {
-        let os_out = ssh_exec_with_port(&runner.host, runner.port, &user, "uname -s").await;
+        let os_out = ssh_exec_with_port(
+            &runner.host,
+            runner.port,
+            &user,
+            "uname -s 2>/dev/null || cmd.exe /c ver",
+        )
+        .await;
         let os_name = os_out
             .get("stdout")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .trim()
             .to_ascii_lowercase();
-
-        if os_name.contains("darwin") {
-            detected_host_os = "macos".to_string();
-        } else if os_name.contains("linux") {
-            detected_host_os = "linux".to_string();
+        if let Some(os) = classify_uname(&os_name) {
+            detected_host_os = os.to_string();
         }
 
-        let checks = [
+        let unix_checks = [
             ("ssh", "command -v ssh >/dev/null 2>&1"),
             ("cicd_runner", "command -v sh >/dev/null 2>&1"),
             ("linux_runner", "uname -s | grep -qi linux"),
+            ("linux_deploy", "command -v systemctl >/dev/null 2>&1 || command -v scp >/dev/null 2>&1"),
+            ("docker", "command -v docker >/dev/null 2>&1"),
+            ("cuda", "command -v nvidia-smi >/dev/null 2>&1"),
             ("xcode", "command -v xcodebuild >/dev/null 2>&1 && xcodebuild -version | head -n 2"),
             ("simctl", "command -v xcrun >/dev/null 2>&1 && xcrun simctl help >/dev/null 2>&1"),
             ("fastlane", "command -v fastlane >/dev/null 2>&1 && fastlane --version | head -n 1"),
@@ -428,9 +612,36 @@ pub async fn probe_runner(
             ("quantum_sdk", "command -v python3 >/dev/null 2>&1 && python3 -c 'import qiskit' >/dev/null 2>&1"),
             ("quantum_simulator", "command -v python3 >/dev/null 2>&1 && python3 -c 'import qiskit_aer' >/dev/null 2>&1"),
             ("veeros_host", "command -v veerctl >/dev/null 2>&1 || command -v virsh >/dev/null 2>&1 || command -v qemu-system-x86_64 >/dev/null 2>&1"),
-            ("artifact_upload", "command -v scp >/dev/null 2>&1"),
+            ("artifact_upload", "command -v scp >/dev/null 2>&1 || command -v git >/dev/null 2>&1"),
             ("workspace_bootstrap", "command -v git >/dev/null 2>&1"),
+            ("mlx", "command -v python3 >/dev/null 2>&1 && python3 -c 'import mlx' >/dev/null 2>&1"),
+            ("ane", "uname -s | grep -qi darwin && sysctl -n hw.optional.arm64 2>/dev/null | grep -q 1"),
+            ("llm_infer", "command -v ef-ml-worker >/dev/null 2>&1 || command -v ollama >/dev/null 2>&1 || (command -v python3 >/dev/null 2>&1 && python3 -c 'import mlx' >/dev/null 2>&1)"),
+            ("llm_train", "command -v python3 >/dev/null 2>&1 && (python3 -c 'import mlx' >/dev/null 2>&1 || python3 -c 'import torch' >/dev/null 2>&1)"),
+            ("pipeline_pp", "command -v ef-ml-worker >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1"),
+            ("macos_runner", "uname -s | grep -qi darwin"),
+            ("macos_deploy", "uname -s | grep -qi darwin && command -v xcodebuild >/dev/null 2>&1"),
         ];
+        let windows_checks = [
+            ("ssh", "where.exe ssh"),
+            ("cicd_runner", "where.exe powershell"),
+            ("windows_runner", "cmd.exe /c ver"),
+            ("windows_deploy", "where.exe dotnet"),
+            ("msbuild", "where.exe msbuild"),
+            ("powershell", "where.exe powershell"),
+            ("docker", "where.exe docker"),
+            ("cuda", "where.exe nvidia-smi"),
+            ("wsl", "where.exe wsl"),
+            ("artifact_upload", "where.exe git"),
+            ("workspace_bootstrap", "where.exe git"),
+            ("llm_infer", "where.exe ollama"),
+        ];
+
+        let checks: &[(&str, &str)] = if detected_host_os == "windows" {
+            &windows_checks
+        } else {
+            &unix_checks
+        };
 
         for (capability, cmd) in checks {
             let out = ssh_exec_with_port(&runner.host, runner.port, &user, cmd).await;
@@ -440,7 +651,7 @@ pub async fn probe_runner(
                 .unwrap_or(false);
 
             if ok && !detected_capabilities.iter().any(|c| c == capability) {
-                detected_capabilities.push(capability.to_string());
+                detected_capabilities.push((*capability).to_string());
             }
 
             tool_checks.push(json!({
@@ -458,16 +669,139 @@ pub async fn probe_runner(
     detected_capabilities.sort();
     detected_capabilities.dedup();
 
+    let mut hardware = json!({});
+    if let Some(user) = ssh_authenticated_as.clone() {
+        let hw_script = r#"python3 - <<'PY'
+import json, os, platform, re, shutil, subprocess
+def sh(cmd):
+    try:
+        return subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL, text=True, timeout=8).strip()
+    except Exception:
+        return ""
+sysname = platform.system().lower()
+chip = platform.processor() or platform.machine()
+cpu = os.cpu_count()
+mem_gb = None
+gpu = None
+ane = None
+link = 1000
+if sysname == "darwin":
+    chip = sh("sysctl -n machdep.cpu.brand_string") or chip
+    mem = sh("sysctl -n hw.memsize")
+    try:
+        mem_gb = round(int(mem) / (1024**3)) if mem else None
+    except ValueError:
+        mem_gb = None
+    cpu = sh("sysctl -n hw.ncpu") or cpu
+    low = (chip or "").lower()
+    if "m6" in low: gpu, ane = 12, 32
+    elif "m5" in low: gpu, ane = 10, 16
+    elif "m4" in low: gpu, ane = 10, 16
+    elif "apple" in low or platform.machine() == "arm64": gpu, ane = 8, 16
+    media = sh("ifconfig -a")
+    m = re.search(r"media:.*\((\d+)(?:G|g)ase-T", media)
+    if m:
+        try: link = int(m.group(1)) * 1000
+        except ValueError: pass
+    m2 = re.search(r"(2500|1000|10000)baseT", media, re.I)
+    if m2:
+        try: link = int(m2.group(1))
+        except ValueError: pass
+elif sysname == "linux":
+    mem = sh("awk '/MemTotal/ {print $2}' /proc/meminfo")
+    try:
+        mem_gb = round(int(mem) / (1024**2)) if mem else None
+    except ValueError:
+        mem_gb = None
+    cpu = sh("nproc") or cpu
+    chip = sh("lscpu | awk -F: '/Model name/ {print $2; exit}'") or chip
+    nvs = sh("nvidia-smi --query-gpu=count --format=csv,noheader 2>/dev/null | head -1")
+    try:
+        gpu = int(nvs.strip()) if nvs.strip() else None
+    except ValueError:
+        gpu = None
+    etht = sh("cat /sys/class/net/*/speed 2>/dev/null | sort -n | tail -1")
+    try:
+        if etht: link = int(etht)
+    except ValueError:
+        pass
+else:
+    mem = sh("powershell -NoProfile -Command \"[math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1GB)\"")
+    try:
+        mem_gb = int(mem) if mem else None
+    except ValueError:
+        mem_gb = None
+    chip = sh("powershell -NoProfile -Command \"(Get-CimInstance Win32_Processor).Name\"") or chip
+    nvs = sh("nvidia-smi --query-gpu=count --format=csv,noheader")
+    try:
+        gpu = int(nvs.strip().splitlines()[0]) if nvs.strip() else None
+    except Exception:
+        gpu = None
+mlx_ver = ""
+try:
+    import mlx
+    mlx_ver = getattr(mlx, "__version__", "present")
+except Exception:
+    pass
+print(json.dumps({
+    "chip": (chip or "unknown").strip(),
+    "cpu_cores": int(cpu) if str(cpu).isdigit() else None,
+    "gpu_cores": gpu,
+    "ane_cores": ane,
+    "unified_memory_gb": mem_gb,
+    "link_mbps": link,
+    "mlx_version": mlx_ver,
+    "worker_present": shutil.which("ef-ml-worker") is not None,
+    "arch": platform.machine(),
+    "os": platform.system(),
+}))
+PY"#;
+        let hw_out = ssh_exec_with_port(&runner.host, runner.port, &user, hw_script).await;
+        if let Some(stdout) = hw_out.get("stdout").and_then(|v| v.as_str()) {
+            if let Ok(parsed) = serde_json::from_str::<Value>(stdout.trim()) {
+                hardware = parsed;
+            }
+        }
+        seed_host_capabilities_for_os(&detected_host_os, &mut detected_capabilities);
+        if detected_host_os == "macos" && detected_capabilities.iter().any(|c| c == "xcode") {
+            merge_caps(&mut detected_capabilities, &["macos_deploy"]);
+        }
+        if detected_host_os == "linux" && detected_capabilities.iter().any(|c| c == "iot_deploy" || c == "docker") {
+            merge_caps(&mut detected_capabilities, &["linux_deploy"]);
+        }
+        if detected_host_os == "windows"
+            && detected_capabilities
+                .iter()
+                .any(|c| c == "msbuild" || c == "dotnet" || c == "windows_deploy")
+        {
+            merge_caps(&mut detected_capabilities, &["windows_deploy"]);
+        }
+        if detected_capabilities
+            .iter()
+            .any(|c| c == "mlx" || c == "llm_infer")
+            || runner.runner_class == "mlx-cluster"
+        {
+            merge_caps(
+                &mut detected_capabilities,
+                &["llm_infer", "pipeline_pp"],
+            );
+            if detected_host_os == "macos" {
+                merge_caps(&mut detected_capabilities, &["mlx", "ane"]);
+            }
+        }
+    }
+
     let probe_result = json!({
         "target": target,
         "reachable": reachable,
-        "probe_type": "tcp_connect+ssh_toolchain",
+        "probe_type": "tcp_connect+ssh_host_probe",
         "requested_user": requested_user,
         "ssh_authenticated_as": ssh_authenticated_as,
         "auth_attempts": auth_attempts,
         "checks": tool_checks,
         "detected_host_os": detected_host_os,
         "detected_capabilities": detected_capabilities,
+        "hardware": hardware,
     });
 
     let status = if runner.drained {
@@ -492,6 +826,52 @@ pub async fn probe_runner(
             ApiError::internal("Failed to update probe result")
         })?
         .ok_or_else(|| ApiError::not_found(format!("Runner {id} not found")))?;
+
+    if let Some(hw) = probe_result.get("hardware") {
+        if detected_capabilities
+            .iter()
+            .any(|c| {
+                c == "mlx"
+                    || c == "llm_infer"
+                    || c == "macos_runner"
+                    || c == "linux_runner"
+                    || c == "windows_runner"
+                    || c == "cuda"
+            })
+        {
+            let chip = hw.get("chip").and_then(|v| v.as_str()).unwrap_or("");
+            let cpu = hw.get("cpu_cores").and_then(|v| v.as_i64()).map(|n| n as i32);
+            let gpu = hw.get("gpu_cores").and_then(|v| v.as_i64()).map(|n| n as i32);
+            let ane = hw.get("ane_cores").and_then(|v| v.as_i64()).map(|n| n as i32);
+            let mem = hw
+                .get("unified_memory_gb")
+                .and_then(|v| v.as_i64())
+                .map(|n| n as i32);
+            let link = hw
+                .get("link_mbps")
+                .and_then(|v| v.as_i64())
+                .map(|n| n as i32)
+                .unwrap_or(2500);
+            let mlx_ver = hw.get("mlx_version").and_then(|v| v.as_str()).unwrap_or("");
+            if let Some(tenant_id) = updated.tenant_id {
+                let _ = ef_db::repo::ml::MlRepo::upsert_node(
+                    &state.pool,
+                    tenant_id,
+                    id,
+                    chip,
+                    cpu,
+                    gpu,
+                    ane,
+                    mem,
+                    link,
+                    mlx_ver,
+                    &updated.labels,
+                    status,
+                )
+                .await;
+            }
+        }
+    }
 
     Ok(Json(json!({
         "runner": updated,
@@ -539,6 +919,7 @@ pub async fn allocate_runner_lease(
         required_capabilities: body.required_capabilities,
         required_labels: body.required_labels,
         lease_ttl_seconds: body.lease_ttl_seconds.unwrap_or(600),
+        runner_class: None,
     };
 
     let (runner, lease) = scheduler
@@ -574,4 +955,48 @@ pub async fn release_runner_lease(
         "lease_id": lease_id,
         "status": "released"
     })))
+}
+
+pub(crate) async fn ensure_ssh_host_runner(
+    pool: &sqlx::PgPool,
+    tenant_id: Uuid,
+    device: &DeviceRow,
+) -> Result<Option<ef_db::repo::runner::RunnerRow>, sqlx::Error> {
+    if device.os != "ssh" && device.os != "veeros" {
+        return Ok(None);
+    }
+    if let Some(existing) = RunnerRepo::find_by_device_id(pool, device.id).await? {
+        return Ok(Some(existing));
+    }
+    let Some((host, port)) = derive_host_port_from_device(device) else {
+        return Ok(None);
+    };
+    if let Some(existing) = RunnerRepo::find_by_host_port(pool, tenant_id, &host, port).await? {
+        if existing.device_id.is_none() {
+            return RunnerRepo::link_device(pool, existing.id, device.id).await;
+        }
+        return Ok(Some(existing));
+    }
+    let os_ver = device.os_version.to_ascii_lowercase();
+    let host_os = normalize_host_os(&os_ver);
+    let mut caps = device.capabilities.clone();
+    seed_host_capabilities_for_os(&host_os, &mut caps);
+    let concurrency = if host_os == "linux" { 2 } else { 2 };
+    let runner = RunnerRepo::create(
+        pool,
+        tenant_id,
+        Some(device.id),
+        &device.name,
+        "generic",
+        &host,
+        port,
+        &host_os,
+        "",
+        &device.region,
+        &[],
+        &caps,
+        concurrency,
+    )
+    .await?;
+    Ok(Some(runner))
 }

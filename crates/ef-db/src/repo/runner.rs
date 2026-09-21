@@ -102,6 +102,116 @@ impl RunnerRepo {
         .await
     }
 
+    pub async fn find_by_device_id(
+        pool: &PgPool,
+        device_id: Uuid,
+    ) -> Result<Option<RunnerRow>, sqlx::Error> {
+        sqlx::query_as::<_, RunnerRow>(
+            r#"SELECT id, tenant_id, device_id, name, runner_class, host, port, host_os, architecture,
+                      region, labels, capabilities, max_concurrency, drained, status,
+                      health, last_probe_at, last_probe_result, created_at, updated_at
+               FROM runners
+               WHERE device_id = $1
+               ORDER BY updated_at DESC
+               LIMIT 1"#,
+        )
+        .bind(device_id)
+        .fetch_optional(pool)
+        .await
+    }
+
+    pub async fn find_by_host_port(
+        pool: &PgPool,
+        tenant_id: Uuid,
+        host: &str,
+        port: i32,
+    ) -> Result<Option<RunnerRow>, sqlx::Error> {
+        sqlx::query_as::<_, RunnerRow>(
+            r#"SELECT id, tenant_id, device_id, name, runner_class, host, port, host_os, architecture,
+                      region, labels, capabilities, max_concurrency, drained, status,
+                      health, last_probe_at, last_probe_result, created_at, updated_at
+               FROM runners
+               WHERE (tenant_id = $1 OR tenant_id IS NULL)
+                 AND host = $2 AND port = $3
+               ORDER BY updated_at DESC
+               LIMIT 1"#,
+        )
+        .bind(tenant_id)
+        .bind(host)
+        .bind(port)
+        .fetch_optional(pool)
+        .await
+    }
+
+    pub async fn update_registration(
+        pool: &PgPool,
+        id: Uuid,
+        device_id: Option<Uuid>,
+        name: &str,
+        runner_class: &str,
+        host: &str,
+        port: i32,
+        host_os: &str,
+        architecture: &str,
+        region: &str,
+        labels: &[String],
+        capabilities: &[String],
+        max_concurrency: i32,
+    ) -> Result<Option<RunnerRow>, sqlx::Error> {
+        sqlx::query_as::<_, RunnerRow>(
+            r#"UPDATE runners SET
+                   device_id = COALESCE($2, device_id),
+                   name = $3,
+                   runner_class = $4,
+                   host = $5,
+                   port = $6,
+                   host_os = $7,
+                   architecture = CASE WHEN $8 = '' THEN architecture ELSE $8 END,
+                   region = $9,
+                   labels = $10,
+                   capabilities = $11,
+                   max_concurrency = $12,
+                   drained = FALSE,
+                   status = 'online'
+               WHERE id = $1
+               RETURNING id, tenant_id, device_id, name, runner_class, host, port, host_os, architecture,
+                         region, labels, capabilities, max_concurrency, drained, status,
+                         health, last_probe_at, last_probe_result, created_at, updated_at"#,
+        )
+        .bind(id)
+        .bind(device_id)
+        .bind(name)
+        .bind(runner_class)
+        .bind(host)
+        .bind(port)
+        .bind(host_os)
+        .bind(architecture)
+        .bind(region)
+        .bind(labels)
+        .bind(capabilities)
+        .bind(max_concurrency)
+        .fetch_optional(pool)
+        .await
+    }
+
+    pub async fn link_device(
+        pool: &PgPool,
+        id: Uuid,
+        device_id: Uuid,
+    ) -> Result<Option<RunnerRow>, sqlx::Error> {
+        sqlx::query_as::<_, RunnerRow>(
+            r#"UPDATE runners SET device_id = $2
+               WHERE id = $1
+               RETURNING id, tenant_id, device_id, name, runner_class, host, port, host_os, architecture,
+                         region, labels, capabilities, max_concurrency, drained, status,
+                         health, last_probe_at, last_probe_result, created_at, updated_at"#,
+        )
+        .bind(id)
+        .bind(device_id)
+        .fetch_optional(pool)
+        .await
+    }
+
     pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<RunnerRow>, sqlx::Error> {
         sqlx::query_as::<_, RunnerRow>(
             r#"SELECT id, tenant_id, device_id, name, runner_class, host, port, host_os, architecture,
@@ -196,6 +306,7 @@ impl RunnerRepo {
         region: Option<&str>,
         build_job_id: Option<Uuid>,
         ttl_seconds: i64,
+        runner_class: Option<&str>,
     ) -> Result<Option<(RunnerRow, RunnerLeaseRow)>, sqlx::Error> {
         let cap_filter: Option<Vec<String>> = if required_capabilities.is_empty() {
             None
@@ -220,6 +331,7 @@ impl RunnerRepo {
                       AND ($2::text IS NULL OR r.region = $2)
                       AND ($3::text[] IS NULL OR r.capabilities @> $3::text[])
                       AND ($4::text[] IS NULL OR r.labels @> $4::text[])
+                      AND ($5::text IS NULL OR r.runner_class = $5)
                     ORDER BY r.last_probe_at DESC NULLS LAST, r.created_at ASC
                     FOR UPDATE SKIP LOCKED
                 )
@@ -239,6 +351,7 @@ impl RunnerRepo {
         .bind(region)
         .bind(cap_filter)
         .bind(label_filter)
+        .bind(runner_class)
         .fetch_optional(&mut *tx)
         .await?;
 
@@ -293,6 +406,61 @@ impl RunnerRepo {
         .fetch_one(&mut *tx)
         .await?;
 
+        tx.commit().await?;
+        Ok(Some((runner, lease)))
+    }
+
+    pub async fn acquire_lease_for_runner(
+        pool: &PgPool,
+        tenant_id: Uuid,
+        runner_id: Uuid,
+        ttl_seconds: i64,
+    ) -> Result<Option<(RunnerRow, RunnerLeaseRow)>, sqlx::Error> {
+        let mut tx = pool.begin().await?;
+        let runner = sqlx::query_as::<_, RunnerRow>(
+            r#"SELECT id, tenant_id, device_id, name, runner_class, host, port, host_os, architecture,
+                      region, labels, capabilities, max_concurrency, drained, status,
+                      health, last_probe_at, last_probe_result, created_at, updated_at
+               FROM runners
+               WHERE id = $1 AND (tenant_id = $2 OR tenant_id IS NULL)
+                 AND status = 'online' AND drained = FALSE
+               FOR UPDATE SKIP LOCKED"#,
+        )
+        .bind(runner_id)
+        .bind(tenant_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(runner) = runner else {
+            tx.commit().await?;
+            return Ok(None);
+        };
+        let active: i64 = sqlx::query_scalar(
+            r#"SELECT COUNT(*)::bigint FROM runner_leases
+               WHERE runner_id = $1 AND status = 'active'::runner_lease_status
+                 AND (expires_at IS NULL OR expires_at > NOW())"#,
+        )
+        .bind(runner.id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if active >= i64::from(runner.max_concurrency) {
+            tx.commit().await?;
+            return Ok(None);
+        }
+        let lease = sqlx::query_as::<_, RunnerLeaseRow>(
+            r#"INSERT INTO runner_leases (runner_id, tenant_id, status, expires_at, metadata)
+               VALUES (
+                   $1, $2, 'active'::runner_lease_status,
+                   CASE WHEN $3::bigint > 0 THEN NOW() + make_interval(secs => $3::int) ELSE NULL END,
+                   jsonb_build_object('purpose', 'host-lease')
+               )
+               RETURNING id, runner_id, tenant_id, build_job_id, status::text,
+                         acquired_at, expires_at, released_at, metadata"#,
+        )
+        .bind(runner.id)
+        .bind(tenant_id)
+        .bind(ttl_seconds)
+        .fetch_one(&mut *tx)
+        .await?;
         tx.commit().await?;
         Ok(Some((runner, lease)))
     }

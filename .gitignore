@@ -14,12 +14,18 @@ Thumbs.db
 # Environment
 .env
 .env.local
+deploy/ec2/host.env
 *.pem
 *.key
 
 # Logs
 *.log
 /logs/
+
+# Packaged host-worker binaries
+/dist/
+crates/ef-dashboard/dist/downloads/
+
 
 # Deploy runtime
 /.pids/

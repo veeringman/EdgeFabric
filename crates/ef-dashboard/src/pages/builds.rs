@@ -702,7 +702,7 @@ fn SubmitBuildForm(
                             "xcode".into(),
                             "artifact_upload".into(),
                         ],
-                        required_runner_labels: vec!["ios".into()],
+                        required_runner_labels: vec![],
                         lease_ttl_seconds: Some(1800),
                         ssh_user: ssh_user_value,
                     };

@@ -1,0 +1,154 @@
+/* EdgeFabric Dashboard — board-twin-3d
+   3D board twin (Three.js WebGL) with 2D SVG fallback. */
+
+.board-twin {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    width: 100%;
+}
+
+.board-twin-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.45rem 0.6rem;
+    border-radius: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    background: linear-gradient(180deg, rgba(19, 31, 48, 0.92), rgba(10, 19, 31, 0.96));
+}
+
+.board-twin-seg {
+    display: inline-flex;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.board-twin-seg button {
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: #8daac4;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.3rem 0.65rem;
+    cursor: pointer;
+}
+
+.board-twin-seg button.is-active {
+    background: rgba(56, 189, 248, 0.2);
+    color: #e0f2fe;
+}
+
+.board-twin-env {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.72rem;
+    color: #8daac4;
+}
+
+.board-twin-env input[type="range"] {
+    width: 110px;
+    accent-color: #38bdf8;
+}
+
+.board-twin-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.72rem;
+    color: #8daac4;
+    cursor: pointer;
+    user-select: none;
+}
+
+.board-twin-check input {
+    accent-color: #38bdf8;
+}
+
+.board-twin-canvas-wrap {
+    position: relative;
+    width: 100%;
+    min-height: 340px;
+    height: 420px;
+    border-radius: 16px;
+    overflow: hidden;
+    border: 1px solid rgba(125, 211, 252, 0.12);
+    background:
+        radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.1), transparent 45%),
+        linear-gradient(180deg, #060d17, #030810);
+}
+
+.board-twin-canvas-wrap.is-mini {
+    height: 300px;
+    min-height: 260px;
+}
+
+.board-twin-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+    cursor: grab;
+}
+
+.board-twin-canvas:active {
+    cursor: grabbing;
+}
+
+.board-twin-canvas canvas {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.board-twin-hint {
+    position: absolute;
+    left: 0.6rem;
+    bottom: 0.55rem;
+    font-size: 0.66rem;
+    letter-spacing: 0.04em;
+    color: rgba(141, 170, 196, 0.85);
+    background: rgba(4, 10, 18, 0.6);
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    padding: 0.2rem 0.5rem;
+    border-radius: 999px;
+    pointer-events: none;
+}
+
+.board-twin-badge {
+    position: absolute;
+    right: 0.6rem;
+    top: 0.55rem;
+    font-size: 0.64rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #67e8f9;
+    background: rgba(8, 20, 32, 0.72);
+    border: 1px solid rgba(103, 232, 249, 0.3);
+    padding: 0.22rem 0.55rem;
+    border-radius: 999px;
+    pointer-events: none;
+}
+
+.board-twin-fallback-note {
+    font-size: 0.7rem;
+    color: #8daac4;
+    padding: 0 0.2rem;
+}
+
+.board-twin-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    padding: 0 0.1rem;
+}
+
+.board-twin-legend .chip {
+    font-size: 0.66rem;
+}

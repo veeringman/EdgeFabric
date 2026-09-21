@@ -1,13 +1,16 @@
 use leptos::prelude::*;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::api::{
     self, AttachVirtualIotBackendRequest, CreateVirtualIotRequest, UpdateVirtualIotConfigRequest,
     VirtualIotBackendListResponse, VirtualIotConfigResponse, VirtualIotEventDefinition,
     VirtualIotEventStep,
 };
-use crate::board_config::{controller_accessories, controllers, find_controller, sensor_categories};
-use crate::components::board_layout::render_catalog_board_layout;
+use crate::board_config::{
+    controller_accessories, controllers, find_controller, sensor_categories, sensor_profile,
+};
+use crate::components::board_twin_3d::BoardTwin3d;
 
 fn extract_host_from_url(url: &str) -> Option<String> {
     let trimmed = url.trim();
@@ -656,8 +659,11 @@ pub fn VirtualIotDesignerPage() -> impl IntoView {
                     <div class="iot-designer-preview">
                         <div class="card">
                             <div class="card-header"><h2>"Board Preview"</h2></div>
-                            <div class="board-preview-container">
-                                <BoardPreview controller_type=controller_type/>
+                            <div class="board-preview-container" style="display:block;">
+                                <BoardPreview
+                                    controller_type=controller_type
+                                    enabled_sensors=enabled_sensors
+                                />
                             </div>
                             <div class="controller-specs">
                                 {move || {
@@ -1181,76 +1187,33 @@ pub fn VirtualIotDesignerPage() -> impl IntoView {
     }
 }
 
-/// Inline SVG board preview that swaps based on controller type.
+/// Board preview — realistic 3D twin (WebGL) with precise 2D fallback.
+/// Sensor nodes orbit the board; readings use catalog preview values until
+/// live telemetry arrives in the Live viewer.
 #[component]
-fn BoardPreview(controller_type: ReadSignal<String>) -> impl IntoView {
-    move || {
-        let ct = controller_type.get();
-        let profile = find_controller(&ct);
-        let chip_label = profile.chip_label.as_str();
-        let has_wifi = profile.has_wifi;
-        let pin_count = profile.pin_count;
-        let board_color = profile.board_color.as_str();
-        let board_title = profile.name.as_str();
-        view! {
-            <svg viewBox="0 0 260 360" class="board-shell-svg" xmlns="http://www.w3.org/2000/svg">
-                <defs>
-                    <linearGradient id="pcb-sheen" x1="0" y1="0" x2="1" y2="1">
-                        <stop offset="0%" stop-color="rgba(255,255,255,0.18)"/>
-                        <stop offset="28%" stop-color="rgba(255,255,255,0.02)"/>
-                        <stop offset="100%" stop-color="rgba(0,0,0,0.18)"/>
-                    </linearGradient>
-                    <pattern id="pcb-grid" width="18" height="18" patternUnits="userSpaceOnUse">
-                        <path d="M18 0H0V18" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="1"/>
-                    </pattern>
-                    <filter id="chip-shadow" x="-20%" y="-20%" width="140%" height="140%">
-                        <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="rgba(0,0,0,0.45)"/>
-                    </filter>
-                </defs>
+fn BoardPreview(
+    controller_type: ReadSignal<String>,
+    enabled_sensors: ReadSignal<Vec<String>>,
+) -> impl IntoView {
+    let (preview_values, set_preview_values) = signal(HashMap::<String, String>::new());
+    Effect::new(move || {
+        let map: HashMap<String, String> = enabled_sensors
+            .get()
+            .into_iter()
+            .map(|s| {
+                let preview = sensor_profile(&s).preview.clone();
+                (s, preview)
+            })
+            .collect();
+        set_preview_values.set(map);
+    });
 
-                <rect x="10" y="10" width="240" height="340" rx="18" fill={board_color} stroke="#111826" stroke-width="2"/>
-                <rect x="10" y="10" width="240" height="340" rx="18" fill="url(#pcb-grid)"/>
-                <rect x="10" y="10" width="240" height="340" rx="18" fill="url(#pcb-sheen)"/>
-
-                <circle cx="28" cy="28" r="6" fill="#0c111a" stroke="#818c99" stroke-width="1.2"/>
-                <circle cx="232" cy="28" r="6" fill="#0c111a" stroke="#818c99" stroke-width="1.2"/>
-                <circle cx="28" cy="332" r="6" fill="#0c111a" stroke="#818c99" stroke-width="1.2"/>
-                <circle cx="232" cy="332" r="6" fill="#0c111a" stroke="#818c99" stroke-width="1.2"/>
-
-                <text x="130" y="30" text-anchor="middle" fill="rgba(255,255,255,0.85)" font-size="8" font-family="sans-serif">{board_title}</text>
-
-                {if let Some(layout_view) = render_catalog_board_layout(profile, chip_label) {
-                    layout_view
-                } else {
-                    view! {
-                        <>
-                            <rect x="22" y="24" width="216" height="312" rx="12" fill={board_color} stroke="#1f2937" stroke-width="2"/>
-                            <rect x="70" y="90" width="120" height="82" rx="5" fill="#111827" stroke="#5f6872" stroke-width="1.2" filter="url(#chip-shadow)"/>
-                            <text x="130" y="134" text-anchor="middle" fill="#d1dae2" font-size="9" font-family="monospace">{chip_label}</text>
-                            {(0..pin_count).map(|i| {
-                                let y = 50 + i * 16;
-                                view! {
-                                    <>
-                                        <rect x="28" y={y} width="12" height="8" rx="1" fill="#d4af37"/>
-                                        <rect x="220" y={y} width="12" height="8" rx="1" fill="#d4af37"/>
-                                    </>
-                                }
-                            }).collect::<Vec<_>>()}
-                        </>
-                    }.into_any()
-                }}
-
-                {if has_wifi {
-                    view! {
-                        <g transform="translate(176, 44)">
-                            <rect x="0" y="0" width="54" height="18" rx="4" fill="#0b315a" stroke="#2b6cb0" stroke-width="0.8"/>
-                            <text x="27" y="12.5" text-anchor="middle" fill="#a5d8ff" font-size="7" font-family="sans-serif">"Wireless"</text>
-                        </g>
-                    }.into_any()
-                } else {
-                    view! { <g/> }.into_any()
-                }}
-            </svg>
-        }
+    view! {
+        <BoardTwin3d
+            controller=controller_type
+            enabled_sensors=enabled_sensors
+            sensor_values=preview_values
+            mini=true
+        />
     }
 }

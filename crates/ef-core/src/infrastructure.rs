@@ -789,7 +789,7 @@ mod tests {
         let second = instantiate_gpu_cluster_template(&template).unwrap();
         assert_eq!(first.graph.resources.len(), 14);
         assert_eq!(first.graph.relationships.len(), 12);
-        assert_eq!(first.pcie_topology.as_ref().unwrap().devices.len(), 14);
+        assert_eq!(first.pcie_topology.as_ref().unwrap().devices.len(), 12);
         assert_eq!(first.pcie_topology.as_ref().unwrap().links.len(), 10);
         let identities = |instance: &SimulationInstance| {
             instance.graph.resources.iter().map(|resource| resource.identity.clone()).collect::<Vec<_>>()

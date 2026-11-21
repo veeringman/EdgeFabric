@@ -428,6 +428,10 @@ fn project_simulation_scene(id: Uuid, instance: &SimulationInstance) -> Value {
         let geometry = instance.geometry.get(identity);
         let pose = instance.poses.get(identity);
         let bounds = instance.bounds.get(identity);
+        let geometry_asset_url = geometry.and_then(|asset| asset.asset_uri.strip_prefix("artifact://geometry/"))
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .filter(|_| geometry.is_some_and(|asset| asset.format.eq_ignore_ascii_case("glb")))
+            .map(|asset_id| format!("/api/v1/infrastructure/geometry-assets/{asset_id}/content"));
         json!({
             "id": identity,
             "kind": resource.kind,
@@ -441,6 +445,7 @@ fn project_simulation_scene(id: Uuid, instance: &SimulationInstance) -> Value {
             "transform": pose,
             "bounds_mm": bounds,
             "geometry": geometry,
+            "geometry_asset_url": geometry_asset_url,
             "render_hint": if geometry.is_some() { "asset" } else if bounds.is_some() { "bounds_primitive" } else { "unresolved" }
         })
     }).collect();

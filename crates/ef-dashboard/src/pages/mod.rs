@@ -1,3 +1,4 @@
+pub mod infrastructure_scene;
 pub mod admin;
 pub mod builds;
 pub mod development_ide;

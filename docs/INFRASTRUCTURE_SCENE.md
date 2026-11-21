@@ -73,15 +73,16 @@ The builder does not create vendor-specific HGX/DGX CAD geometry and does not cl
 
 The authenticated API exposes a starter catalog:
 
-- `GET /api/v1/infrastructure/hardware-profiles` — list built-in profiles and catalog metadata.
-- `GET /api/v1/infrastructure/hardware-profiles/{id}` — retrieve a profile by stable ID.
+- `GET /api/v1/infrastructure/hardware-profiles` — list built-in and tenant-owned profiles.
+- `GET /api/v1/infrastructure/hardware-profiles/{uuid}` — retrieve a tenant-owned immutable version.
+- `POST /api/v1/infrastructure/hardware-profiles` — register a new tenant-owned immutable version.
 - `POST /api/v1/infrastructure/hardware-profiles/validate` — validate a submitted profile document without saving it or granting qualification.
 
 A profile is versioned and carries optional vendor/product identity, structured facts, supported component classes, source provenance, and licensed geometry asset references with SHA-256 digests. Unknown facts are omitted rather than inferred. Vendor-documentation, vendor-validation and field-verification states require provenance; validation is structural and does not independently prove that a source is authoritative.
 
 The built-in `edgefabric.generic-gpu-node` profile is explicitly `template_only`. It has no vendor, product model, dimensions, port map, power envelope or CAD asset. It is suitable for generic topology authoring only. No Rubin or Rubin Ultra product profile is currently published by this catalog. Those profiles must be populated from authoritative vendor documentation and reviewed CAD/asset packages before they can be used for physical qualification.
 
-This first catalog is read-only and built into the API; tenant-persisted profile authoring, approval workflow, profile-to-simulation binding and asset resolution are subsequent implementation steps. Profile validation does not persist input and never changes a simulation or physical inventory.
+The built-in generic profile is read-only; tenant profile versions are persisted separately. Profile validation does not persist input and never changes a simulation or physical inventory.
 
 ### Tenant-persisted profile versions
 

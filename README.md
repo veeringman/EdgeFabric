@@ -8,6 +8,7 @@
   <a href="docs/SYSTEM_DESIGN.md">System Design</a> ·
   <a href="docs/ARCHITECTURE.md">Architecture & Diagrams</a> ·
   <a href="docs/API_REFERENCE.md">API Reference</a> ·
+  <a href="docs/INFRASTRUCTURE_SCENE.md">Infrastructure Scene</a> ·
   <a href="CHIP_DESIGN_INTEGRATION_PLAN.md">Chip Design</a> ·
   <a href="PCB_DESIGN_INTEGRATION_PLAN.md">PCB Design</a> ·
   <a href="QUANTUM_INTEGRATION_PLAN.md">Quantum</a> ·

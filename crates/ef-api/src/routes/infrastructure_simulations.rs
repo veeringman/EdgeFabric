@@ -55,7 +55,7 @@ fn validate_instance(instance: &SimulationInstance) -> Vec<String> {
             || rack.placements.len() > 256)) {
         issues.push("Rack power/cooling topology exceeds rack, host, PDU, UPS or placement limits".into());
     }
-    if instance.geometry.len() > 10_000 || instance.poses.len() > 10_000 {
+    if instance.geometry.len() > 10_000 || instance.poses.len() > 10_000 || instance.bounds.len() > 10_000 {
         issues.push("A simulation may contain at most 10000 geometry or pose entries".into());
     }
     issues
@@ -184,6 +184,8 @@ pub async fn create_gpu_cluster(
         "pdu_count": instance.rack_power_cooling.as_ref().map_or(0, |topology| topology.racks.iter().map(|rack| rack.pdu_identities.len()).sum::<usize>()),
         "ups_count": instance.rack_power_cooling.as_ref().map_or(0, |topology| topology.racks.iter().map(|rack| rack.ups_identities.len()).sum::<usize>()),
         "rack_unit_placement_count": instance.rack_power_cooling.as_ref().map_or(0, |topology| topology.racks.iter().map(|rack| rack.placements.len()).sum::<usize>()),
+        "spatial_pose_count": instance.poses.len(),
+        "spatial_bounds_count": instance.bounds.len(),
         "deterministic_topology": true,
         "physical_inventory_mutated": false,
         "execution_started": false

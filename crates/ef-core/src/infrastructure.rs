@@ -293,6 +293,41 @@ pub struct CxlTopology {
     pub links: Vec<CxlMemoryLink>,
 }
 
+/// Declared rack-level power and cooling design envelope. Watt values are planning inputs, not measured draw or thermal simulation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RackPowerCoolingTemplate {
+    pub hosts_per_rack: u16,
+    pub host_power_watts: u64,
+    pub gpu_power_watts: u64,
+    pub nic_power_watts: u64,
+    pub storage_device_power_watts: u64,
+    pub cxl_device_power_watts: u64,
+    pub rack_power_capacity_watts: u64,
+    pub pdus_per_rack: u8,
+    pub pdu_capacity_watts: u64,
+    pub cooling_capacity_watts: u64,
+    #[serde(default)]
+    pub require_redundant_pdu: bool,
+}
+
+/// Per-rack declared load and capacity assessment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RackPowerCoolingRecord {
+    pub rack_identity: String,
+    pub host_identities: Vec<String>,
+    pub pdu_identities: Vec<String>,
+    pub design_load_watts: u64,
+    pub rack_capacity_watts: u64,
+    pub pdu_capacity_after_single_failure_watts: u64,
+    pub cooling_capacity_watts: u64,
+    pub redundant_feed_required: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RackPowerCoolingTopology {
+    pub racks: Vec<RackPowerCoolingRecord>,
+}
+
 /// Declarative inputs for a reproducible multi-host virtual GPU cluster.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GpuClusterTemplate {
@@ -315,6 +350,8 @@ pub struct GpuClusterTemplate {
     pub storage: Option<StorageFabricTemplate>,
     #[serde(default)]
     pub cxl_memory: Option<CxlMemoryTemplate>,
+    #[serde(default)]
+    pub power_cooling: Option<RackPowerCoolingTemplate>,
     pub seed: u64,
 }
 
@@ -389,6 +426,7 @@ pub fn instantiate_gpu_cluster_template(
     let mut storage_links = Vec::new();
     let mut cxl_devices = Vec::new();
     let mut cxl_links = Vec::new();
+    let mut rack_power_cooling = Vec::new();
 
     if let Some(network) = &template.network_fabric {
         if network.nics_per_host == 0 || network.nics_per_host > 16 { issues.push("NICs per host must be between 1 and 16".into()); }
@@ -431,6 +469,25 @@ pub fn instantiate_gpu_cluster_template(
         }
         if ![1, 2, 4, 8, 16].contains(&cxl.lane_width) {
             issues.push("CXL lane width must be one of 1, 2, 4, 8 or 16".into());
+        }
+    }
+    if let Some(power) = &template.power_cooling {
+        if power.hosts_per_rack == 0 || power.hosts_per_rack > 64 {
+            issues.push("Hosts per rack must be between 1 and 64".into());
+        }
+        if power.rack_power_capacity_watts == 0 || power.pdu_capacity_watts == 0 || power.cooling_capacity_watts == 0 {
+            issues.push("Rack, PDU and cooling capacities must be greater than zero".into());
+        }
+        if power.pdus_per_rack == 0 || power.pdus_per_rack > 8 {
+            issues.push("PDUs per rack must be between 1 and 8".into());
+        }
+        if power.require_redundant_pdu && power.pdus_per_rack < 2 {
+            issues.push("Redundant PDU mode requires at least two PDUs per rack".into());
+        }
+        let count = (u32::from(template.hosts) + u32::from(power.hosts_per_rack.max(1)) - 1)
+            / u32::from(power.hosts_per_rack.max(1));
+        if count.saturating_mul(u32::from(power.pdus_per_rack) + 2) > 20_000 {
+            issues.push("Rack power/cooling topology may contain at most 20000 resources".into());
         }
     }
     let storage_link_count = template.storage.as_ref().map_or(0, |storage| {
@@ -769,6 +826,90 @@ pub fn instantiate_gpu_cluster_template(
         }
     }
 
+    if let Some(power) = &template.power_cooling {
+        let per_rack = u32::from(power.hosts_per_rack);
+        let rack_count = (u32::from(template.hosts) + per_rack - 1) / per_rack;
+        let nics = template.network_fabric.as_ref().map_or(0_u64, |n| u64::from(n.nics_per_host));
+        let drives = template.storage.as_ref().map_or(0_u64, |s| if s.kind == StorageFabricKind::DirectNvme { u64::from(s.drives_per_host) } else { 0 });
+        let cxl_devices = template.cxl_memory.as_ref().map_or(0_u64, |m| u64::from(m.devices_per_host));
+        let host_load = power.host_power_watts
+            .saturating_add(power.gpu_power_watts.saturating_mul(u64::from(template.gpus_per_host)))
+            .saturating_add(power.nic_power_watts.saturating_mul(nics))
+            .saturating_add(power.storage_device_power_watts.saturating_mul(drives))
+            .saturating_add(power.cxl_device_power_watts.saturating_mul(cxl_devices));
+        for rack_index in 0..rack_count {
+            let first = rack_index * per_rack;
+            let count = (u32::from(template.hosts) - first).min(per_rack);
+            let rack = format!("{}:rack-{:03}", template.identity, rack_index + 1);
+            let host_ids = (first..first + count).map(|i| format!("{}:host-{:03}", template.identity, i + 1)).collect::<Vec<_>>();
+            let pdu_ids = (0..power.pdus_per_rack).map(|i| format!("{rack}:pdu-{:02}", i + 1)).collect::<Vec<_>>();
+            let cooling = format!("{rack}:cooling-zone");
+            let load = host_load.saturating_mul(u64::from(count));
+            let surviving_pdu_capacity = power.pdu_capacity_watts.saturating_mul(u64::from(
+                power.pdus_per_rack.saturating_sub(if power.require_redundant_pdu { 1 } else { 0 })
+            ));
+            if load > power.rack_power_capacity_watts {
+                issues.push(format!("Rack '{rack}' design load {load} W exceeds rack capacity {} W", power.rack_power_capacity_watts));
+            }
+            if load > surviving_pdu_capacity {
+                issues.push(format!("Rack '{rack}' design load {load} W exceeds PDU capacity after failure allowance {surviving_pdu_capacity} W"));
+            }
+            if load > power.cooling_capacity_watts {
+                issues.push(format!("Rack '{rack}' design heat load {load} W exceeds cooling capacity {} W", power.cooling_capacity_watts));
+            }
+            resources.push(DiscoveredResource {
+                identity: rack.clone(), kind: "rack".into(),
+                attributes: BTreeMap::from([
+                    ("virtual".into(), Value::Bool(true)),
+                    ("design_load_watts".into(), Value::from(load)),
+                    ("power_capacity_watts".into(), Value::from(power.rack_power_capacity_watts)),
+                    ("cooling_capacity_watts".into(), Value::from(power.cooling_capacity_watts)),
+                ]),
+                source: source.into(), observed_at: now, verified: false,
+            });
+            resources.push(DiscoveredResource {
+                identity: cooling.clone(), kind: "cooling_zone".into(),
+                attributes: BTreeMap::from([
+                    ("virtual".into(), Value::Bool(true)),
+                    ("capacity_watts".into(), Value::from(power.cooling_capacity_watts)),
+                ]),
+                source: source.into(), observed_at: now, verified: false,
+            });
+            relationships.push(ResourceRelationship {
+                identity: format!("{rack}:cooled-by"), source_identity: rack.clone(), target_identity: cooling,
+                kind: "cooled_by".into(), attributes: BTreeMap::new(), source: source.into(), observed_at: now, verified: false,
+            });
+            for host in &host_ids {
+                relationships.push(ResourceRelationship {
+                    identity: format!("{rack}:contains:{host}"), source_identity: rack.clone(), target_identity: host.clone(),
+                    kind: "contains".into(), attributes: BTreeMap::new(), source: source.into(), observed_at: now, verified: false,
+                });
+            }
+            for pdu in &pdu_ids {
+                resources.push(DiscoveredResource {
+                    identity: pdu.clone(), kind: "power_distribution_unit".into(),
+                    attributes: BTreeMap::from([
+                        ("virtual".into(), Value::Bool(true)),
+                        ("capacity_watts".into(), Value::from(power.pdu_capacity_watts)),
+                    ]),
+                    source: source.into(), observed_at: now, verified: false,
+                });
+                relationships.push(ResourceRelationship {
+                    identity: format!("{rack}:powered-by:{pdu}"), source_identity: rack.clone(), target_identity: pdu.clone(),
+                    kind: "powered_by".into(), attributes: BTreeMap::new(), source: source.into(), observed_at: now, verified: false,
+                });
+            }
+            rack_power_cooling.push(RackPowerCoolingRecord {
+                rack_identity: rack, host_identities: host_ids, pdu_identities: pdu_ids,
+                design_load_watts: load, rack_capacity_watts: power.rack_power_capacity_watts,
+                pdu_capacity_after_single_failure_watts: surviving_pdu_capacity,
+                cooling_capacity_watts: power.cooling_capacity_watts,
+                redundant_feed_required: power.require_redundant_pdu,
+            });
+        }
+        if !issues.is_empty() { return Err(issues); }
+    }
+
     if relationships.len() > 20_000 {
         return Err(vec!["Expanded GPU cluster may contain at most 20000 graph relationships".into()]);
     }
@@ -798,6 +939,7 @@ pub fn instantiate_gpu_cluster_template(
         network_fabric: template.network_fabric.as_ref().map(|network| NetworkFabricTopology { kind: network.kind, links: network_links }),
         storage_topology: template.storage.as_ref().map(|_| StorageTopology { links: storage_links }),
         cxl_topology: template.cxl_memory.as_ref().map(|_| CxlTopology { devices: cxl_devices, links: cxl_links }),
+        rack_power_cooling: template.power_cooling.as_ref().map(|_| RackPowerCoolingTopology { racks: rack_power_cooling }),
         geometry: BTreeMap::new(),
         poses: BTreeMap::new(),
         parameters: BTreeMap::from([
@@ -854,6 +996,8 @@ pub struct SimulationInstance {
     pub storage_topology: Option<StorageTopology>,
     #[serde(default)]
     pub cxl_topology: Option<CxlTopology>,
+    #[serde(default)]
+    pub rack_power_cooling: Option<RackPowerCoolingTopology>,
     #[serde(default)]
     pub geometry: BTreeMap<String, GeometryAsset>,
     #[serde(default)]
@@ -1013,6 +1157,29 @@ pub fn validate_simulation(instance: &SimulationInstance) -> Vec<String> {
             };
             if !endpoint_pairs.insert(pair) {
                 issues.push(format!("GPU peer endpoint pair on '{}' is duplicated", link.identity));
+            }
+        }
+    }
+    if let Some(topology) = &instance.rack_power_cooling {
+        let ids = instance.graph.resources.iter().map(|r| r.identity.as_str()).collect::<HashSet<_>>();
+        let mut racks = HashSet::new();
+        for rack in &topology.racks {
+            if rack.rack_identity.trim().is_empty() || !racks.insert(rack.rack_identity.as_str()) {
+                issues.push(format!("Rack power/cooling identity '{}' is empty or duplicated", rack.rack_identity));
+            }
+            if !ids.contains(rack.rack_identity.as_str()) {
+                issues.push(format!("Rack '{}' is missing from the resource graph", rack.rack_identity));
+            }
+            if rack.design_load_watts > rack.rack_capacity_watts
+                || rack.design_load_watts > rack.pdu_capacity_after_single_failure_watts
+                || rack.design_load_watts > rack.cooling_capacity_watts {
+                issues.push(format!("Rack '{}' exceeds a declared power or cooling envelope", rack.rack_identity));
+            }
+            if rack.redundant_feed_required && rack.pdu_identities.len() < 2 {
+                issues.push(format!("Rack '{}' requires redundant PDU feeds but has fewer than two PDUs", rack.rack_identity));
+            }
+            for id in rack.host_identities.iter().chain(rack.pdu_identities.iter()) {
+                if !ids.contains(id.as_str()) { issues.push(format!("Rack '{}' references missing resource '{id}'", rack.rack_identity)); }
             }
         }
     }
@@ -1396,8 +1563,32 @@ mod tests {
             network_fabric: None,
             storage: None,
             cxl_memory: None,
+            power_cooling: None,
             seed: 42,
         }
+    }
+
+    #[test]
+    fn gpu_cluster_template_places_hosts_and_checks_rack_power_cooling() {
+        let mut template = sample_gpu_template();
+        template.power_cooling = Some(RackPowerCoolingTemplate {
+            hosts_per_rack: 1, host_power_watts: 1200, gpu_power_watts: 700,
+            nic_power_watts: 100, storage_device_power_watts: 30, cxl_device_power_watts: 50,
+            rack_power_capacity_watts: 5000, pdus_per_rack: 2, pdu_capacity_watts: 4500,
+            cooling_capacity_watts: 5000, require_redundant_pdu: true,
+        });
+        let instance = instantiate_gpu_cluster_template(&template).unwrap();
+        let topology = instance.rack_power_cooling.as_ref().unwrap();
+        assert_eq!(topology.racks.len(), 2);
+        assert_eq!(topology.racks[0].host_identities.len(), 1);
+        assert_eq!(topology.racks[0].design_load_watts, 4000);
+        assert_eq!(topology.racks[0].pdu_capacity_after_single_failure_watts, 4500);
+        assert_eq!(instance.graph.resources.iter().filter(|r| r.kind == "rack").count(), 2);
+        assert_eq!(instance.graph.resources.iter().filter(|r| r.kind == "power_distribution_unit").count(), 4);
+        assert!(validate_simulation(&instance).is_empty());
+        template.power_cooling.as_mut().unwrap().cooling_capacity_watts = 3500;
+        let issues = instantiate_gpu_cluster_template(&template).unwrap_err();
+        assert!(issues.iter().any(|issue| issue.contains("exceeds cooling capacity")));
     }
 
     #[test]

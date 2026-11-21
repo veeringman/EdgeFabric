@@ -116,6 +116,164 @@ pub fn generic_gpu_node_profile() -> HardwareProfile {
     }
 }
 
+/// Read-only vendor-documented reference profiles built from public NVIDIA material.
+/// These are architecture references, not vendor-validated system configurations.
+pub fn builtin_hardware_profiles() -> Vec<HardwareProfile> {
+    let source_hgx = HardwareProfileSource {
+        title: "NVIDIA HGX Platform specifications".into(),
+        uri: "https://www.nvidia.com/en-us/data-center/hgx/".into(),
+        publisher: "NVIDIA".into(),
+        revision: Some("Accessed 2026-11-21; preliminary specifications".into()),
+        sha256: None,
+    };
+    let source_pod = HardwareProfileSource {
+        title: "NVIDIA Vera Rubin POD: Seven Chips, Five Rack-Scale Systems, One AI Supercomputer".into(),
+        uri: "https://developer.nvidia.com/blog/nvidia-vera-rubin-pod-seven-chips-five-rack-scale-systems-one-ai-supercomputer".into(),
+        publisher: "NVIDIA Developer".into(),
+        revision: Some("Published 2026-03-16".into()),
+        sha256: None,
+    };
+    vec![
+        generic_gpu_node_profile(),
+        HardwareProfile {
+            id: "nvidia.rubin-gpu".into(),
+            version: 1,
+            vendor: Some("NVIDIA".into()),
+            product_family: Some("Rubin".into()),
+            model: Some("Rubin GPU".into()),
+            display_name: "NVIDIA Rubin GPU (public reference)".into(),
+            qualification: HardwareProfileQualification::VendorDocumented,
+            facts: serde_json::json!({
+                "gpu": {
+                    "memory_capacity_gb": 288,
+                    "memory_type": "HBM4",
+                    "memory_bandwidth_tb_s": 22.0,
+                    "nvlink_generation": 6,
+                    "nvlink_bandwidth_tb_s": 3.6,
+                    "nvfp4_inference_sparse_pflops": 50.0,
+                    "nvfp4_training_pflops": 35.0
+                },
+                "specification_status": "preliminary_subject_to_change"
+            }),
+            supported_components: vec!["gpu".into(), "memory".into(), "nvlink".into()],
+            assets: Vec::new(),
+            sources: vec![source_hgx.clone()],
+            notes: vec![
+                "Public NVIDIA HGX page lists 288 GB HBM4, 22 TB/s memory bandwidth and sixth-generation NVLink.".into(),
+                "Performance values are source-defined peak specifications; do not treat them as measured workload results.".into(),
+                "No package dimensions, board layout, power envelope, cooling requirements or physical CAD are included.".into(),
+            ],
+        },
+        HardwareProfile {
+            id: "nvidia.hgx-rubin-nvl8".into(),
+            version: 1,
+            vendor: Some("NVIDIA".into()),
+            product_family: Some("HGX Rubin".into()),
+            model: Some("HGX Rubin NVL8".into()),
+            display_name: "NVIDIA HGX Rubin NVL8 (public reference)".into(),
+            qualification: HardwareProfileQualification::VendorDocumented,
+            facts: serde_json::json!({
+                "system": {
+                    "gpu_count": 8,
+                    "gpu_memory_capacity_tb": 2.3,
+                    "gpu_memory_bandwidth_tb_s": 176.0,
+                    "nvlink_generation": 6,
+                    "nvlink_switch_bandwidth_tb_s": 28.8,
+                    "networking_bandwidth_tb_s": 1.6
+                },
+                "cpu_options": {
+                    "vera_cpu": {
+                        "core_count": 88,
+                        "memory_capacity_tb": 1.5,
+                        "memory_type": "LPDDR5X",
+                        "memory_bandwidth_tb_s": 1.2
+                    },
+                    "x86_baseboard": "OEM_defined"
+                },
+                "specification_status": "preliminary_subject_to_change"
+            }),
+            supported_components: vec!["gpu".into(), "host".into(), "cpu".into(), "nvlink".into(), "network".into(), "memory".into()],
+            assets: Vec::new(),
+            sources: vec![source_hgx.clone()],
+            notes: vec![
+                "NVIDIA documents an eight-Rubin-SXM HGX baseboard and either Vera CPU or x86 CPU baseboard variants.".into(),
+                "OEM-defined CPU and memory details are intentionally not filled for x86 variants.".into(),
+                "No chassis dimensions, PCIe slot map, port inventory, rack power or cooling capacity is asserted.".into(),
+            ],
+        },
+        HardwareProfile {
+            id: "nvidia.vera-rubin-nvl72".into(),
+            version: 1,
+            vendor: Some("NVIDIA".into()),
+            product_family: Some("Vera Rubin".into()),
+            model: Some("Vera Rubin NVL72".into()),
+            display_name: "NVIDIA Vera Rubin NVL72 (rack reference)".into(),
+            qualification: HardwareProfileQualification::VendorDocumented,
+            facts: serde_json::json!({
+                "rack": {
+                    "gpu_count": 72,
+                    "vera_cpu_count": 36,
+                    "compute_tray_count": 18,
+                    "nvlink_switch_tray_count": 9,
+                    "nvlink_generation": 6,
+                    "nvlink_bandwidth_per_gpu_tb_s": 3.6,
+                    "nvlink_scale_up_bandwidth_per_rack_tb_s": 260.0,
+                    "approximate_weight_lb": 4000,
+                    "coolant_inlet_temperature_c": 45,
+                    "cooling": "liquid_cooled"
+                },
+                "compute_tray": {
+                    "connectx9_supernic_count": 8,
+                    "bluefield4_dpu_count": 1
+                },
+                "power_features": {
+                    "rack_energy_storage_joules_per_gpu": 400,
+                    "intelligent_power_smoothing": true
+                },
+                "specification_status": "published_architecture_reference"
+            }),
+            supported_components: vec!["gpu".into(), "cpu".into(), "compute_tray".into(), "nvlink_switch_tray".into(), "rack".into(), "network".into(), "dpu".into(), "power_cooling".into()],
+            assets: Vec::new(),
+            sources: vec![source_pod.clone()],
+            notes: vec![
+                "This is a rack-level architecture reference: 18 compute trays, 9 NVLink switch trays, 72 GPUs and 36 Vera CPUs.".into(),
+                "Compute trays are not generic host servers; preserve tray identity in a dedicated rack-scale model rather than mapping them to hosts.".into(),
+                "Approximate weight and coolant inlet temperature are source statements, not a complete mechanical or thermal model.".into(),
+                "No complete electrical input, rack dimensions, manifold flow, CDU, hose routing or service-clearance data is supplied.".into(),
+            ],
+        },
+        HardwareProfile {
+            id: "nvidia.vera-rubin-ultra-nvl576".into(),
+            version: 1,
+            vendor: Some("NVIDIA".into()),
+            product_family: Some("Vera Rubin Ultra".into()),
+            model: Some("Vera Rubin Ultra NVL576".into()),
+            display_name: "NVIDIA Vera Rubin Ultra NVL576 (architecture reference)".into(),
+            qualification: HardwareProfileQualification::VendorDocumented,
+            facts: serde_json::json!({
+                "system": {
+                    "gpu_count": 576,
+                    "mgx_nvl_rack_count": 8,
+                    "rubin_ultra_gpus_per_rack": 72,
+                    "nvlink_topology": "two_layer_all_to_all",
+                    "inter_rack_links": ["copper", "direct_optical"],
+                    "nvlink_domain_gpu_count": 576
+                },
+                "specification_status": "published_architecture_reference"
+            }),
+            supported_components: vec!["gpu".into(), "rack".into(), "nvlink".into(), "optical_interconnect".into(), "copper_interconnect".into()],
+            assets: Vec::new(),
+            sources: vec![source_pod],
+            notes: vec![
+                "NVIDIA describes eight MGX NVL racks, each with 72 Rubin Ultra GPUs, forming one 576-GPU NVLink domain.".into(),
+                "The two-layer all-to-all topology uses copper and direct optical connections between racks.".into(),
+                "No final GPU memory, per-GPU bandwidth, rack electrical, detailed mechanical, cable schedule or vendor CAD values are asserted here.".into(),
+                "This profile is an architecture reference, not a vendor-validated qualification package.".into(),
+            ],
+        },
+    ]
+}
+
 /// Result of evaluating one explicitly declared numeric profile constraint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProfileConstraintResult {

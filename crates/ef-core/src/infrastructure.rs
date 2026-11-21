@@ -602,6 +602,44 @@ mod tests {
     }
 
     #[test]
+    fn pcie_topology_rejects_links_above_endpoint_capabilities() {
+        let graph = InfrastructureGraph {
+            observed_at: Utc::now(),
+            coverage_complete: false,
+            resources: vec![discovered("root-1"), discovered("gpu-1")],
+            relationships: vec![],
+        };
+        let topology = PcieTopology {
+            devices: vec![
+                PcieDevice {
+                    resource_identity: "root-1".into(),
+                    role: PcieDeviceRole::RootComplex,
+                    max_generation: 4,
+                    max_lane_width: 16,
+                    numa_node: Some(0),
+                },
+                PcieDevice {
+                    resource_identity: "gpu-1".into(),
+                    role: PcieDeviceRole::Endpoint,
+                    max_generation: 4,
+                    max_lane_width: 16,
+                    numa_node: Some(0),
+                },
+            ],
+            links: vec![PcieLink {
+                identity: "pcie-root-gpu".into(),
+                upstream_identity: "root-1".into(),
+                downstream_identity: "gpu-1".into(),
+                generation: 5,
+                lane_width: 32,
+            }],
+        };
+        let issues = validate_pcie_topology(&topology, &graph);
+        assert!(issues.iter().any(|issue| issue.contains("generation capability")));
+        assert!(issues.iter().any(|issue| issue.contains("lane-width capability")));
+    }
+
+    #[test]
     fn simulation_rejects_spatial_metadata_for_unknown_resource() {
         let instance = SimulationInstance {
             identity: "sim-1".into(),

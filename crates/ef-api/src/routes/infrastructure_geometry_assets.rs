@@ -58,6 +58,16 @@ impl LocalFilesystemProvider {
         Ok(self.root.join(id.to_string()))
     }
 
+}
+
+#[allow(async_fn_in_trait)]
+trait GeometryStorageProvider {
+    async fn put(&self, id: Uuid, bytes: &[u8]) -> Result<(), std::io::Error>;
+    async fn read(&self, key: &str) -> Result<Vec<u8>, std::io::Error>;
+    async fn delete(&self, key: &str);
+}
+
+impl GeometryStorageProvider for LocalFilesystemProvider {
     async fn put(&self, id: Uuid, bytes: &[u8]) -> Result<(), std::io::Error> {
         use tokio::io::AsyncWriteExt;
         let path = self.path_for(&id.to_string())?;
@@ -68,7 +78,12 @@ impl LocalFilesystemProvider {
             let _ = tokio::fs::remove_file(self.path_for(&id.to_string())?).await;
             return Err(error);
         }
-        file.sync_all().await
+        if let Err(error) = file.sync_all().await {
+            drop(file);
+            let _ = tokio::fs::remove_file(self.path_for(&id.to_string())?).await;
+            return Err(error);
+        }
+        Ok(())
     }
 
     async fn read(&self, key: &str) -> Result<Vec<u8>, std::io::Error> {

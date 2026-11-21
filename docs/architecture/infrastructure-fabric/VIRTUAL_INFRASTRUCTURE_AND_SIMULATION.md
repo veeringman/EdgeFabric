@@ -52,6 +52,7 @@ Example request:
   "switch_downstream_ports": 8,
   "gpu_memory_gib": 288,
   "numa_nodes_per_host": 2,
+  "gpu_peer_fabric": "nv_switch",
   "seed": 42
 }
 ```
@@ -60,7 +61,7 @@ The template expands into synthetic host, root-complex, PCIe-switch and GPU reso
 
 For the example above, the deterministic graph contains 2 hosts, 2 root complexes, 2 PCIe switches and 8 GPUs; 12 PCIe devices and 10 PCIe links. Synthetic resources are unverified and tagged with the simulation source. Repeated expansion yields the same resource identities and topology for the same template. The seed is retained as scenario provenance; this structural template currently does not introduce random placement.
 
-The current template creates PCIe topology only. NVLink/NVSwitch, NIC/DPU, network fabrics, storage, power and cooling are subsequent typed extensions. It does not emulate a GPU, launch a workload, or qualify hardware.
+The template can optionally add a GPU peer fabric, independent of PCIe: `nv_link_full_mesh` creates direct GPU-to-GPU links within each host, while `nv_switch` creates a synthetic NVSwitch resource per host and GPU-to-switch peer links. The peer-fabric validator checks endpoint membership, self-links, duplicate identities and duplicate endpoint pairs. For two hosts with four GPUs each, full-mesh mode creates 12 peer links (six per host); NVSwitch mode creates eight GPU-to-switch links and two NVSwitch resources. These are structural abstractions: they do not assert a particular NVLink generation, bandwidth, switch radix, NVLink lane count, or measured peer performance. The template still does not emulate a GPU, launch a workload, or qualify hardware. NIC/DPU, network fabrics, storage, power and cooling remain subsequent typed extensions.
 
 ## Example scenario
 

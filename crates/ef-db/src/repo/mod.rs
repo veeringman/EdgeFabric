@@ -12,3 +12,4 @@ pub mod tenant;
 pub mod virtual_iot;
 pub mod virtual_iot_backend;
 pub mod infrastructure_manifest;
+pub mod infrastructure_simulation;

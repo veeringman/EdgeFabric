@@ -16,6 +16,7 @@ pub mod infrastructure;
 pub mod infrastructure_manifests;
 pub mod infrastructure_simulations;
 pub mod infrastructure_hardware_profiles;
+pub mod infrastructure_geometry_assets;
 
 use axum::{Json, Router, extract::State, http::StatusCode, routing::{get, post, put}};
 use serde::Deserialize;
@@ -104,6 +105,9 @@ pub fn api_router() -> Router<AppState> {
         .route("/infrastructure/manifests/validate", post(infrastructure_manifests::validate))
         .route("/infrastructure/manifests/{id}", get(infrastructure_manifests::get))
         .route("/infrastructure/manifests/{id}/reconcile", post(infrastructure_manifests::reconcile_manifest))
+        // Tenant-scoped geometry asset storage and delivery.
+        .route("/infrastructure/geometry-assets", post(infrastructure_geometry_assets::upload))
+        .route("/infrastructure/geometry-assets/{id}/content", get(infrastructure_geometry_assets::download))
         // Versioned hardware profile catalog.
         .route("/infrastructure/hardware-profiles/validate", post(infrastructure_hardware_profiles::validate))
         .route("/infrastructure/hardware-profiles/clone", post(infrastructure_hardware_profiles::clone_builtin))

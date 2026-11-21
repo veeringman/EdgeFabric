@@ -28,6 +28,14 @@ pub fn InfrastructureScenePage() -> impl IntoView {
     let (overlay_storage, set_overlay_storage) = signal(true);
     let (overlay_power, set_overlay_power) = signal(true);
     let canvas_id = "ef-infrastructure-scene-canvas";
+    let (template_identity, set_template_identity) = signal("rubin-qualification-lab".to_string());
+    let (template_scenario, set_template_scenario) = signal("rubin-cluster-baseline".to_string());
+    let (template_hosts, set_template_hosts) = signal("4".to_string());
+    let (template_gpus, set_template_gpus) = signal("8".to_string());
+    let (template_generation, set_template_generation) = signal("6".to_string());
+    let (template_gpu_memory, set_template_gpu_memory) = signal("192".to_string());
+    let (template_peer_fabric, set_template_peer_fabric) = signal("nv_switch".to_string());
+    let (creating, set_creating) = signal(false);
 
     // Load the tenant-scoped simulation registry for convenient ID discovery.
     Effect::new(move || {
@@ -37,6 +45,65 @@ pub fn InfrastructureScenePage() -> impl IntoView {
             }
         });
     });
+
+    let create_simulation = move |_| {
+        let identity = template_identity.get_untracked().trim().to_string();
+        let scenario_id = template_scenario.get_untracked().trim().to_string();
+        let hosts = template_hosts.get_untracked().parse::<u16>().unwrap_or(0);
+        let gpus_per_host = template_gpus.get_untracked().parse::<u16>().unwrap_or(0);
+        let pcie_generation = template_generation.get_untracked().parse::<u8>().unwrap_or(0);
+        let gpu_memory_gib = template_gpu_memory.get_untracked().parse::<u32>().unwrap_or(0);
+        let peer = template_peer_fabric.get_untracked();
+        if identity.is_empty() || scenario_id.is_empty() {
+            set_error.set(Some("Simulation identity and scenario are required.".into()));
+            return;
+        }
+        let body = serde_json::json!({
+            "identity": identity,
+            "scenario_id": scenario_id,
+            "hosts": hosts,
+            "gpus_per_host": gpus_per_host,
+            "pcie_generation": pcie_generation,
+            "root_complex_lanes": 16,
+            "switch_uplink_lanes": 16,
+            "gpu_lanes": 16,
+            "switch_downstream_ports": gpus_per_host,
+            "gpu_memory_gib": gpu_memory_gib,
+            "numa_nodes_per_host": 2,
+            "gpu_peer_fabric": if peer == "none" { serde_json::Value::Null } else { serde_json::Value::String(peer) },
+            "network_fabric": null,
+            "storage": null,
+            "cxl_memory": null,
+            "power_cooling": null,
+            "seed": 1
+        });
+        set_creating.set(true);
+        set_error.set(None);
+        leptos::task::spawn_local(async move {
+            match crate::api::post::<_, Value>("/infrastructure/simulations/templates/gpu-cluster", &body).await {
+                Ok(response) => {
+                    let id = response["simulation"]["id"].as_str().unwrap_or("").to_string();
+                    if id.is_empty() {
+                        set_error.set(Some("Simulation was created, but the API response did not include its ID.".into()));
+                    } else {
+                        set_simulation_id.set(id.clone());
+                        match crate::api::get::<Value>(&format!("/infrastructure/simulations/{id}/scene")).await {
+                            Ok(document) => {
+                                set_scene.set(Some(document));
+                                set_selected.set(String::new());
+                                if let Ok(list) = crate::api::get::<Value>("/infrastructure/simulations").await {
+                                    set_simulations.set(list["simulations"].as_array().cloned().unwrap_or_default());
+                                }
+                            }
+                            Err(err) => set_error.set(Some(format!("Simulation saved, but scene loading failed: {err}"))),
+                        }
+                    }
+                }
+                Err(err) => set_error.set(Some(err)),
+            }
+            set_creating.set(false);
+        });
+    };
 
     let load_scene = move |_| {
         let id = simulation_id.get_untracked().trim().to_string();
@@ -135,6 +202,46 @@ pub fn InfrastructureScenePage() -> impl IntoView {
                     <p>"Explore simulated GPU clusters, racks, interconnects, storage and power topology."</p>
                 </div>
                 <span class="infra-scene-sim-badge">"SIMULATION · READ ONLY"</span>
+            </div>
+
+            <div class="infra-scene-load card">
+                <h2>"Create a GPU cluster simulation"</h2>
+                <p class="muted">"Generate a deterministic, tenant-owned virtual cluster and load it directly into the 3D twin."</p>
+                <div class="infra-scene-builder-grid">
+                    <label>"Simulation identity"
+                        <input type="text" prop:value=move || template_identity.get() on:input=move |ev| set_template_identity.set(event_target_value(&ev))/>
+                    </label>
+                    <label>"Scenario ID"
+                        <input type="text" prop:value=move || template_scenario.get() on:input=move |ev| set_template_scenario.set(event_target_value(&ev))/>
+                    </label>
+                    <label>"Hosts"
+                        <input type="number" min="1" max="256" prop:value=move || template_hosts.get() on:input=move |ev| set_template_hosts.set(event_target_value(&ev))/>
+                    </label>
+                    <label>"GPUs per host"
+                        <input type="number" min="1" max="64" prop:value=move || template_gpus.get() on:input=move |ev| set_template_gpus.set(event_target_value(&ev))/>
+                    </label>
+                    <label>"PCIe generation"
+                        <select prop:value=move || template_generation.get() on:change=move |ev| set_template_generation.set(event_target_value(&ev))>
+                            <option value="5">"Gen 5"</option>
+                            <option value="6">"Gen 6"</option>
+                            <option value="7">"Gen 7"</option>
+                        </select>
+                    </label>
+                    <label>"GPU memory (GiB)"
+                        <input type="number" min="1" prop:value=move || template_gpu_memory.get() on:input=move |ev| set_template_gpu_memory.set(event_target_value(&ev))/>
+                    </label>
+                    <label>"GPU peer fabric"
+                        <select prop:value=move || template_peer_fabric.get() on:change=move |ev| set_template_peer_fabric.set(event_target_value(&ev))>
+                            <option value="nv_switch">"NVSwitch domains"</option>
+                            <option value="nv_link_full_mesh">"Direct full mesh"</option>
+                            <option value="none">"No peer fabric"</option>
+                        </select>
+                    </label>
+                </div>
+                <button class="btn btn-primary" on:click=create_simulation disabled=move || creating.get()>
+                    {move || if creating.get() { "Creating simulation…" } else { "Create and open 3D twin" }}
+                </button>
+                <p class="muted" style="font-size:0.72rem">"Starter profile: PCIe x16 root/uplink/GPU lanes, 2 NUMA nodes, deterministic seed 1. Optional network, storage, CXL and rack power/cooling can be added in the next builder iteration."</p>
             </div>
 
             <div class="infra-scene-load card">

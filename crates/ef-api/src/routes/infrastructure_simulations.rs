@@ -174,6 +174,8 @@ pub async fn create_gpu_cluster(
         "storage_link_count": instance.storage_topology.as_ref().map_or(0, |topology| topology.links.len()),
         "cxl_memory_device_count": instance.cxl_topology.as_ref().map_or(0, |topology| topology.devices.len()),
         "cxl_link_count": instance.cxl_topology.as_ref().map_or(0, |topology| topology.links.len()),
+        "rack_count": instance.rack_power_cooling.as_ref().map_or(0, |topology| topology.racks.len()),
+        "pdu_count": instance.rack_power_cooling.as_ref().map_or(0, |topology| topology.racks.iter().map(|rack| rack.pdu_identities.len()).sum()),
         "deterministic_topology": true,
         "physical_inventory_mutated": false,
         "execution_started": false

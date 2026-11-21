@@ -1,5 +1,6 @@
 //! Tenant-scoped immutable hardware profile registry and validation API.
 use axum::{Json, extract::{Path, Query, State}, http::StatusCode};
+use ef_core::audit::{AuditAction, AuditLogger};
 use ef_core::hardware_profiles::{HardwareProfile, builtin_hardware_profiles};
 use ef_db::repo::infrastructure_hardware_profile::InfrastructureHardwareProfileRepo;
 use serde::Deserialize;
@@ -135,6 +136,24 @@ pub async fn submit(
             tracing::error!(tenant_id = %auth.tenant_id, profile_id = %id, error = %error, "Hardware profile submission failed");
             ApiError::internal("Failed to submit hardware profile")
         })?.ok_or_else(|| ApiError::bad_request("Profile was not found in this tenant or is not in draft status"))?;
+    let profile_record_id = row.id.to_string();
+    if let Err(error) = AuditLogger::log(
+        &state.pool,
+        Some(auth.tenant_id),
+        &auth.tenant_name,
+        AuditAction::Custom("hardware_profile_submitted".into()),
+        "infrastructure_hardware_profile",
+        Some(&profile_record_id),
+        json!({
+            "profile_id": row.profile_id,
+            "version": row.version,
+            "qualification_claim": row.qualification,
+            "review_status": row.review_status
+        }),
+        None,
+    ).await {
+        tracing::error!(tenant_id = %auth.tenant_id, profile_id = %row.id, error = %error, "Hardware profile submission audit write failed");
+    }
     Ok(Json(json!({
         "profile": row,
         "submitted": true,

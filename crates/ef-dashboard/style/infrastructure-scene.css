@@ -59,3 +59,12 @@
  .infra-scene-inspector { min-height:260px; max-height:500px; }
  .infra-scene-load-row { flex-direction:column; }
 }
+
+
+.infra-scene-load h2 { margin:.1rem 0; font-size:1rem; }
+.infra-scene-builder-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.7rem; }
+.infra-scene-builder-grid label { display:flex; flex-direction:column; gap:.3rem; min-width:0; }
+.infra-scene-builder-grid input,.infra-scene-builder-grid select { width:100%; min-width:0; box-sizing:border-box; background:var(--bg-input); color:var(--text-primary); border:1px solid var(--border); border-radius:var(--radius); padding:.62rem .7rem; font:inherit; font-size:.82rem; }
+.infra-scene-load > .btn { align-self:flex-start; }
+@media (max-width:1000px) { .infra-scene-builder-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:520px) { .infra-scene-builder-grid { grid-template-columns:1fr; } }

@@ -410,7 +410,7 @@ mod tests {
 
     #[test]
     fn graph_validation_rejects_missing_and_ambiguous_endpoints() {
-        let mut left = discovered("host-1");
+        let left = discovered("host-1");
         let right = discovered("switch-1");
         let duplicate = discovered("host-1");
         let relationship = ResourceRelationship {
@@ -432,7 +432,6 @@ mod tests {
         let issues = validate_graph(&graph);
         assert!(issues.iter().any(|issue| issue.detail.contains("not present")));
 
-        left.identity = "host-1".into();
         let mut ambiguous = graph;
         ambiguous.resources.push(duplicate);
         ambiguous.relationships[0].target_identity = "switch-1".into();

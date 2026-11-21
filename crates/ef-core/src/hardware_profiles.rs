@@ -94,12 +94,21 @@ impl HardwareProfile {
             }
         }
         if self.sources.len() > 100 || self.assets.len() > 100 || self.components.len() > 256 { issues.push("A profile may contain at most 100 sources, 100 assets and 256 components".into()); }
+        let mut component_ids = std::collections::HashSet::new();
         for component in &self.components {
             if component.id.trim().is_empty() || component.class.trim().is_empty() {
                 issues.push("Each profile component requires a stable ID and class".into());
             }
+            if !component_ids.insert(component.id.as_str()) {
+                issues.push(format!("Duplicate profile component ID '{}'", component.id));
+            }
             if component.quantity == Some(0) {
                 issues.push(format!("Component '{}' quantity must be positive when supplied", component.id));
+            }
+            if let Some(parent) = &component.parent_component_id {
+                if parent == &component.id || !self.components.iter().any(|candidate| &candidate.id == parent) {
+                    issues.push(format!("Component '{}' has an invalid parent component reference", component.id));
+                }
             }
             if !component.facts.is_object() {
                 issues.push(format!("Component '{}' facts must be a JSON object", component.id));

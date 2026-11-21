@@ -423,7 +423,7 @@ pub fn instantiate_gpu_cluster_template(
             let racks = (u32::from(template.hosts) + u32::from(power.hosts_per_rack.max(1)) - 1)
                 / u32::from(power.hosts_per_rack.max(1));
             racks.saturating_mul(u32::from(power.pdus_per_rack)
-                + u32::from(power.ups_per_feed) * if power.require_redundant_pdu { 2 } else { 1 } + 2)
+                + u32::from(power.ups_per_feed) * (if power.require_redundant_pdu { 2 } else { 1 }) + 2)
         }) > 10_000 {
         issues.push("Expanded GPU cluster including peer, network, storage and CXL resources may contain at most 10000 resources".into());
     }
@@ -1040,6 +1040,27 @@ pub fn instantiate_gpu_cluster_template(
             }
         }
     }
+    let mut bounds = BTreeMap::new();
+    if let Some(power) = &template.power_cooling {
+        for rack in &rack_power_cooling {
+            if power.rack_width_mm > 0 && power.rack_depth_mm > 0 && power.rack_units > 0 {
+                bounds.insert(rack.rack_identity.clone(), SpatialBounds {
+                    width_mm: f64::from(power.rack_width_mm),
+                    height_mm: f64::from(power.rack_units) * 44.45,
+                    depth_mm: f64::from(power.rack_depth_mm),
+                });
+            }
+            if power.host_width_mm > 0 && power.host_depth_mm > 0 && power.host_height_u > 0 {
+                for placement in &rack.placements {
+                    bounds.insert(placement.host_identity.clone(), SpatialBounds {
+                        width_mm: f64::from(power.host_width_mm),
+                        height_mm: f64::from(placement.height_u) * 44.45,
+                        depth_mm: f64::from(power.host_depth_mm),
+                    });
+                }
+            }
+        }
+    }
     let pcie_topology = PcieTopology { devices, links };
     let instance = SimulationInstance {
         identity: template.identity.clone(),
@@ -1059,6 +1080,7 @@ pub fn instantiate_gpu_cluster_template(
         rack_power_cooling: template.power_cooling.as_ref().map(|_| RackPowerCoolingTopology { racks: rack_power_cooling }),
         geometry: BTreeMap::new(),
         poses,
+        bounds,
         parameters: BTreeMap::from([
             ("template".into(), serde_json::to_value(template).unwrap_or(Value::Null)),
             ("deterministic_topology".into(), Value::Bool(true)),
@@ -1077,6 +1099,14 @@ pub struct SpatialPose {
     pub translation: [f64; 3],
     pub rotation_xyzw: [f64; 4],
     pub scale: [f64; 3],
+}
+
+/// Axis-aligned dimensions in millimetres for spatially rendered resources.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpatialBounds {
+    pub width_mm: f64,
+    pub height_mm: f64,
+    pub depth_mm: f64,
 }
 
 /// Immutable reference to a geometry asset; geometry bytes live in the existing
@@ -1120,6 +1150,8 @@ pub struct SimulationInstance {
     #[serde(default)]
     pub poses: BTreeMap<String, SpatialPose>,
     #[serde(default)]
+    pub bounds: BTreeMap<String, SpatialBounds>,
+    #[serde(default)]
     pub parameters: BTreeMap<String, Value>,
 }
 
@@ -1147,6 +1179,15 @@ pub fn validate_simulation(instance: &SimulationInstance) -> Vec<String> {
         let norm = pose.rotation_xyzw.iter().map(|value| value * value).sum::<f64>().sqrt();
         if !norm.is_finite() || (norm - 1.0).abs() > 1e-3 {
             issues.push(format!("Spatial pose for '{identity}' rotation quaternion must be normalized"));
+        }
+    }
+    for (identity, bounds) in &instance.bounds {
+        if !instance.graph.resources.iter().any(|resource| resource.identity == *identity) {
+            issues.push(format!("Spatial bounds reference unknown resource '{identity}'"));
+        }
+        if !bounds.width_mm.is_finite() || !bounds.height_mm.is_finite() || !bounds.depth_mm.is_finite()
+            || bounds.width_mm <= 0.0 || bounds.height_mm <= 0.0 || bounds.depth_mm <= 0.0 {
+            issues.push(format!("Spatial bounds for '{identity}' must contain positive finite millimetre dimensions"));
         }
     }
     for (identity, asset) in &instance.geometry {
@@ -1747,6 +1788,8 @@ mod tests {
         assert_eq!(topology.racks[0].placements[0].start_u, 1);
         assert_eq!(topology.racks[0].ups_identities.len(), 0);
         assert_eq!(instance.poses.len(), 4);
+        assert_eq!(instance.bounds.len(), 4);
+        assert!(instance.bounds["rack-power:rack-001"].height_mm > 1800.0);
         assert_eq!(instance.graph.resources.iter().filter(|r| r.kind == "rack").count(), 2);
         assert_eq!(instance.graph.resources.iter().filter(|r| r.kind == "power_distribution_unit").count(), 4);
         assert!(validate_simulation(&instance).is_empty());

@@ -120,6 +120,48 @@ pub fn InfrastructureScenePage() -> impl IntoView {
         });
     };
 
+    let create_profile_simulation = move |_| {
+        let identity = template_identity.get_untracked().trim().to_string();
+        let scenario_id = template_scenario.get_untracked().trim().to_string();
+        let profile_record_id = template_profile_record_id.get_untracked();
+        if identity.is_empty() || scenario_id.is_empty() || profile_record_id.is_empty() {
+            set_error.set(Some("Simulation identity, scenario and a tenant hardware profile are required.".into()));
+            return;
+        }
+        set_creating.set(true);
+        set_error.set(None);
+        leptos::task::spawn_local(async move {
+            let body = serde_json::json!({
+                "identity": format!("{identity}-profile-derived"),
+                "scenario_id": scenario_id,
+                "hardware_profile_record_id": profile_record_id,
+                "seed": 1
+            });
+            match crate::api::post::<_, Value>("/infrastructure/simulations/templates/hardware-profile", &body).await {
+                Ok(response) => {
+                    let id = response["simulation"]["id"].as_str().unwrap_or("").to_string();
+                    if id.is_empty() {
+                        set_error.set(Some("Profile simulation was created, but the API response did not include its ID.".into()));
+                    } else {
+                        set_simulation_id.set(id.clone());
+                        match crate::api::get::<Value>(&format!("/infrastructure/simulations/{id}/scene")).await {
+                            Ok(document) => {
+                                set_scene.set(Some(document));
+                                set_selected.set(String::new());
+                                if let Ok(list) = crate::api::get::<Value>("/infrastructure/simulations").await {
+                                    set_simulations.set(list["simulations"].as_array().cloned().unwrap_or_default());
+                                }
+                            }
+                            Err(err) => set_error.set(Some(format!("Profile simulation saved, but scene loading failed: {err}"))),
+                        }
+                    }
+                }
+                Err(err) => set_error.set(Some(err)),
+            }
+            set_creating.set(false);
+        });
+    };
+
     let create_simulation = move |_| {
         let identity = template_identity.get_untracked().trim().to_string();
         let scenario_id = template_scenario.get_untracked().trim().to_string();
@@ -452,6 +494,9 @@ pub fn InfrastructureScenePage() -> impl IntoView {
                 </div>
                 <button class="btn btn-primary" on:click=create_simulation disabled=move || creating.get()>
                     {move || if creating.get() { "Creating simulation…" } else { "Create and open 3D twin" }}
+                </button>
+                <button class="btn btn-secondary" on:click=create_profile_simulation disabled=move || creating.get()>
+                    {move || if creating.get() { "Creating profile twin…" } else { "Create profile-derived component twin" }}
                 </button>
                 <p class="muted" style="font-size:0.72rem">"Optional profile binding references an immutable tenant profile version. A reference records provenance and review metadata; it does not assert physical qualification. Starter assumptions: 400 Gbps links, fixed chassis power envelope and 4U hosts."</p>
             </div>

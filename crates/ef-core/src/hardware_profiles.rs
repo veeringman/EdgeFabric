@@ -98,6 +98,79 @@ pub fn generic_gpu_node_profile() -> HardwareProfile {
     }
 }
 
+/// Result of evaluating one explicitly declared numeric profile constraint.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProfileConstraintResult {
+    pub key: String,
+    pub observed: f64,
+    pub operator: String,
+    pub expected: f64,
+    pub status: String,
+}
+
+/// Profile constraints use the optional `facts.constraints` object. Each
+/// leaf is an object containing one or more numeric operators: `min`,
+/// `max`, or `equals`. Only supplied observations and constraints are
+/// evaluated; absent values are reported as unknown rather than inferred.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HardwareProfileEvaluation {
+    pub profile_id: String,
+    pub profile_version: u32,
+    pub evaluated: Vec<ProfileConstraintResult>,
+    pub unknown: Vec<String>,
+    pub status: String,
+}
+
+pub fn evaluate_numeric_constraints(
+    profile: &HardwareProfile,
+    observations: &std::collections::BTreeMap<String, f64>,
+) -> HardwareProfileEvaluation {
+    let mut evaluated = Vec::new();
+    let mut unknown = Vec::new();
+    let constraints = profile.facts.get("constraints").and_then(serde_json::Value::as_object);
+    for (key, observed) in observations {
+        let Some(rule) = constraints.and_then(|all| all.get(key)).and_then(serde_json::Value::as_object) else {
+            unknown.push(key.clone());
+            continue;
+        };
+        let mut found = false;
+        for (operator, expected) in rule {
+            let Some(expected) = expected.as_f64() else { continue; };
+            let passed = match operator.as_str() {
+                "min" => *observed >= expected,
+                "max" => *observed <= expected,
+                "equals" => (*observed - expected).abs() <= f64::EPSILON,
+                _ => continue,
+            };
+            found = true;
+            evaluated.push(ProfileConstraintResult {
+                key: key.clone(),
+                observed: *observed,
+                operator: operator.clone(),
+                expected,
+                status: if passed { "pass" } else { "fail" }.into(),
+            });
+        }
+        if !found { unknown.push(key.clone()); }
+    }
+    let status = if evaluated.iter().any(|result| result.status == "fail") {
+        "fail"
+    } else if !evaluated.is_empty() && unknown.is_empty() {
+        "pass"
+    } else if evaluated.is_empty() {
+        "unknown"
+    } else {
+        "partial"
+    };
+    HardwareProfileEvaluation {
+        profile_id: profile.id.clone(),
+        profile_version: profile.version,
+        evaluated,
+        unknown,
+        status: status.into(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

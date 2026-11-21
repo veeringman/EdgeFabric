@@ -13,6 +13,10 @@
 9. **Simulation is first-class.** The simulation provider supports CI and safe development.
 10. **External lifecycle managers are adapters.** Integrate only for demonstrated supported operations; do not make them mandatory or assume complete coverage.
 
+11. **Virtual infrastructure is first-class.** Support versioned simulated instances and virtual hardware topologies using the same resource graph vocabulary, while retaining explicit synthetic provenance and isolation from physical inventory.
+12. **Spatial digital twins are graph-backed.** 3D/volumetric scenes reference graph resources through coordinate frames and content-addressed geometry assets; the viewer is not a system of record and geometry blobs do not live in graph rows.
+13. **Simulation fidelity is explicit.** Topology, capacity, performance, power/thermal and hardware-emulation models are distinct capabilities with declared assumptions and accuracy; simulated qualification is never represented as physical qualification.
+
 ## Explicit non-goals
 
 - A second network discovery engine.

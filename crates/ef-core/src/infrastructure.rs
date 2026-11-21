@@ -258,8 +258,18 @@ pub fn instantiate_gpu_cluster_template(
     let network_resource_count = template.network_fabric.as_ref().map_or(0, |network| {
         u32::from(template.hosts) * (u32::from(network.nics_per_host) + if network.dpu_per_host { 1 } else { 0 }) + 1
     });
-    if u32::from(template.hosts) * (u32::from(template.gpus_per_host) + 3) + network_resource_count > 10_000 {
-        issues.push("Expanded GPU cluster including network resources may contain at most 10000 resources".into());
+    let nvswitch_resource_count = if template.gpu_peer_fabric == Some(GpuPeerFabricKind::NvSwitch) {
+        u32::from(template.hosts)
+    } else { 0 };
+    if u32::from(template.hosts) * (u32::from(template.gpus_per_host) + 3)
+        + nvswitch_resource_count + network_resource_count > 10_000 {
+        issues.push("Expanded GPU cluster including peer and network resources may contain at most 10000 resources".into());
+    }
+    if template.gpu_peer_fabric == Some(GpuPeerFabricKind::NvLinkFullMesh) {
+        let per_host_links = u32::from(template.gpus_per_host) * u32::from(template.gpus_per_host.saturating_sub(1)) / 2;
+        if u32::from(template.hosts) * per_host_links > 20_000 {
+            issues.push("GPU peer fabric may contain at most 20000 links".into());
+        }
     }
     if template.numa_nodes_per_host == 0 || template.numa_nodes_per_host > 8 { issues.push("NUMA nodes per host must be between 1 and 8".into()); }
     if ![1, 2, 4, 8, 16, 32].contains(&template.root_complex_lanes)

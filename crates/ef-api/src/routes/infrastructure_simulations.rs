@@ -2,6 +2,7 @@
 //! reproducible simulation inputs; it does not execute a simulator.
 use axum::{Json, extract::{Path, Query, State}, http::StatusCode};
 use ef_core::hardware_profiles::{HardwareProfile, evaluate_numeric_constraints};
+use ef_core::hardware_profile_simulation::instantiate_hardware_profile;
 use ef_core::infrastructure::{GpuClusterTemplate, SimulationInstance, instantiate_gpu_cluster_template, validate_simulation};
 use ef_db::repo::infrastructure_hardware_profile::InfrastructureHardwareProfileRepo;
 use ef_db::repo::infrastructure_simulation::InfrastructureSimulationRepo;
@@ -136,6 +137,92 @@ pub struct GpuClusterSimulationRequest {
     pub template: GpuClusterTemplate,
     /// Optional UUID of a tenant-owned immutable hardware profile version.
     pub hardware_profile_record_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct HardwareProfileSimulationRequest {
+    pub identity: String,
+    pub scenario_id: String,
+    pub hardware_profile_record_id: Uuid,
+    #[serde(default)]
+    pub seed: u64,
+}
+
+
+/// POST /api/v1/infrastructure/simulations/templates/hardware-profile
+/// Expands a tenant-owned profile's declared component inventory into a structural simulation.
+pub async fn create_from_hardware_profile(
+    State(state): State<AppState>,
+    auth: AuthContext,
+    Json(request): Json<HardwareProfileSimulationRequest>,
+) -> ApiResult<Json<Value>> {
+    let row = InfrastructureHardwareProfileRepo::get(
+        &state.pool, auth.tenant_id, request.hardware_profile_record_id
+    ).await.map_err(|error| {
+        tracing::error!(tenant_id = %auth.tenant_id, profile_id = %request.hardware_profile_record_id, error = %error, "Profile-derived simulation lookup failed");
+        ApiError::internal("Failed to resolve hardware profile")
+    })?.ok_or_else(|| ApiError::bad_request("Hardware profile does not exist in this tenant"))?;
+    let profile: HardwareProfile = serde_json::from_value(row.document.clone())
+        .map_err(|error| {
+            tracing::error!(profile_id = %row.id, error = %error, "Stored hardware profile document is invalid");
+            ApiError::internal("Stored hardware profile is invalid")
+        })?;
+    let document_qualification = serde_json::to_value(profile.qualification)
+        .ok().and_then(|value| value.as_str().map(str::to_owned));
+    if profile.id != row.profile_id
+        || profile.version != row.version as u32
+        || document_qualification.as_deref() != Some(row.qualification.as_str())
+    {
+        tracing::error!(profile_id = %row.id, "Hardware profile row metadata does not match its immutable document");
+        return Err(ApiError::internal("Stored hardware profile metadata is inconsistent"));
+    }
+    let mut instance = instantiate_hardware_profile(
+        &profile, &request.identity, &request.scenario_id, request.seed
+    ).map_err(|issues| ApiError::bad_request(format!(
+        "Hardware profile simulation validation failed: {}", issues.join("; ")
+    )))?;
+    instance.parameters.insert("hardware_profile_binding".into(), json!({
+        "record_id": row.id,
+        "profile_id": row.profile_id,
+        "version": row.version,
+        "qualification": row.qualification,
+        "review_status": row.review_status,
+        "display_name": profile.display_name,
+        "physical_qualification_asserted": false
+    }));
+    let document = serde_json::to_value(&instance)
+        .map_err(|error| ApiError::bad_request(format!("Invalid simulation document: {error}")))?;
+    let seed = i64::try_from(instance.seed)
+        .map_err(|_| ApiError::bad_request("Simulation seed must be within the signed 64-bit range"))?;
+    let row = InfrastructureSimulationRepo::create(
+        &state.pool,
+        auth.tenant_id,
+        &instance.identity,
+        "topology_simulation",
+        &instance.scenario_id,
+        &instance.engine,
+        &instance.engine_version,
+        seed,
+        None,
+        &document,
+    ).await.map_err(|error| {
+        if let sqlx::Error::Database(db_error) = &error {
+            if db_error.code().as_deref() == Some("23505") {
+                return ApiError::bad_request("A simulation with this identity already exists in this tenant");
+            }
+        }
+        tracing::error!(tenant_id = %auth.tenant_id, error = %error, "Profile-derived simulation persistence failed");
+        ApiError::internal("Failed to store profile-derived simulation")
+    })?;
+    Ok(Json(json!({
+        "simulation": row,
+        "inventory_class": "simulated",
+        "resource_count": instance.graph.resources.len(),
+        "relationship_count": instance.graph.relationships.len(),
+        "hardware_profile_binding": instance.parameters.get("hardware_profile_binding").cloned().unwrap_or(Value::Null),
+        "physical_inventory_mutated": false,
+        "execution_started": false
+    })))
 }
 
 /// POST /api/v1/infrastructure/simulations/templates/gpu-cluster

@@ -1794,6 +1794,14 @@ mod tests {
         template.power_cooling.as_mut().unwrap().cooling_capacity_watts = 3500;
         let issues = instantiate_gpu_cluster_template(&template).unwrap_err();
         assert!(issues.iter().any(|issue| issue.contains("exceeds cooling capacity")));
+        template.power_cooling.as_mut().unwrap().rack_units = 3;
+        let issues = instantiate_gpu_cluster_template(&template).unwrap_err();
+        assert!(issues.iter().any(|issue| issue.contains("Rack-unit capacity")));
+        let power = template.power_cooling.as_mut().unwrap();
+        power.rack_units = 42;
+        power.host_width_mm = 700;
+        let issues = instantiate_gpu_cluster_template(&template).unwrap_err();
+        assert!(issues.iter().any(|issue| issue.contains("width exceeds rack width")));
     }
 
     #[test]

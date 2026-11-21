@@ -1,6 +1,6 @@
 //! Tenant-scoped immutable hardware profile registry and validation API.
 use axum::{Json, extract::{Path, Query, State}, http::StatusCode};
-use ef_core::hardware_profiles::{HardwareProfile, generic_gpu_node_profile};
+use ef_core::hardware_profiles::{HardwareProfile, builtin_hardware_profiles};
 use ef_db::repo::infrastructure_hardware_profile::InfrastructureHardwareProfileRepo;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -41,15 +41,18 @@ pub async fn list(
         ApiError::internal("Failed to list hardware profiles")
     })?;
     let count = rows.len();
-    let builtins = if query.profile_id.as_deref().is_none_or(|id| id == "edgefabric.generic-gpu-node") {
-        vec![generic_gpu_node_profile()]
-    } else { Vec::new() };
+    let builtins = builtin_hardware_profiles().into_iter()
+        .filter(|profile| query.profile_id.as_deref().is_none_or(|id| profile.id == id))
+        .collect::<Vec<_>>();
+    let built_in_profile_count = builtins.len();
     Ok(Json(json!({
         "profiles": rows,
         "built_in_profiles": builtins,
         "count": count,
+        "tenant_profile_count": count,
+        "built_in_profile_count": built_in_profile_count,
         "catalog": "edgefabric",
-        "catalog_version": 2
+        "catalog_version": 3
     })))
 }
 

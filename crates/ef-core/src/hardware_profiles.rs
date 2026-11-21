@@ -118,6 +118,17 @@ impl HardwareProfile {
                 if source.title.trim().is_empty() || source.uri.trim().is_empty() || source.publisher.trim().is_empty() {
                     issues.push(format!("Component '{}' has a source without title, URI or publisher", component.id));
                 }
+                if source.sha256.as_ref().is_some_and(|digest| digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit())) {
+                    issues.push(format!("Component '{}' has an invalid source SHA-256", component.id));
+                }
+            }
+            for asset in &component.assets {
+                if asset.uri.trim().is_empty() || asset.license.trim().is_empty()
+                    || asset.sha256.len() != 64
+                    || !asset.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+                {
+                    issues.push(format!("Component '{}' has an invalid or unlicensed geometry asset", component.id));
+                }
             }
         }
         for asset in &self.assets {

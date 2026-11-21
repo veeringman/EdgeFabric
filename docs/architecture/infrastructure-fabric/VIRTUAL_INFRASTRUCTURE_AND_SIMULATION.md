@@ -63,6 +63,17 @@ For the example above, the deterministic graph contains 2 hosts, 2 root complexe
 
 The template can optionally add a GPU peer fabric, independent of PCIe: `nv_link_full_mesh` creates direct GPU-to-GPU links within each host, while `nv_switch` creates a synthetic NVSwitch resource per host and GPU-to-switch peer links. The peer-fabric validator checks endpoint membership, self-links, duplicate identities and duplicate endpoint pairs. For two hosts with four GPUs each, full-mesh mode creates 12 peer links (six per host); NVSwitch mode creates eight GPU-to-switch links and two NVSwitch resources. These are structural abstractions: they do not assert a particular NVLink generation, bandwidth, switch radix, NVLink lane count, or measured peer performance. The template still does not emulate a GPU, launch a workload, or qualify hardware. NIC/DPU, network fabrics, storage, power and cooling remain subsequent typed extensions.
 
+## Storage and CXL topology primitives
+
+Simulation documents may now carry two additional typed topologies, each validated independently from PCIe, GPU peer connectivity and host networking:
+
+- **Storage topology:** links identify source and target resources, transport (`direct_nvme`, `nvme_of_tcp`, `nvme_of_rdma` or `fibre_channel`), addressable capacity in GiB and configured link rate in Gbps. This can describe local NVMe paths or networked storage endpoints without conflating storage transport with the general-purpose network fabric.
+- **CXL memory topology:** memory devices identify graph resources, addressable capacity in GiB and optional NUMA locality. Host-to-expander links carry CXL generation and lane width and must reference a declared CXL memory device and a resource in the graph.
+
+The validators reject duplicate/empty identities, missing endpoints, self-links, zero capacities or rates, duplicate endpoint pairs, and unsupported CXL generation/lane-width values. API payloads are bounded to 20,000 storage links, 10,000 CXL memory devices and 20,000 CXL links.
+
+These are topology and declared-capacity primitives, not a storage performance model or a CXL memory-coherency emulator. They do not predict IOPS, latency, bandwidth under contention, memory pooling behavior, decoder/interleave configuration, or NUMA performance. The current GPU-cluster template does not yet synthesize storage arrays, NVMe drives or CXL expanders; callers can supply these typed structures in a simulation document. Template expansion and richer CXL decoder/port modeling remain follow-on work.
+
 ## Example scenario
 
 The following is illustrative declarative intent, not a claim of tested or supported hardware. It describes two virtual hosts, each with four virtual GPUs behind a PCIe switch, and a separate GPU peer fabric relationship.

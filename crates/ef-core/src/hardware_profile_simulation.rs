@@ -59,6 +59,7 @@ pub fn instantiate_hardware_profile(
             ("vendor".into(), json!(profile.vendor)),
             ("qualification".into(), json!(profile.qualification)),
             ("profile_facts".into(), profile.facts.clone()),
+            ("profile_sources".into(), json!(profile.sources)),
             ("supported_components".into(), json!(profile.supported_components)),
             ("geometry_assets".into(), json!(profile.assets.iter().map(|asset| json!({
                 "format": asset.format,
@@ -121,6 +122,7 @@ pub fn instantiate_hardware_profile(
                 ("profile_component_index".into(), json!(index + 1)),
                 ("quantity_known".into(), Value::Bool(known_quantity)),
                 ("facts".into(), component.facts.clone()),
+                ("component_sources".into(), json!(component.sources)),
                 ("physical_geometry_available".into(), Value::Bool(false)),
             ]);
             if let Some(quantity) = component.quantity {

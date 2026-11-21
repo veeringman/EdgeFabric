@@ -115,3 +115,15 @@ Profile authors may supply machine-readable numeric limits under `facts.constrai
 Only explicitly declared numeric constraints are evaluated. Missing constraints or missing observations remain `unknown`; EdgeFabric does not infer values. Evaluation status is `pass`, `fail`, `partial`, or `unknown`. This is a profile-vs-template structural check, not a vendor certification, electrical simulation, thermal/CFD model, measured performance result, or physical deployment approval.
 
 A tenant may submit a draft profile for review with `POST /api/v1/infrastructure/hardware-profiles/{id}/submit`. This is a one-way `draft` to `submitted` transition scoped to the owning tenant. Approval and rejection are deliberately not exposed by this endpoint; they require a separately authorized review workflow. Submission never grants qualification.
+
+### NVIDIA Rubin and Vera Rubin Ultra reference catalog
+
+The built-in catalog now includes read-only, source-linked reference profiles for the Rubin GPU, HGX Rubin NVL8, Vera Rubin NVL72 and Vera Rubin Ultra NVL576. These entries are `vendor_documented` references, not vendor-validated qualification packages. Their source URLs and publication/access revisions are retained in the profile documents.
+
+The Rubin GPU reference records NVIDIA-published 288 GB HBM4, 22 TB/s memory bandwidth and sixth-generation NVLink at 3.6 TB/s per GPU. HGX Rubin NVL8 records the eight-GPU baseboard and the published system-level HBM4, NVLink-switch and networking figures. NVIDIA labels its HGX specifications preliminary and subject to change; consumers must preserve this caveat and the source revision.
+
+The Vera Rubin NVL72 reference records 72 GPUs, 36 Vera CPUs, 18 compute trays, nine NVLink switch trays, ConnectX-9 SuperNIC and BlueField-4 DPU counts per compute tray, NVLink 6 bandwidth, approximate rack weight and the published 45°C coolant inlet design point. The Vera Rubin Ultra NVL576 reference records the announced eight-rack, 576-GPU, two-layer all-to-all NVLink domain using copper and direct optical inter-rack connections.
+
+**Modeling boundary:** an NVL72 compute tray is not a generic host server. Do not translate its 18 compute trays into 18 conventional hosts. The existing generic GPU-cluster template remains a topology simulation, not a faithful NVL72/NVL576 system model. Exact rack mechanical envelopes, electrical input and transient envelopes, coolant flow/pressure, CDU/manifold design, service clearances, detailed tray layouts, cable schedules, PCIe slot maps and OEM variants require their respective authoritative documents and licensed assets. Unknowns are intentionally omitted.
+
+Read-only built-ins can be copied into a tenant's immutable profile registry with `POST /api/v1/infrastructure/hardware-profiles/clone` and body `{"profile_id":"nvidia.hgx-rubin-nvl8"}` (replace with another built-in ID as required). The clone retains its public source provenance and vendor-documented classification but begins in tenant review state `draft`. It can then be submitted with `POST /api/v1/infrastructure/hardware-profiles/{id}/submit`. This does not grant vendor validation or field verification.

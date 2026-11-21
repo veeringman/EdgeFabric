@@ -395,4 +395,26 @@ mod tests {
         assert_eq!(result.status, "unknown");
         assert_eq!(result.unknown, vec!["gpus_per_host"]);
     }
+
+    #[test]
+    fn built_in_nvidia_reference_profiles_have_provenance_and_validate() {
+        let profiles = builtin_hardware_profiles();
+        assert!(profiles.len() >= 5);
+        for profile in profiles {
+            assert!(profile.validate().is_empty(), "{}: {:?}", profile.id, profile.validate());
+            if profile.vendor.as_deref() == Some("NVIDIA") {
+                assert_eq!(profile.qualification, HardwareProfileQualification::VendorDocumented);
+                assert!(!profile.sources.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_constraint_operator_is_rejected() {
+        let mut profile = generic_gpu_node_profile();
+        profile.facts = serde_json::json!({
+            "constraints": { "gpus_per_host": { "greater_than": 8 } }
+        });
+        assert!(profile.validate().iter().any(|issue| issue.contains("numeric min, max or equals")));
+    }
 }

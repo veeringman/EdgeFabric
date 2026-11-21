@@ -49,6 +49,12 @@ fn validate_instance(instance: &SimulationInstance) -> Vec<String> {
     if instance.cxl_topology.as_ref().is_some_and(|topology| topology.devices.len() > 10_000 || topology.links.len() > 20_000) {
         issues.push("A CXL topology may contain at most 10000 memory devices and 20000 links".into());
     }
+    if instance.rack_power_cooling.as_ref().is_some_and(|topology| topology.racks.len() > 10_000
+        || topology.racks.iter().any(|rack| rack.host_identities.len() > 256
+            || rack.pdu_identities.len() > 8 || rack.ups_identities.len() > 16
+            || rack.placements.len() > 256)) {
+        issues.push("Rack power/cooling topology exceeds rack, host, PDU, UPS or placement limits".into());
+    }
     if instance.geometry.len() > 10_000 || instance.poses.len() > 10_000 {
         issues.push("A simulation may contain at most 10000 geometry or pose entries".into());
     }
@@ -176,6 +182,8 @@ pub async fn create_gpu_cluster(
         "cxl_link_count": instance.cxl_topology.as_ref().map_or(0, |topology| topology.links.len()),
         "rack_count": instance.rack_power_cooling.as_ref().map_or(0, |topology| topology.racks.len()),
         "pdu_count": instance.rack_power_cooling.as_ref().map_or(0, |topology| topology.racks.iter().map(|rack| rack.pdu_identities.len()).sum::<usize>()),
+        "ups_count": instance.rack_power_cooling.as_ref().map_or(0, |topology| topology.racks.iter().map(|rack| rack.ups_identities.len()).sum::<usize>()),
+        "rack_unit_placement_count": instance.rack_power_cooling.as_ref().map_or(0, |topology| topology.racks.iter().map(|rack| rack.placements.len()).sum::<usize>()),
         "deterministic_topology": true,
         "physical_inventory_mutated": false,
         "execution_started": false

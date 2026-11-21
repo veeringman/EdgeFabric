@@ -68,3 +68,17 @@ The same dashboard page includes a GPU cluster template builder. It submits a de
 The current builder exposes host/GPU counts, PCIe generation, GPU memory, NVLink/NVSwitch selection, Ethernet/RoCE/InfiniBand network selection, optional per-host DPU, direct NVMe or shared NVMe-oF/Fibre Channel storage, optional CXL memory expansion, hosts-per-rack, rack-unit capacity, and redundant A/B power with UPS. Chassis dimensions, per-device power assumptions, link rates and storage capacities are starter-profile values in this iteration; they are not vendor-certified specifications. Backend template validation remains authoritative and may reject a configuration whose declared rack, power, cooling, port or topology budgets do not fit.
 
 The builder does not create vendor-specific HGX/DGX CAD geometry and does not claim Rubin compatibility from a generic topology. Vendor-qualified chassis and component profiles are a separate next step.
+
+## Versioned hardware profile catalog
+
+The authenticated API exposes a starter catalog:
+
+- `GET /api/v1/infrastructure/hardware-profiles` — list built-in profiles and catalog metadata.
+- `GET /api/v1/infrastructure/hardware-profiles/{id}` — retrieve a profile by stable ID.
+- `POST /api/v1/infrastructure/hardware-profiles/validate` — validate a submitted profile document without saving it or granting qualification.
+
+A profile is versioned and carries optional vendor/product identity, structured facts, supported component classes, source provenance, and licensed geometry asset references with SHA-256 digests. Unknown facts are omitted rather than inferred. Vendor-documentation, vendor-validation and field-verification states require provenance; validation is structural and does not independently prove that a source is authoritative.
+
+The built-in `edgefabric.generic-gpu-node` profile is explicitly `template_only`. It has no vendor, product model, dimensions, port map, power envelope or CAD asset. It is suitable for generic topology authoring only. No Rubin or Rubin Ultra product profile is currently published by this catalog. Those profiles must be populated from authoritative vendor documentation and reviewed CAD/asset packages before they can be used for physical qualification.
+
+This first catalog is read-only and built into the API; tenant-persisted profile authoring, approval workflow, profile-to-simulation binding and asset resolution are subsequent implementation steps. Profile validation does not persist input and never changes a simulation or physical inventory.

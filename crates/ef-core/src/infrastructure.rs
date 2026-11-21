@@ -322,6 +322,19 @@ mod tests {
     }
 
     #[test]
+    fn declaration_validation_rejects_empty_and_duplicate_identity() {
+        let declarations = vec![
+            ResourceDeclaration { identity: " ".into(), kind: "host".into(), expected: BTreeMap::new() },
+            ResourceDeclaration { identity: "node-1".into(), kind: "host".into(), expected: BTreeMap::new() },
+            ResourceDeclaration { identity: "node-1".into(), kind: " ".into(), expected: BTreeMap::new() },
+        ];
+        let issues = validate_declarations(&declarations);
+        assert!(issues.iter().any(|issue| issue.contains("identity must not be empty")));
+        assert!(issues.iter().any(|issue| issue.contains("duplicates identity")));
+        assert!(issues.iter().any(|issue| issue.contains("kind must not be empty")));
+    }
+
+    #[test]
     fn identical_verified_resource_matches() {
         let result = reconcile(&[declaration("host-1")], &snapshot(vec![discovered("host-1")], true));
         assert_eq!(result.matched_count, 1);

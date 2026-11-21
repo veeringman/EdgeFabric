@@ -765,6 +765,49 @@ mod tests {
         DiscoverySnapshot { observed_at: Utc::now(), coverage_complete, resources }
     }
 
+    fn sample_gpu_template() -> GpuClusterTemplate {
+        GpuClusterTemplate {
+            identity: "lab:gpu-cluster".into(),
+            scenario_id: "rubin-qualification-lab".into(),
+            hosts: 2,
+            gpus_per_host: 4,
+            pcie_generation: 6,
+            root_complex_lanes: 32,
+            switch_uplink_lanes: 16,
+            gpu_lanes: 16,
+            switch_downstream_ports: 8,
+            gpu_memory_gib: 288,
+            numa_nodes_per_host: 2,
+            seed: 42,
+        }
+    }
+
+    #[test]
+    fn gpu_cluster_template_expands_deterministic_topology() {
+        let template = sample_gpu_template();
+        let first = instantiate_gpu_cluster_template(&template).unwrap();
+        let second = instantiate_gpu_cluster_template(&template).unwrap();
+        assert_eq!(first.graph.resources.len(), 14);
+        assert_eq!(first.graph.relationships.len(), 12);
+        assert_eq!(first.pcie_topology.as_ref().unwrap().devices.len(), 14);
+        assert_eq!(first.pcie_topology.as_ref().unwrap().links.len(), 10);
+        let identities = |instance: &SimulationInstance| {
+            instance.graph.resources.iter().map(|resource| resource.identity.clone()).collect::<Vec<_>>()
+        };
+        assert_eq!(identities(&first), identities(&second));
+        assert_eq!(first.pcie_topology, second.pcie_topology);
+        assert!(first.graph.resources.iter().all(|resource| !resource.verified));
+        assert!(validate_simulation(&first).is_empty());
+    }
+
+    #[test]
+    fn gpu_cluster_template_rejects_insufficient_switch_ports() {
+        let mut template = sample_gpu_template();
+        template.switch_downstream_ports = 2;
+        let issues = instantiate_gpu_cluster_template(&template).unwrap_err();
+        assert!(issues.iter().any(|issue| issue.contains("downstream port count")));
+    }
+
     #[test]
     fn pcie_topology_rejects_links_above_endpoint_capabilities() {
         let graph = InfrastructureGraph {

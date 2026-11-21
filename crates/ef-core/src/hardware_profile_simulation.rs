@@ -189,6 +189,8 @@ mod tests {
         assert_eq!(instance.graph.resources.iter().filter(|resource| resource.kind == "gpu").count(), 72);
         assert_eq!(instance.graph.resources.iter().filter(|resource| resource.kind == "compute_tray").count(), 18);
         assert_eq!(instance.graph.resources.iter().filter(|resource| resource.kind == "nvlink_switch_tray").count(), 9);
+        assert_eq!(instance.graph.resources.iter().filter(|resource| resource.kind == "network_interface").count(), 144);
+        assert_eq!(instance.graph.resources.iter().filter(|resource| resource.kind == "dpu").count(), 18);
         assert!(!instance.graph.coverage_complete);
         assert!(instance.geometry.is_empty());
     }

@@ -1,7 +1,7 @@
 //! Tenant-scoped simulation scenario registry. This API validates and stores
 //! reproducible simulation inputs; it does not execute a simulator.
 use axum::{Json, extract::{Path, Query, State}, http::StatusCode};
-use ef_core::hardware_profiles::HardwareProfile;
+use ef_core::hardware_profiles::{HardwareProfile, evaluate_numeric_constraints};
 use ef_core::infrastructure::{GpuClusterTemplate, SimulationInstance, instantiate_gpu_cluster_template, validate_simulation};
 use ef_db::repo::infrastructure_hardware_profile::InfrastructureHardwareProfileRepo;
 use ef_db::repo::infrastructure_simulation::InfrastructureSimulationRepo;
@@ -165,6 +165,39 @@ pub async fn create_gpu_cluster(
         if profile.id != row.profile_id || profile.version != row.version as u32 {
             return Err(ApiError::bad_request("Hardware profile record metadata does not match its immutable document"));
         }
+        let template = &request.template;
+        let mut observations = std::collections::BTreeMap::from([
+            ("hosts".to_string(), f64::from(template.hosts)),
+            ("gpus_per_host".to_string(), f64::from(template.gpus_per_host)),
+            ("pcie_generation".to_string(), f64::from(template.pcie_generation)),
+            ("root_complex_lanes".to_string(), f64::from(template.root_complex_lanes)),
+            ("switch_uplink_lanes".to_string(), f64::from(template.switch_uplink_lanes)),
+            ("gpu_lanes".to_string(), f64::from(template.gpu_lanes)),
+            ("gpu_memory_gib".to_string(), f64::from(template.gpu_memory_gib)),
+            ("numa_nodes_per_host".to_string(), f64::from(template.numa_nodes_per_host)),
+        ]);
+        if let Some(network) = &template.network_fabric {
+            observations.insert("network_link_speed_gbps".into(), f64::from(network.link_speed_gbps));
+            observations.insert("nics_per_host".into(), f64::from(network.nics_per_host));
+            observations.insert("network_switch_ports".into(), f64::from(network.switch_ports));
+        }
+        if let Some(storage) = &template.storage {
+            observations.insert("storage_link_speed_gbps".into(), f64::from(storage.link_speed_gbps));
+            observations.insert("storage_capacity_gib".into(), storage.shared_array_capacity_gib as f64);
+        }
+        if let Some(rack) = &template.power_cooling {
+            observations.insert("hosts_per_rack".into(), f64::from(rack.hosts_per_rack));
+            observations.insert("rack_units".into(), f64::from(rack.rack_units));
+            observations.insert("host_power_watts".into(), rack.host_power_watts as f64);
+            observations.insert("gpu_power_watts".into(), rack.gpu_power_watts as f64);
+            observations.insert("rack_power_capacity_watts".into(), rack.rack_power_capacity_watts as f64);
+            observations.insert("cooling_capacity_watts".into(), rack.cooling_capacity_watts as f64);
+            observations.insert("rack_depth_mm".into(), f64::from(rack.rack_depth_mm));
+            observations.insert("rack_width_mm".into(), f64::from(rack.rack_width_mm));
+            observations.insert("host_depth_mm".into(), f64::from(rack.host_depth_mm));
+            observations.insert("host_width_mm".into(), f64::from(rack.host_width_mm));
+        }
+        let constraint_evaluation = evaluate_numeric_constraints(&profile, &observations);
         profile_binding = json!({
             "record_id": row.id,
             "profile_id": row.profile_id,
@@ -173,7 +206,8 @@ pub async fn create_gpu_cluster(
             "review_status": row.review_status,
             "display_name": profile.display_name,
             "binding_kind": "tenant_hardware_profile_reference",
-            "physical_qualification_asserted": false
+            "physical_qualification_asserted": false,
+            "constraint_evaluation": constraint_evaluation
         });
         instance.parameters.insert("hardware_profile_binding".into(), profile_binding.clone());
     }

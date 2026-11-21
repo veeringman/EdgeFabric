@@ -102,3 +102,16 @@ Tenant isolation is enforced in repository queries. The built-in generic profile
 The GPU cluster template endpoint accepts an optional top-level `hardware_profile_record_id` UUID alongside the existing flattened template fields. When supplied, the API resolves that immutable record inside the caller's tenant, checks that the stored document's profile ID and version agree with its database metadata, and embeds a read-only `hardware_profile_binding` record in the simulation parameters. The create response and scene projection expose the binding, including qualification and review-status metadata.
 
 The dashboard builder exposes the optional profile-version UUID field. Obtain candidate UUIDs from `GET /api/v1/infrastructure/hardware-profiles`. The reference does not copy mutable profile data into the simulation and does not confer vendor qualification. It currently records association and provenance only; physical fit, PCIe lane mapping, power/cooling limits, cable maps and vendor-specific topology are not yet evaluated against profile facts. The referenced profile must remain in the same tenant.
+
+### Hardware profile constraints and submission
+
+Profile authors may supply machine-readable numeric limits under `facts.constraints`. Each constraint key maps to an object containing one or more of `min`, `max`, and `equals` numeric operators. The current GPU-cluster evaluator maps template inputs to these observation keys:
+
+- `hosts`, `gpus_per_host`, `pcie_generation`, `root_complex_lanes`, `switch_uplink_lanes`, `gpu_lanes`, `gpu_memory_gib`, `numa_nodes_per_host`
+- `network_link_speed_gbps`, `nics_per_host`, `network_switch_ports`
+- `storage_link_speed_gbps`, `storage_capacity_gib`
+- `hosts_per_rack`, `rack_units`, `host_power_watts`, `gpu_power_watts`, `rack_power_capacity_watts`, `cooling_capacity_watts`, `rack_depth_mm`, `rack_width_mm`, `host_depth_mm`, `host_width_mm`
+
+Only explicitly declared numeric constraints are evaluated. Missing constraints or missing observations remain `unknown`; EdgeFabric does not infer values. Evaluation status is `pass`, `fail`, `partial`, or `unknown`. This is a profile-vs-template structural check, not a vendor certification, electrical simulation, thermal/CFD model, measured performance result, or physical deployment approval.
+
+A tenant may submit a draft profile for review with `POST /api/v1/infrastructure/hardware-profiles/{id}/submit`. This is a one-way `draft` to `submitted` transition scoped to the owning tenant. Approval and rejection are deliberately not exposed by this endpoint; they require a separately authorized review workflow. Submission never grants qualification.

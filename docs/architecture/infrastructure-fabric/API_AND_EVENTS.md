@@ -53,7 +53,7 @@ Example request:
 }
 ```
 
-The current endpoint intentionally marks discovery coverage incomplete because registered runners are not equivalent to a complete physical-site/network scan. Therefore an absent declaration target is reported as partially discovered, not conclusively missing. Discovered runners outside the submitted declaration set are unexpected within that declared scope. Persistent manifest revisions, full multi-source graph assembly and site-wide coverage tracking remain subsequent implementation work.
+The current endpoint intentionally marks discovery coverage incomplete because registered runners are not equivalent to a complete physical-site/network scan. Therefore an absent declaration target is reported as partially discovered, not conclusively missing. Discovered runners outside the submitted declaration set are unexpected within that declared scope. Versioned tenant-scoped manifest storage is now implemented at `GET/POST /api/v1/infrastructure/manifests` and `GET /api/v1/infrastructure/manifests/{id}`. Each `(tenant, name, version)` is immutable and unique; a new revision is created with a higher version. The current manifest API stores and retrieves JSON documents containing a `declarations` array; schema-level declaration validation and manifest-backed reconciliation are the next increment. Full multi-source graph assembly and site-wide coverage tracking remain subsequent work.
 
 ## Event envelope
 

@@ -37,6 +37,9 @@ fn validate_instance(instance: &SimulationInstance) -> Vec<String> {
     if instance.pcie_topology.as_ref().is_some_and(|topology| topology.devices.len() > 10_000 || topology.links.len() > 20_000) {
         issues.push("A PCIe topology may contain at most 10000 devices and 20000 links".into());
     }
+    if instance.gpu_peer_fabric.as_ref().is_some_and(|fabric| fabric.links.len() > 20_000) {
+        issues.push("A GPU peer fabric may contain at most 20000 links".into());
+    }
     if instance.geometry.len() > 10_000 || instance.poses.len() > 10_000 {
         issues.push("A simulation may contain at most 10000 geometry or pose entries".into());
     }
@@ -155,6 +158,8 @@ pub async fn create_gpu_cluster(
         "relationship_count": instance.graph.relationships.len(),
         "pcie_device_count": instance.pcie_topology.as_ref().map_or(0, |topology| topology.devices.len()),
         "pcie_link_count": instance.pcie_topology.as_ref().map_or(0, |topology| topology.links.len()),
+        "gpu_peer_fabric_kind": instance.gpu_peer_fabric.as_ref().map(|fabric| fabric.kind),
+        "gpu_peer_link_count": instance.gpu_peer_fabric.as_ref().map_or(0, |fabric| fabric.links.len()),
         "deterministic_topology": true,
         "physical_inventory_mutated": false,
         "execution_started": false

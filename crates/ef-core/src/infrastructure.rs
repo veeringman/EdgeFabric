@@ -179,10 +179,17 @@ pub fn instantiate_gpu_cluster_template(
     template: &GpuClusterTemplate,
 ) -> Result<SimulationInstance, Vec<String>> {
     let mut issues = Vec::new();
-    if template.identity.trim().is_empty() { issues.push("Template identity is required".into()); }
-    if template.scenario_id.trim().is_empty() { issues.push("Scenario ID is required".into()); }
+    if template.identity.trim().is_empty() || template.identity.len() > 200 {
+        issues.push("Template identity is required and must be at most 200 characters".into());
+    }
+    if template.scenario_id.trim().is_empty() || template.scenario_id.len() > 200 {
+        issues.push("Scenario ID is required and must be at most 200 characters".into());
+    }
     if template.hosts == 0 || template.hosts > 256 { issues.push("Hosts must be between 1 and 256".into()); }
     if template.gpus_per_host == 0 || template.gpus_per_host > 64 { issues.push("GPUs per host must be between 1 and 64".into()); }
+    if u32::from(template.hosts) * (u32::from(template.gpus_per_host) + 3) > 10_000 {
+        issues.push("Expanded GPU cluster may contain at most 10000 resources".into());
+    }
     if template.numa_nodes_per_host == 0 || template.numa_nodes_per_host > 8 { issues.push("NUMA nodes per host must be between 1 and 8".into()); }
     if ![1, 2, 4, 8, 16, 32].contains(&template.root_complex_lanes)
         || ![1, 2, 4, 8, 16, 32].contains(&template.switch_uplink_lanes)
@@ -217,6 +224,7 @@ pub fn instantiate_gpu_cluster_template(
         host_attributes.insert("host_index".into(), Value::from(host_index + 1));
         host_attributes.insert("gpus".into(), Value::from(template.gpus_per_host));
         host_attributes.insert("numa_nodes".into(), Value::from(template.numa_nodes_per_host));
+        host_attributes.insert("simulation_seed".into(), Value::from(template.seed));
         resources.push(DiscoveredResource {
             identity: host.clone(), kind: "host".into(), attributes: host_attributes,
             source: source.into(), observed_at: now, verified: false,

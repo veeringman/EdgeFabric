@@ -312,7 +312,7 @@ pub fn builtin_hardware_profiles() -> Vec<HardwareProfile> {
             components: vec![
                 HardwareProfileComponent { id: "rubin-ultra-gpu".into(), class: "gpu".into(), vendor: Some("NVIDIA".into()), model: Some("Rubin Ultra GPU".into()), quantity: Some(576), facts: serde_json::json!({}), sources: vec![source_pod.clone()], assets: Vec::new() },
                 HardwareProfileComponent { id: "mgx-nvl-rack".into(), class: "rack".into(), vendor: Some("NVIDIA".into()), model: Some("MGX NVL rack".into()), quantity: Some(8), facts: serde_json::json!({"rubin_ultra_gpus_per_rack":72}), sources: vec![source_pod.clone()], assets: Vec::new() },
-                HardwareProfileComponent { id: "nvlink-domain".into(), class: "nvlink_domain".into(), vendor: Some("NVIDIA".into()), model: Some("Two-layer all-to-all".into()), quantity: Some(1), facts: serde_json::json!({"gpu_count":576,"inter_rack_media":["copper","direct_optical"]}), sources: vec![source_pod], assets: Vec::new() }
+                HardwareProfileComponent { id: "nvlink-domain".into(), class: "nvlink_domain".into(), vendor: Some("NVIDIA".into()), model: Some("Two-layer all-to-all".into()), quantity: Some(1), facts: serde_json::json!({"gpu_count":576,"inter_rack_media":["copper","direct_optical"]}), sources: vec![source_pod.clone()], assets: Vec::new() }
             ],
             assets: Vec::new(),
             sources: vec![source_pod],

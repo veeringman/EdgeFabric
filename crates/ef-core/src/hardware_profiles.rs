@@ -52,6 +52,24 @@ impl HardwareProfile {
         if self.version == 0 { issues.push("Profile version must be a positive integer".into()); }
         if self.display_name.trim().is_empty() || self.display_name.len() > 200 { issues.push("Profile display name must contain 1 to 200 characters".into()); }
         if !self.facts.is_object() { issues.push("Profile facts must be a JSON object; omit unknown facts".into()); }
+        if let Some(constraints) = self.facts.get("constraints") {
+            if let Some(constraints) = constraints.as_object() {
+                for (key, rule) in constraints {
+                    match rule.as_object() {
+                        Some(rule) if !rule.is_empty() => {
+                            for (operator, expected) in rule {
+                                if !matches!(operator.as_str(), "min" | "max" | "equals") || expected.as_f64().is_none() {
+                                    issues.push(format!("Constraint '{key}' must use numeric min, max or equals operators"));
+                                }
+                            }
+                        }
+                        _ => issues.push(format!("Constraint '{key}' must be a non-empty object")),
+                    }
+                }
+            } else {
+                issues.push("Profile facts.constraints must be an object".into());
+            }
+        }
         if self.sources.len() > 100 || self.assets.len() > 100 { issues.push("A profile may contain at most 100 sources and 100 assets".into()); }
         for source in &self.sources {
             if source.title.trim().is_empty() || source.uri.trim().is_empty() || source.publisher.trim().is_empty() {

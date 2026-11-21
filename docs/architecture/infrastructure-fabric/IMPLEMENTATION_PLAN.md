@@ -21,6 +21,17 @@ Deliverable: repository-fit architecture decision, sequence diagrams and minimal
 
 Acceptance: existing EdgeFabric discovery is reused; no second scanner or duplicate inventory source is introduced.
 
+## Phase 1B — Virtual infrastructure and spatial simulation
+
+- Define simulation instance lifecycle, isolation and provenance; simulated outputs never masquerade as physical discovery.
+- Add declarative templates for virtual GPU clusters and PCIe topologies, including PCIe generation/width, root complexes, switches, NUMA affinity, GPU peer fabrics, NIC/DPU paths and power/cooling constraints.
+- Add spatial coordinate frames, transforms and content-addressed geometry references for sites, racks, chassis and boards.
+- Integrate deterministic topology/capacity simulators first; add performance and power/thermal models only with explicit fidelity metadata and validation fixtures.
+- Expose model/scene data to a separate 3D viewer through graph and geometry APIs; keep geometry assets in artifact storage.
+- Label simulated qualification and capacity estimates separately from physical qualification evidence.
+
+Acceptance: same scenario + manifest + engine version + seed produces deterministic topology output; invalid links and impossible topology constraints are reported; simulated inventory is isolated from physical inventory and tenant-scoped.
+
 ## Phase 2 — Manifests and reconciliation
 
 - Add versioned site/rack/node manifests and profile references.

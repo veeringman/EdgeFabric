@@ -1282,8 +1282,29 @@ pub fn validate_simulation(instance: &SimulationInstance) -> Vec<String> {
             if rack.redundant_feed_required && rack.pdu_identities.len() < 2 {
                 issues.push(format!("Rack '{}' requires redundant PDU feeds but has fewer than two PDUs", rack.rack_identity));
             }
-            for id in rack.host_identities.iter().chain(rack.pdu_identities.iter()) {
+            for id in rack.host_identities.iter().chain(rack.pdu_identities.iter()).chain(rack.ups_identities.iter()) {
                 if !ids.contains(id.as_str()) { issues.push(format!("Rack '{}' references missing resource '{id}'", rack.rack_identity)); }
+            }
+            let mut occupied_units = HashSet::new();
+            let mut placed_hosts = HashSet::new();
+            for placement in &rack.placements {
+                if !rack.host_identities.iter().any(|host| host == &placement.host_identity) {
+                    issues.push(format!("Rack '{}' placement references non-member host '{}'", rack.rack_identity, placement.host_identity));
+                }
+                if !placed_hosts.insert(placement.host_identity.as_str()) {
+                    issues.push(format!("Rack '{}' places host '{}' more than once", rack.rack_identity, placement.host_identity));
+                }
+                if placement.start_u == 0 || placement.height_u == 0 {
+                    issues.push(format!("Rack '{}' has an invalid rack-unit placement for '{}'", rack.rack_identity, placement.host_identity));
+                }
+                for unit in placement.start_u..placement.start_u.saturating_add(placement.height_u) {
+                    if !occupied_units.insert(unit) {
+                        issues.push(format!("Rack '{}' has overlapping rack-unit placements at U{unit}", rack.rack_identity));
+                    }
+                }
+            }
+            if !rack.placements.is_empty() && placed_hosts.len() != rack.host_identities.len() {
+                issues.push(format!("Rack '{}' does not place every contained host", rack.rack_identity));
             }
         }
     }

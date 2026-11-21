@@ -1,7 +1,6 @@
 use leptos::prelude::*;
 use serde_json::Value;
 use std::time::Duration;
-use wasm_bindgen::JsCast;
 
 fn js_call(script: &str) {
     let _ = js_sys::eval(script);
@@ -72,13 +71,36 @@ pub fn InfrastructureScenePage() -> impl IntoView {
                     canvas_id = canvas_id,
                     json = json
                 );
-                set_timeout(move || js_call(&script), Duration::from_millis(80));
+                let overlay_script = format!(
+                    "window.EfInfrastructureScene && window.EfInfrastructureScene.setOverlays({canvas_id:?}, {{pcie:{pcie},gpu:{gpu},network:{network},storage:{storage},power:{power}}})",
+                    canvas_id = canvas_id,
+                    pcie = overlay_pcie.get_untracked(),
+                    gpu = overlay_gpu.get_untracked(),
+                    network = overlay_network.get_untracked(),
+                    storage = overlay_storage.get_untracked(),
+                    power = overlay_power.get_untracked()
+                );
+                set_timeout(move || {
+                    js_call(&script);
+                    js_call(&overlay_script);
+                }, Duration::from_millis(80));
             } else {
                 js_call(&format!(
                     "window.EfInfrastructureScene && window.EfInfrastructureScene.dispose({canvas_id:?})",
                     canvas_id = canvas_id
                 ));
             }
+        });
+    }
+
+    // Reflect the resource selected in the inspector in the 3D viewport.
+    {
+        Effect::new(move || {
+            let id = selected.get();
+            js_call(&format!(
+                "window.EfInfrastructureScene && window.EfInfrastructureScene.setSelected({canvas_id:?}, {id:?})",
+                canvas_id = canvas_id, id = id
+            ));
         });
     }
 

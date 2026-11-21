@@ -115,3 +115,8 @@ An operation names target resource IDs or bounded selector, capability ID/versio
 ### GPU peer-fabric template options
 
 The GPU-cluster template accepts optional `gpu_peer_fabric`: `nv_link_full_mesh` generates direct per-host GPU peer edges, while `nv_switch` generates a synthetic per-host NVSwitch resource and GPU-to-switch peer edges. These edges are validated and counted independently of PCIe links. They are structural abstractions only; the API does not claim NVLink generation, bandwidth, switch radix or measured performance.
+
+
+### NIC/DPU and network fabric template options
+
+The GPU-cluster template optionally accepts `network_fabric` with `kind` (`ethernet`, `roce`, `infini_band`), `nics_per_host`, `ports_per_nic`, `link_speed_gbps`, `switch_ports` and `dpu_per_host`. The response includes `network_fabric_kind` and `network_fabric_link_count`. Network links are modeled separately from PCIe and GPU peer-fabric links; no throughput or protocol qualification is inferred.

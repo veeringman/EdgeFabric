@@ -188,4 +188,35 @@ mod tests {
         profile.qualification = HardwareProfileQualification::VendorDocumented;
         assert!(profile.validate().iter().any(|issue| issue.contains("provenance")));
     }
+
+    #[test]
+    fn profile_constraints_preserve_unknown_and_report_failures() {
+        let mut profile = generic_gpu_node_profile();
+        profile.facts = serde_json::json!({
+            "constraints": {
+                "gpus_per_host": { "max": 8 },
+                "pcie_generation": { "min": 6 }
+            }
+        });
+        let observations = std::collections::BTreeMap::from([
+            ("gpus_per_host".to_string(), 10.0),
+            ("pcie_generation".to_string(), 6.0),
+            ("rack_power_watts".to_string(), 12000.0),
+        ]);
+        let result = evaluate_numeric_constraints(&profile, &observations);
+        assert_eq!(result.status, "fail");
+        assert!(result.evaluated.iter().any(|item| item.key == "gpus_per_host" && item.status == "fail"));
+        assert!(result.unknown.contains(&"rack_power_watts".to_string()));
+    }
+
+    #[test]
+    fn no_profile_constraints_means_unknown_not_pass() {
+        let profile = generic_gpu_node_profile();
+        let observations = std::collections::BTreeMap::from([
+            ("gpus_per_host".to_string(), 8.0),
+        ]);
+        let result = evaluate_numeric_constraints(&profile, &observations);
+        assert_eq!(result.status, "unknown");
+        assert_eq!(result.unknown, vec!["gpus_per_host"]);
+    }
 }

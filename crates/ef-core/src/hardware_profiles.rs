@@ -25,6 +25,24 @@ pub struct HardwareProfileAsset {
     pub units: Option<String>,
 }
 
+/// A first-class component entry inside a system or rack profile.
+/// Quantity is omitted when the authoritative source does not specify it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HardwareProfileComponent {
+    pub id: String,
+    pub class: String,
+    pub vendor: Option<String>,
+    pub model: Option<String>,
+    pub quantity: Option<u64>,
+    #[serde(default)]
+    pub facts: serde_json::Value,
+    #[serde(default)]
+    pub sources: Vec<HardwareProfileSource>,
+    #[serde(default)]
+    pub assets: Vec<HardwareProfileAsset>,
+}
+
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HardwareProfile {
     pub id: String,
@@ -38,6 +56,8 @@ pub struct HardwareProfile {
     pub facts: serde_json::Value,
     #[serde(default)]
     pub supported_components: Vec<String>,
+    #[serde(default)]
+    pub components: Vec<HardwareProfileComponent>,
     #[serde(default)]
     pub assets: Vec<HardwareProfileAsset>,
     #[serde(default)]
@@ -70,7 +90,18 @@ impl HardwareProfile {
                 issues.push("Profile facts.constraints must be an object".into());
             }
         }
-        if self.sources.len() > 100 || self.assets.len() > 100 { issues.push("A profile may contain at most 100 sources and 100 assets".into()); }
+        if self.sources.len() > 100 || self.assets.len() > 100 || self.components.len() > 256 { issues.push("A profile may contain at most 100 sources, 100 assets and 256 components".into()); }
+        for component in &self.components {
+            if component.id.trim().is_empty() || component.class.trim().is_empty() {
+                issues.push("Each profile component requires a stable ID and class".into());
+            }
+            if component.quantity == Some(0) {
+                issues.push(format!("Component '{}' quantity must be positive when supplied", component.id));
+            }
+            if !component.facts.is_object() {
+                issues.push(format!("Component '{}' facts must be a JSON object", component.id));
+            }
+        }
         for source in &self.sources {
             if source.title.trim().is_empty() || source.uri.trim().is_empty() || source.publisher.trim().is_empty() {
                 issues.push("Each source requires a title, URI and publisher".into());
@@ -106,6 +137,7 @@ pub fn generic_gpu_node_profile() -> HardwareProfile {
         qualification: HardwareProfileQualification::TemplateOnly,
         facts: serde_json::json!({}),
         supported_components: vec!["host".into(), "gpu".into(), "pcie".into(), "network".into(), "storage".into(), "rack".into(), "power_cooling".into()],
+        components: Vec::new(),
         assets: Vec::new(),
         sources: Vec::new(),
         notes: vec![
@@ -156,6 +188,7 @@ pub fn builtin_hardware_profiles() -> Vec<HardwareProfile> {
                 "specification_status": "preliminary_subject_to_change"
             }),
             supported_components: vec!["gpu".into(), "memory".into(), "nvlink".into()],
+            components: vec![HardwareProfileComponent { id: "rubin-gpu".into(), class: "gpu".into(), vendor: Some("NVIDIA".into()), model: Some("Rubin GPU".into()), quantity: Some(1), facts: serde_json::json!({"memory_capacity_gb":288,"memory_type":"HBM4","memory_bandwidth_tb_s":22.0,"nvlink_generation":6,"nvlink_bandwidth_tb_s":3.6}), sources: vec![source_hgx.clone()], assets: Vec::new() }],
             assets: Vec::new(),
             sources: vec![source_hgx.clone()],
             notes: vec![
@@ -196,6 +229,11 @@ pub fn builtin_hardware_profiles() -> Vec<HardwareProfile> {
                 }
             }),
             supported_components: vec!["gpu".into(), "host".into(), "cpu".into(), "nvlink".into(), "network".into(), "memory".into()],
+            components: vec![
+                HardwareProfileComponent { id: "rubin-gpu".into(), class: "gpu".into(), vendor: Some("NVIDIA".into()), model: Some("Rubin SXM".into()), quantity: Some(8), facts: serde_json::json!({"memory_capacity_tb_system":2.3,"memory_bandwidth_tb_s_system":176.0}), sources: vec![source_hgx.clone()], assets: Vec::new() },
+                HardwareProfileComponent { id: "hgx-baseboard".into(), class: "baseboard".into(), vendor: Some("NVIDIA".into()), model: Some("HGX Rubin NVL8".into()), quantity: Some(1), facts: serde_json::json!({"form_factor":"8x Rubin SXM"}), sources: vec![source_hgx.clone()], assets: Vec::new() },
+                HardwareProfileComponent { id: "host-cpu".into(), class: "cpu".into(), vendor: None, model: Some("Vera CPU or OEM x86 CPU".into()), quantity: None, facts: serde_json::json!({"variant":"Vera single-socket or OEM x86 baseboard"}), sources: vec![source_hgx.clone()], assets: Vec::new() }
+            ],
             assets: Vec::new(),
             sources: vec![source_hgx.clone()],
             notes: vec![
@@ -236,6 +274,12 @@ pub fn builtin_hardware_profiles() -> Vec<HardwareProfile> {
                 "specification_status": "published_architecture_reference"
             }),
             supported_components: vec!["gpu".into(), "cpu".into(), "compute_tray".into(), "nvlink_switch_tray".into(), "rack".into(), "network".into(), "dpu".into(), "power_cooling".into()],
+            components: vec![
+                HardwareProfileComponent { id: "rubin-gpu".into(), class: "gpu".into(), vendor: Some("NVIDIA".into()), model: Some("Rubin GPU".into()), quantity: Some(72), facts: serde_json::json!({}), sources: vec![source_pod.clone()], assets: Vec::new() },
+                HardwareProfileComponent { id: "vera-cpu".into(), class: "cpu".into(), vendor: Some("NVIDIA".into()), model: Some("Vera CPU".into()), quantity: Some(36), facts: serde_json::json!({}), sources: vec![source_pod.clone()], assets: Vec::new() },
+                HardwareProfileComponent { id: "compute-tray".into(), class: "compute_tray".into(), vendor: Some("NVIDIA".into()), model: Some("Vera Rubin compute tray".into()), quantity: Some(18), facts: serde_json::json!({"connectx9_supernic_count_per_tray":8,"bluefield4_dpu_count_per_tray":1}), sources: vec![source_pod.clone()], assets: Vec::new() },
+                HardwareProfileComponent { id: "nvlink-switch-tray".into(), class: "nvlink_switch_tray".into(), vendor: Some("NVIDIA".into()), model: Some("NVLink switch tray".into()), quantity: Some(9), facts: serde_json::json!({}), sources: vec![source_pod.clone()], assets: Vec::new() }
+            ],
             assets: Vec::new(),
             sources: vec![source_pod.clone()],
             notes: vec![
@@ -265,6 +309,11 @@ pub fn builtin_hardware_profiles() -> Vec<HardwareProfile> {
                 "specification_status": "published_architecture_reference"
             }),
             supported_components: vec!["gpu".into(), "rack".into(), "nvlink".into(), "optical_interconnect".into(), "copper_interconnect".into()],
+            components: vec![
+                HardwareProfileComponent { id: "rubin-ultra-gpu".into(), class: "gpu".into(), vendor: Some("NVIDIA".into()), model: Some("Rubin Ultra GPU".into()), quantity: Some(576), facts: serde_json::json!({}), sources: vec![source_pod.clone()], assets: Vec::new() },
+                HardwareProfileComponent { id: "mgx-nvl-rack".into(), class: "rack".into(), vendor: Some("NVIDIA".into()), model: Some("MGX NVL rack".into()), quantity: Some(8), facts: serde_json::json!({"rubin_ultra_gpus_per_rack":72}), sources: vec![source_pod.clone()], assets: Vec::new() },
+                HardwareProfileComponent { id: "nvlink-domain".into(), class: "nvlink_domain".into(), vendor: Some("NVIDIA".into()), model: Some("Two-layer all-to-all".into()), quantity: Some(1), facts: serde_json::json!({"gpu_count":576,"inter_rack_media":["copper","direct_optical"]}), sources: vec![source_pod], assets: Vec::new() }
+            ],
             assets: Vec::new(),
             sources: vec![source_pod],
             notes: vec![

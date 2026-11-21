@@ -34,6 +34,9 @@ pub struct HardwareProfileComponent {
     pub vendor: Option<String>,
     pub model: Option<String>,
     pub quantity: Option<u64>,
+    /// Parent component class ID; absent means directly contained by the profile root.
+    #[serde(default)]
+    pub parent_component_id: Option<String>,
     #[serde(default)]
     pub facts: serde_json::Value,
     #[serde(default)]
@@ -212,7 +215,7 @@ pub fn builtin_hardware_profiles() -> Vec<HardwareProfile> {
                 "specification_status": "preliminary_subject_to_change"
             }),
             supported_components: vec!["gpu".into(), "memory".into(), "nvlink".into()],
-            components: vec![HardwareProfileComponent { id: "rubin-gpu".into(), class: "gpu".into(), vendor: Some("NVIDIA".into()), model: Some("Rubin GPU".into()), quantity: Some(1), facts: serde_json::json!({"memory_capacity_gb":288,"memory_type":"HBM4","memory_bandwidth_tb_s":22.0,"nvlink_generation":6,"nvlink_bandwidth_tb_s":3.6}), sources: vec![source_hgx.clone()], assets: Vec::new() }],
+            components: vec![HardwareProfileComponent { id: "rubin-gpu".into(), class: "gpu".into(), vendor: Some("NVIDIA".into()), model: Some("Rubin GPU".into()), quantity: Some(1), parent_component_id: None, facts: serde_json::json!({"memory_capacity_gb":288,"memory_type":"HBM4","memory_bandwidth_tb_s":22.0,"nvlink_generation":6,"nvlink_bandwidth_tb_s":3.6}), sources: vec![source_hgx.clone()], assets: Vec::new() }],
             assets: Vec::new(),
             sources: vec![source_hgx.clone()],
             notes: vec![
@@ -254,9 +257,9 @@ pub fn builtin_hardware_profiles() -> Vec<HardwareProfile> {
             }),
             supported_components: vec!["gpu".into(), "host".into(), "cpu".into(), "nvlink".into(), "network".into(), "memory".into()],
             components: vec![
-                HardwareProfileComponent { id: "rubin-gpu".into(), class: "gpu".into(), vendor: Some("NVIDIA".into()), model: Some("Rubin SXM".into()), quantity: Some(8), facts: serde_json::json!({"memory_capacity_tb_system":2.3,"memory_bandwidth_tb_s_system":176.0}), sources: vec![source_hgx.clone()], assets: Vec::new() },
-                HardwareProfileComponent { id: "hgx-baseboard".into(), class: "baseboard".into(), vendor: Some("NVIDIA".into()), model: Some("HGX Rubin NVL8".into()), quantity: Some(1), facts: serde_json::json!({"form_factor":"8x Rubin SXM"}), sources: vec![source_hgx.clone()], assets: Vec::new() },
-                HardwareProfileComponent { id: "host-cpu".into(), class: "cpu".into(), vendor: None, model: Some("Vera CPU or OEM x86 CPU".into()), quantity: None, facts: serde_json::json!({"variant":"Vera single-socket or OEM x86 baseboard"}), sources: vec![source_hgx.clone()], assets: Vec::new() }
+                HardwareProfileComponent { id: "rubin-gpu".into(), class: "gpu".into(), vendor: Some("NVIDIA".into()), model: Some("Rubin SXM".into()), quantity: Some(8), parent_component_id: Some("hgx-baseboard".into()), facts: serde_json::json!({"memory_capacity_tb_system":2.3,"memory_bandwidth_tb_s_system":176.0}), sources: vec![source_hgx.clone()], assets: Vec::new() },
+                HardwareProfileComponent { id: "hgx-baseboard".into(), class: "baseboard".into(), vendor: Some("NVIDIA".into()), model: Some("HGX Rubin NVL8".into()), quantity: Some(1), parent_component_id: None, facts: serde_json::json!({"form_factor":"8x Rubin SXM"}), sources: vec![source_hgx.clone()], assets: Vec::new() },
+                HardwareProfileComponent { id: "host-cpu".into(), class: "cpu".into(), vendor: None, model: Some("Vera CPU or OEM x86 CPU".into()), quantity: None, parent_component_id: Some("hgx-baseboard".into()), facts: serde_json::json!({"variant":"Vera single-socket or OEM x86 baseboard"}), sources: vec![source_hgx.clone()], assets: Vec::new() }
             ],
             assets: Vec::new(),
             sources: vec![source_hgx.clone()],
@@ -299,10 +302,10 @@ pub fn builtin_hardware_profiles() -> Vec<HardwareProfile> {
             }),
             supported_components: vec!["gpu".into(), "cpu".into(), "compute_tray".into(), "nvlink_switch_tray".into(), "rack".into(), "network".into(), "dpu".into(), "power_cooling".into()],
             components: vec![
-                HardwareProfileComponent { id: "rubin-gpu".into(), class: "gpu".into(), vendor: Some("NVIDIA".into()), model: Some("Rubin GPU".into()), quantity: Some(72), facts: serde_json::json!({}), sources: vec![source_pod.clone()], assets: Vec::new() },
-                HardwareProfileComponent { id: "vera-cpu".into(), class: "cpu".into(), vendor: Some("NVIDIA".into()), model: Some("Vera CPU".into()), quantity: Some(36), facts: serde_json::json!({}), sources: vec![source_pod.clone()], assets: Vec::new() },
-                HardwareProfileComponent { id: "compute-tray".into(), class: "compute_tray".into(), vendor: Some("NVIDIA".into()), model: Some("Vera Rubin compute tray".into()), quantity: Some(18), facts: serde_json::json!({"connectx9_supernic_count_per_tray":8,"bluefield4_dpu_count_per_tray":1}), sources: vec![source_pod.clone()], assets: Vec::new() },
-                HardwareProfileComponent { id: "nvlink-switch-tray".into(), class: "nvlink_switch_tray".into(), vendor: Some("NVIDIA".into()), model: Some("NVLink switch tray".into()), quantity: Some(9), facts: serde_json::json!({}), sources: vec![source_pod.clone()], assets: Vec::new() }
+                HardwareProfileComponent { id: "rubin-gpu".into(), class: "gpu".into(), vendor: Some("NVIDIA".into()), model: Some("Rubin GPU".into()), quantity: Some(72), parent_component_id: Some("compute-tray".into()), facts: serde_json::json!({}), sources: vec![source_pod.clone()], assets: Vec::new() },
+                HardwareProfileComponent { id: "vera-cpu".into(), class: "cpu".into(), vendor: Some("NVIDIA".into()), model: Some("Vera CPU".into()), quantity: Some(36), parent_component_id: Some("compute-tray".into()), facts: serde_json::json!({}), sources: vec![source_pod.clone()], assets: Vec::new() },
+                HardwareProfileComponent { id: "compute-tray".into(), class: "compute_tray".into(), vendor: Some("NVIDIA".into()), model: Some("Vera Rubin compute tray".into()), quantity: Some(18), parent_component_id: None, facts: serde_json::json!({"connectx9_supernic_count_per_tray":8,"bluefield4_dpu_count_per_tray":1}), sources: vec![source_pod.clone()], assets: Vec::new() },
+                HardwareProfileComponent { id: "nvlink-switch-tray".into(), class: "nvlink_switch_tray".into(), vendor: Some("NVIDIA".into()), model: Some("NVLink switch tray".into()), quantity: Some(9), parent_component_id: None, facts: serde_json::json!({}), sources: vec![source_pod.clone()], assets: Vec::new() }
             ],
             assets: Vec::new(),
             sources: vec![source_pod.clone()],
@@ -334,9 +337,9 @@ pub fn builtin_hardware_profiles() -> Vec<HardwareProfile> {
             }),
             supported_components: vec!["gpu".into(), "rack".into(), "nvlink".into(), "optical_interconnect".into(), "copper_interconnect".into()],
             components: vec![
-                HardwareProfileComponent { id: "rubin-ultra-gpu".into(), class: "gpu".into(), vendor: Some("NVIDIA".into()), model: Some("Rubin Ultra GPU".into()), quantity: Some(576), facts: serde_json::json!({}), sources: vec![source_pod.clone()], assets: Vec::new() },
-                HardwareProfileComponent { id: "mgx-nvl-rack".into(), class: "rack".into(), vendor: Some("NVIDIA".into()), model: Some("MGX NVL rack".into()), quantity: Some(8), facts: serde_json::json!({"rubin_ultra_gpus_per_rack":72}), sources: vec![source_pod.clone()], assets: Vec::new() },
-                HardwareProfileComponent { id: "nvlink-domain".into(), class: "nvlink_domain".into(), vendor: Some("NVIDIA".into()), model: Some("Two-layer all-to-all".into()), quantity: Some(1), facts: serde_json::json!({"gpu_count":576,"inter_rack_media":["copper","direct_optical"]}), sources: vec![source_pod.clone()], assets: Vec::new() }
+                HardwareProfileComponent { id: "rubin-ultra-gpu".into(), class: "gpu".into(), vendor: Some("NVIDIA".into()), model: Some("Rubin Ultra GPU".into()), quantity: Some(576), parent_component_id: Some("mgx-nvl-rack".into()), facts: serde_json::json!({}), sources: vec![source_pod.clone()], assets: Vec::new() },
+                HardwareProfileComponent { id: "mgx-nvl-rack".into(), class: "rack".into(), vendor: Some("NVIDIA".into()), model: Some("MGX NVL rack".into()), quantity: Some(8), parent_component_id: None, facts: serde_json::json!({"rubin_ultra_gpus_per_rack":72}), sources: vec![source_pod.clone()], assets: Vec::new() },
+                HardwareProfileComponent { id: "nvlink-domain".into(), class: "nvlink_domain".into(), vendor: Some("NVIDIA".into()), model: Some("Two-layer all-to-all".into()), quantity: Some(1), parent_component_id: None, facts: serde_json::json!({"gpu_count":576,"inter_rack_media":["copper","direct_optical"]}), sources: vec![source_pod.clone()], assets: Vec::new() }
             ],
             assets: Vec::new(),
             sources: vec![source_pod],

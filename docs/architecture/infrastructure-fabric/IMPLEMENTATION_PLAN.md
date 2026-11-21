@@ -30,7 +30,8 @@ Acceptance: existing EdgeFabric discovery is reused; no second scanner or duplic
 - [x] Structural NVLink full-mesh and NVSwitch peer-fabric topology, distinct from PCIe attachment paths.
 - [x] Structural NIC/DPU attachment paths and Ethernet/RoCE/InfiniBand fabric links with speed and switch-port validation.
 - [x] Add standalone typed storage-path and CXL-memory topology primitives with graph endpoint, capacity, speed, generation, lane-width and API-size validation.
-- [ ] Extend GPU-cluster templates to synthesize storage devices/arrays and CXL expanders; add power and cooling constraints.
+- [x] Extend GPU-cluster templates to synthesize direct NVMe drives or shared NVMe-oF/Fibre Channel storage arrays, plus per-host CXL memory expanders with NUMA attachment metadata.
+- [ ] Add rack power feeds, PDUs, cooling zones and power/thermal constraints.
 - [ ] Integrate deterministic topology/capacity simulators first; add performance and power/thermal models only with explicit fidelity metadata and validation fixtures.
 - [ ] Expose model/scene data to a separate 3D/volume viewer through graph and geometry APIs; keep geometry assets in artifact storage.
 - [ ] Label simulated qualification and capacity estimates separately from physical qualification evidence.

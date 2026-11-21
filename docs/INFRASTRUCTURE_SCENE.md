@@ -53,3 +53,10 @@ A renderer may expose independent visibility toggles for each overlay. Overlay e
 All resources in this endpoint are marked `inventory_class: simulated`. `execution_started` is always false. Geometry asset references are not proof of vendor approval or physical fit. Rack power and cooling values are declared design envelopes, not live telemetry or CFD. PCIe/NVLink/network/storage topology is structural and does not imply measured or predicted bandwidth, latency or application performance.
 
 The current projection is read-only. It cannot provision hardware, change physical inventory, start simulation workloads, or apply reconciliation plans.
+
+
+## Dashboard viewer
+
+The Leptos dashboard exposes the viewer at `/infrastructure/scene` under the Infrastructure Fabric navigation section. It loads the tenant-scoped simulation registry, lets an operator select/paste a simulation UUID, and requests the scene endpoint. The Three.js renderer provides orbit, zoom and pan controls, a resource list/inspector, and independent visibility toggles for PCIe, GPU peer, network, storage/CXL and power overlays.
+
+The renderer currently uses bounded primitive geometry for spatial resources. Geometry asset references are retained in the scene response but are not yet fetched or rendered by the browser; this avoids treating an unresolved asset URI as a usable CAD model. The viewer remains read-only.

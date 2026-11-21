@@ -24,13 +24,10 @@ const GLB_MEDIA_TYPE: &str = "model/gltf-binary";
 #[derive(Debug, FromRow)]
 struct GeometryAssetRow {
     id: Uuid,
-    tenant_id: Uuid,
     sha256: String,
     format: String,
     media_type: String,
     size_bytes: i64,
-    license: String,
-    units: Option<String>,
     storage_key: String,
 }
 
@@ -177,7 +174,7 @@ pub async fn download(
     axum::extract::Path(id): axum::extract::Path<Uuid>,
 ) -> ApiResult<Response> {
     let row = sqlx::query_as::<_, GeometryAssetRow>(
-        r#"SELECT id, tenant_id, sha256, format, media_type, size_bytes, license, units, storage_key
+        r#"SELECT id, sha256, format, media_type, size_bytes, storage_key
            FROM infrastructure_geometry_assets WHERE id = $1 AND tenant_id = $2"#
     ).bind(id).bind(auth.tenant_id).fetch_optional(&state.pool).await
         .map_err(|error| { tracing::error!(error = %error, "Geometry asset lookup failed"); ApiError::internal("Failed to load geometry asset") })?
@@ -199,7 +196,51 @@ pub async fn download(
     *response.status_mut() = StatusCode::OK;
     response.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static(GLB_MEDIA_TYPE));
     response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("private, no-store"));
-    response.headers_mut().insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    response.headers_mut().insert(axum::http::HeaderName::from_static("x-content-type-options"), HeaderValue::from_static("nosniff"));
     response.headers_mut().insert(header::CONTENT_LENGTH, HeaderValue::from_str(&row.size_bytes.to_string()).unwrap_or(HeaderValue::from_static("0")));
     Ok(response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn glb_with_json(json: &str) -> Vec<u8> {
+        let mut chunk = json.as_bytes().to_vec();
+        while chunk.len() % 4 != 0 { chunk.push(b' '); }
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"glTF");
+        bytes.extend_from_slice(&2_u32.to_le_bytes());
+        bytes.extend_from_slice(&((20 + chunk.len()) as u32).to_le_bytes());
+        bytes.extend_from_slice(&(chunk.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&0x4E4F534A_u32.to_le_bytes());
+        bytes.extend_from_slice(&chunk);
+        bytes
+    }
+
+    #[test]
+    fn accepts_self_contained_glb_v2() {
+        let bytes = glb_with_json(r#"{"asset":{"version":"2.0"},"scene":0,"scenes":[{}]}"#);
+        assert!(validate_glb(&bytes).is_ok());
+    }
+
+    #[test]
+    fn rejects_external_glb_dependencies() {
+        let bytes = glb_with_json(r#"{"asset":{"version":"2.0"},"buffers":[{"uri":"https://example.invalid/model.bin"}]}"#);
+        assert_eq!(validate_glb(&bytes), Err("External GLB buffer or image URIs are not supported"));
+    }
+
+    #[test]
+    fn rejects_mismatched_declared_length_and_non_glb() {
+        assert!(validate_glb(b"not a glb file").is_err());
+        let mut bytes = glb_with_json(r#"{"asset":{"version":"2.0"}}"#);
+        bytes[8..12].copy_from_slice(&1_u32.to_le_bytes());
+        assert_eq!(validate_glb(&bytes), Err("GLB declared length does not match uploaded bytes"));
+    }
+
+    #[test]
+    fn storage_keys_must_be_uuids() {
+        assert!(Uuid::parse_str("../outside").is_err());
+        assert!(Uuid::parse_str(&Uuid::new_v4().to_string()).is_ok());
+    }
 }

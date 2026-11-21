@@ -413,8 +413,8 @@ pub fn instantiate_gpu_cluster_template(
                 if storage.shared_array_capacity_gib == 0 {
                     issues.push("Shared storage array capacity must be greater than zero".into());
                 }
-                if storage.switch_ports < u32::from(template.hosts) {
-                    issues.push("Storage fabric switch port count is smaller than host count".into());
+                if storage.switch_ports < u32::from(template.hosts) + 1 {
+                    issues.push("Storage fabric switch port count must cover every host and the storage-array uplink".into());
                 }
             }
         }

@@ -63,6 +63,99 @@ pub enum SimulationKind {
     SpatialVisualization,
 }
 
+/// Functional role of a device in a simulated PCIe fabric.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PcieDeviceRole {
+    RootComplex,
+    Switch,
+    Endpoint,
+    Bridge,
+}
+
+/// PCIe capability envelope for one graph resource. The values describe the
+/// simulated port/device capability, not a live hardware probe.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PcieDevice {
+    pub resource_identity: String,
+    pub role: PcieDeviceRole,
+    pub max_generation: u8,
+    pub max_lane_width: u8,
+    pub numa_node: Option<u16>,
+}
+
+/// A point-to-point PCIe link with negotiated generation and lane width.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PcieLink {
+    pub identity: String,
+    pub upstream_identity: String,
+    pub downstream_identity: String,
+    pub generation: u8,
+    pub lane_width: u8,
+}
+
+/// Virtual PCIe topology for GPU, NIC/DPU, storage and accelerator instances.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PcieTopology {
+    pub devices: Vec<PcieDevice>,
+    pub links: Vec<PcieLink>,
+}
+
+/// Validate device membership, unique edges, and negotiated link limits.
+pub fn validate_pcie_topology(topology: &PcieTopology, graph: &InfrastructureGraph) -> Vec<String> {
+    let mut issues = Vec::new();
+    let mut devices = HashMap::new();
+    for device in &topology.devices {
+        if devices.insert(device.resource_identity.as_str(), device).is_some() {
+            issues.push(format!("Duplicate PCIe device '{}'", device.resource_identity));
+        }
+        if !graph.resources.iter().any(|resource| resource.identity == device.resource_identity) {
+            issues.push(format!("PCIe device '{}' is not present in the resource graph", device.resource_identity));
+        }
+        if !(1..=7).contains(&device.max_generation) {
+            issues.push(format!("PCIe device '{}' has unsupported maximum generation", device.resource_identity));
+        }
+        if ![1, 2, 4, 8, 16, 32].contains(&device.max_lane_width) {
+            issues.push(format!("PCIe device '{}' has invalid maximum lane width", device.resource_identity));
+        }
+    }
+
+    let mut link_ids = HashSet::new();
+    let mut endpoint_pairs = HashSet::new();
+    for link in &topology.links {
+        if link.identity.trim().is_empty() || !link_ids.insert(link.identity.as_str()) {
+            issues.push(format!("PCIe link identity '{}' is empty or duplicated", link.identity));
+        }
+        if link.upstream_identity == link.downstream_identity {
+            issues.push(format!("PCIe link '{}' cannot connect a device to itself", link.identity));
+        }
+        let pair = if link.upstream_identity <= link.downstream_identity {
+            (link.upstream_identity.as_str(), link.downstream_identity.as_str())
+        } else {
+            (link.downstream_identity.as_str(), link.upstream_identity.as_str())
+        };
+        if !endpoint_pairs.insert(pair) {
+            issues.push(format!("PCIe endpoint pair on link '{}' is duplicated", link.identity));
+        }
+        let upstream = devices.get(link.upstream_identity.as_str());
+        let downstream = devices.get(link.downstream_identity.as_str());
+        match (upstream, downstream) {
+            (Some(upstream), Some(downstream)) => {
+                let max_generation = upstream.max_generation.min(downstream.max_generation);
+                let max_width = upstream.max_lane_width.min(downstream.max_lane_width);
+                if !(1..=7).contains(&link.generation) || link.generation > max_generation {
+                    issues.push(format!("PCIe link '{}' exceeds endpoint generation capability", link.identity));
+                }
+                if ![1, 2, 4, 8, 16, 32].contains(&link.lane_width) || link.lane_width > max_width {
+                    issues.push(format!("PCIe link '{}' exceeds endpoint lane-width capability", link.identity));
+                }
+            }
+            _ => issues.push(format!("PCIe link '{}' references a device missing from its topology", link.identity)),
+        }
+    }
+    issues
+}
+
 /// Position and orientation in a named coordinate frame. Translation units
 /// are defined by the referenced scene/model; rotation is a normalized quaternion.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -97,6 +190,8 @@ pub struct SimulationInstance {
     pub created_at: DateTime<Utc>,
     pub source_manifest_revision: Option<String>,
     pub graph: InfrastructureGraph,
+    #[serde(default)]
+    pub pcie_topology: Option<PcieTopology>,
     #[serde(default)]
     pub geometry: BTreeMap<String, GeometryAsset>,
     #[serde(default)]
@@ -139,6 +234,9 @@ pub fn validate_simulation(instance: &SimulationInstance) -> Vec<String> {
             || asset.format.trim().is_empty() || asset.units.trim().is_empty() {
             issues.push(format!("Geometry asset for '{identity}' requires URI, SHA-256, format and units"));
         }
+    }
+    if let Some(topology) = &instance.pcie_topology {
+        issues.extend(validate_pcie_topology(topology, &instance.graph));
     }
     for issue in validate_graph(&instance.graph) {
         issues.push(format!("Graph relationship '{}': {}", issue.relationship_identity, issue.detail));

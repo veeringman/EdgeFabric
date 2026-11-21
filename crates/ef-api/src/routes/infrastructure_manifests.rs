@@ -39,9 +39,12 @@ pub async fn create(
     if !body.document.is_object() {
         return Err(ApiError::bad_request("Manifest document must be a JSON object"));
     }
-    if body.document.get("declarations").and_then(Value::as_array).is_none() {
-        return Err(ApiError::bad_request("Manifest document must contain a declarations array"));
-    }
+    let declarations = body.document.get("declarations")
+        .cloned()
+        .filter(Value::is_array)
+        .ok_or_else(|| ApiError::bad_request("Manifest document must contain a declarations array"))?;
+    serde_json::from_value::<Vec<ResourceDeclaration>>(declarations)
+        .map_err(|error| ApiError::bad_request(format!("Invalid manifest declarations: {error}")))?;
 
     let row = InfrastructureManifestRepo::create(
         &state.pool, auth.tenant_id, name, body.version, &body.description, &body.document,

@@ -352,7 +352,7 @@ pub fn instantiate_gpu_cluster_template(
     if u32::from(template.hosts) * (u32::from(template.gpus_per_host) + 3)
         + nvswitch_resource_count + network_resource_count
         + storage_resource_count + cxl_resource_count > 10_000 {
-        issues.push("Expanded GPU cluster including peer and network resources may contain at most 10000 resources".into());
+        issues.push("Expanded GPU cluster including peer, network, storage and CXL resources may contain at most 10000 resources".into());
     }
     if template.gpu_peer_fabric == Some(GpuPeerFabricKind::NvLinkFullMesh) {
         let per_host_links = u32::from(template.gpus_per_host) * u32::from(template.gpus_per_host.saturating_sub(1)) / 2;
@@ -1483,6 +1483,74 @@ mod tests {
         });
         let issues = instantiate_gpu_cluster_template(&template).unwrap_err();
         assert!(issues.iter().any(|issue| issue.contains("network switch port count")));
+    }
+
+    #[test]
+    fn gpu_cluster_template_expands_direct_nvme_and_per_host_cxl_memory() {
+        let mut template = sample_gpu_template();
+        template.storage = Some(StorageFabricTemplate {
+            kind: StorageFabricKind::DirectNvme,
+            drives_per_host: 2,
+            capacity_gib_per_drive: 7680,
+            shared_array_capacity_gib: 0,
+            link_speed_gbps: 64,
+            switch_ports: 0,
+        });
+        template.cxl_memory = Some(CxlMemoryTemplate {
+            devices_per_host: 2,
+            capacity_gib_per_device: 1024,
+            generation: 3,
+            lane_width: 8,
+        });
+        let instance = instantiate_gpu_cluster_template(&template).unwrap();
+        let storage = instance.storage_topology.as_ref().unwrap();
+        let cxl = instance.cxl_topology.as_ref().unwrap();
+        assert_eq!(storage.links.len(), 4);
+        assert!(storage.links.iter().all(|link| link.kind == StorageFabricKind::DirectNvme
+            && link.capacity_gib == 7680 && link.link_speed_gbps == 64));
+        assert_eq!(instance.graph.resources.iter().filter(|r| r.kind == "nvme_ssd").count(), 4);
+        assert_eq!(cxl.devices.len(), 4);
+        assert_eq!(cxl.links.len(), 4);
+        assert_eq!(instance.graph.resources.iter().filter(|r| r.kind == "cxl_memory_expander").count(), 4);
+        assert_eq!(cxl.devices.iter().map(|device| device.numa_node).collect::<Vec<_>>(),
+            vec![Some(0), Some(1), Some(0), Some(1)]);
+        assert!(validate_simulation(&instance).is_empty());
+    }
+
+    #[test]
+    fn gpu_cluster_template_expands_shared_nvmeof_rdma_array() {
+        let mut template = sample_gpu_template();
+        template.storage = Some(StorageFabricTemplate {
+            kind: StorageFabricKind::NvmeOfRdma,
+            drives_per_host: 0,
+            capacity_gib_per_drive: 0,
+            shared_array_capacity_gib: 1_048_576,
+            link_speed_gbps: 400,
+            switch_ports: 2,
+        });
+        let instance = instantiate_gpu_cluster_template(&template).unwrap();
+        let storage = instance.storage_topology.as_ref().unwrap();
+        assert_eq!(storage.links.len(), 3);
+        assert_eq!(instance.graph.resources.iter().filter(|r| r.kind == "storage_array").count(), 1);
+        assert_eq!(instance.graph.resources.iter().filter(|r| r.kind == "storage_fabric_switch").count(), 1);
+        assert_eq!(storage.links.iter().filter(|link| link.source_identity.contains(":host-")).count(), 2);
+        assert!(storage.links.iter().all(|link| link.kind == StorageFabricKind::NvmeOfRdma
+            && link.capacity_gib == 1_048_576 && link.link_speed_gbps == 400));
+        assert!(validate_simulation(&instance).is_empty());
+    }
+
+    #[test]
+    fn gpu_cluster_template_rejects_invalid_cxl_configuration() {
+        let mut template = sample_gpu_template();
+        template.cxl_memory = Some(CxlMemoryTemplate {
+            devices_per_host: 1,
+            capacity_gib_per_device: 512,
+            generation: 4,
+            lane_width: 32,
+        });
+        let issues = instantiate_gpu_cluster_template(&template).unwrap_err();
+        assert!(issues.iter().any(|issue| issue.contains("CXL generation")));
+        assert!(issues.iter().any(|issue| issue.contains("CXL lane width")));
     }
 
     #[test]

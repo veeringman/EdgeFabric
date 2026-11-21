@@ -59,7 +59,7 @@ The current projection is read-only. It cannot provision hardware, change physic
 
 The Leptos dashboard exposes the viewer at `/infrastructure/scene` under the Infrastructure Fabric navigation section. It loads the tenant-scoped simulation registry, lets an operator select/paste a simulation UUID, and requests the scene endpoint. The Three.js renderer provides orbit, zoom and pan controls, a resource list/inspector, and independent visibility toggles for PCIe, GPU peer, network, storage/CXL and power overlays.
 
-The renderer currently uses bounded primitive geometry for spatial resources. Geometry asset references are retained in the scene response but are not yet fetched or rendered by the browser; this avoids treating an unresolved asset URI as a usable CAD model. The viewer remains read-only.
+The viewer renders tenant-owned, self-contained GLB v2 assets when a profile component references an EdgeFabric geometry asset URI (`artifact://geometry/{uuid}`). The API resolves that UUID only within the authenticated tenant, reads bytes from the configured local filesystem provider, and verifies the stored SHA-256 before returning content. The browser verifies the digest again before parsing with the pinned Three.js GLTFLoader. Failed resolution, unsupported units, loader errors or digest mismatches leave the generic primitive visible. Arbitrary external URLs and GLB files with external buffer/image URIs are rejected. GLTF JSON, STEP, STL and vendor CAD conversion are not yet supported.
 \n
 ### Dashboard simulation builder
 
@@ -146,3 +146,24 @@ A tenant-owned profile with component inventory can now be expanded into a struc
 The dashboard offers **Create profile-derived component twin** after a tenant profile has been selected. For Vera Rubin NVL72, the reference component inventory expands 72 GPUs, 36 Vera CPUs, 18 compute trays, 9 NVLink switch trays, 144 ConnectX-9 SuperNICs and 18 BlueField-4 DPUs. For Vera Rubin Ultra NVL576, it expands eight MGX NVL racks, 576 GPUs and one NVLink-domain resource. Parent-child containment is represented; detailed NVLink edge/cable routing is not fabricated.
 
 The generated graph is always marked with incomplete physical discovery coverage. It contains no vendor CAD geometry, measured telemetry, PCIe slot map, explicit cable topology, facility power model or CFD. The profile model and structural twin preserve licensed geometry asset references, checksums, licenses, coordinate systems, units and source provenance at the profile/component level. The scene projection can expose a geometry reference when units are declared, but the current dashboard viewer does not yet fetch or render GLB/GLTF/CAD assets; it continues to use generic visual primitives. This profile-derived twin is a structural planning artifact, not an exact hardware emulator or qualification result.
+
+
+## Local geometry asset storage
+
+The first binary storage provider is local filesystem storage. Set `EF_GEOMETRY_STORAGE_ROOT` on the API server to a persistent directory writable only by the EdgeFabric service account; the default is `./var/geometry-assets`. The database stores tenant-scoped metadata and generated UUID storage keys, never client filenames or arbitrary paths. Keep this directory on durable storage and include it in backup/restore procedures.
+
+Upload a self-contained GLB v2 file as the raw request body:
+
+```http
+POST /api/v1/infrastructure/geometry-assets
+Authorization: Bearer <tenant JWT>
+Content-Type: model/gltf-binary
+X-Asset-License: <license identifier or grant description>
+X-Asset-Units: mm
+
+<GLB bytes>
+```
+
+Uploads are limited to 100 MiB. EdgeFabric validates the GLB header/version/declared length, requires a JSON first chunk, rejects external buffer/image URIs, computes SHA-256, and returns an `artifact://geometry/{uuid}` URI. The content endpoint is authenticated and tenant-scoped; it rechecks file length and SHA-256 on every read. Do not place user-controlled filenames or direct filesystem paths in profile metadata. A later object-store provider can implement the same generated-key storage contract without changing profile asset identities.
+
+The local provider is intended for a single API deployment with a shared persistent volume. Multi-node deployments must use a shared filesystem or a future object-store provider; node-local ephemeral disks are not suitable for durable geometry assets.

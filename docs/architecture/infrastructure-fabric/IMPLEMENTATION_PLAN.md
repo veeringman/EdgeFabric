@@ -27,7 +27,8 @@ Acceptance: existing EdgeFabric discovery is reused; no second scanner or duplic
 - [x] Add typed PCIe device/link models for root complexes, switches, bridges and endpoints, with generation/width and NUMA metadata plus endpoint capability validation.
 - [x] Add spatial coordinate frames, transforms and content-addressed geometry references for sites, racks, chassis and boards.
 - [x] Add a bounded deterministic virtual GPU-cluster template expander with host/root-complex/PCIe-switch/GPU graph resources, typed PCIe links, switch-port checks and uplink oversubscription metadata.
-- [ ] Extend templates with NVLink/NVSwitch peer fabrics, NIC/DPU paths, storage, network fabrics and power/cooling constraints.
+- [x] Structural NVLink full-mesh and NVSwitch peer-fabric topology, distinct from PCIe attachment paths.
+- [ ] Extend templates with NIC/DPU paths, storage, network fabrics and power/cooling constraints.
 - [ ] Integrate deterministic topology/capacity simulators first; add performance and power/thermal models only with explicit fidelity metadata and validation fixtures.
 - [ ] Expose model/scene data to a separate 3D/volume viewer through graph and geometry APIs; keep geometry assets in artifact storage.
 - [ ] Label simulated qualification and capacity estimates separately from physical qualification evidence.

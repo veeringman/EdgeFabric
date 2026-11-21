@@ -26,6 +26,7 @@ Acceptance: existing EdgeFabric discovery is reused; no second scanner or duplic
 - [x] Define a tenant-scoped simulation scenario registry with explicit synthetic provenance; simulated outputs never masquerade as physical discovery.
 - [x] Add typed PCIe device/link models for root complexes, switches, bridges and endpoints, with generation/width and NUMA metadata plus endpoint capability validation.
 - [x] Add spatial coordinate frames, transforms and content-addressed geometry references for sites, racks, chassis and boards.
+- [x] Add rack-unit placement, A/B PDU and optional UPS paths, physical rack/chassis dimensions, spatial poses and axis-aligned scene bounds.
 - [x] Add a bounded deterministic virtual GPU-cluster template expander with host/root-complex/PCIe-switch/GPU graph resources, typed PCIe links, switch-port checks and uplink oversubscription metadata.
 - [x] Structural NVLink full-mesh and NVSwitch peer-fabric topology, distinct from PCIe attachment paths.
 - [x] Structural NIC/DPU attachment paths and Ethernet/RoCE/InfiniBand fabric links with speed and switch-port validation.

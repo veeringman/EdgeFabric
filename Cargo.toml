@@ -79,6 +79,7 @@ bytes = "1"
 
 # Base64
 base64 = "0.22"
+sha2 = "0.10"
 
 # Logging / Tracing
 tracing = "0.1"

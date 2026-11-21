@@ -446,7 +446,7 @@ fn project_simulation_scene(id: Uuid, instance: &SimulationInstance) -> Value {
             "bounds_mm": bounds,
             "geometry": geometry,
             "geometry_asset_url": geometry_asset_url,
-            "render_hint": if geometry.is_some() { "asset" } else if bounds.is_some() { "bounds_primitive" } else { "unresolved" }
+            "render_hint": if geometry_asset_url.is_some() { "asset" } else if bounds.is_some() { "bounds_primitive" } else { "unresolved" }
         })
     }).collect();
 

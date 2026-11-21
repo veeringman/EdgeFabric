@@ -196,6 +196,13 @@ mod tests {
         assert_eq!(instance.graph.resources.iter().filter(|resource| resource.kind == "nvlink_switch_tray").count(), 9);
         assert_eq!(instance.graph.resources.iter().filter(|resource| resource.kind == "network_interface").count(), 144);
         assert_eq!(instance.graph.resources.iter().filter(|resource| resource.kind == "dpu").count(), 18);
+        let first_tray = "profile:nvidia.vera-rubin-nvl72/v1/system/component/compute-tray/1";
+        assert_eq!(instance.graph.relationships.iter().filter(|edge| {
+            edge.source_identity == first_tray && edge.target_identity.contains("/component/rubin-gpu/")
+        }).count(), 4);
+        assert_eq!(instance.graph.relationships.iter().filter(|edge| {
+            edge.source_identity == first_tray && edge.target_identity.contains("/component/connectx9-supernic/")
+        }).count(), 8);
         assert!(!instance.graph.coverage_complete);
         assert!(instance.geometry.is_empty());
     }
@@ -207,5 +214,9 @@ mod tests {
         let instance = instantiate_hardware_profile(&profile, "rubin-ultra", "qualification", 9).unwrap();
         assert_eq!(instance.graph.resources.iter().filter(|resource| resource.kind == "gpu").count(), 576);
         assert_eq!(instance.graph.resources.iter().filter(|resource| resource.kind == "rack").count(), 8);
+        let first_rack = "profile:nvidia.vera-rubin-ultra-nvl576/v1/system/component/mgx-nvl-rack/1";
+        assert_eq!(instance.graph.relationships.iter().filter(|edge| {
+            edge.source_identity == first_rack && edge.target_identity.contains("/component/rubin-ultra-gpu/")
+        }).count(), 72);
     }
 }

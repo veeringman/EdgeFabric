@@ -156,6 +156,29 @@ pub fn validate_pcie_topology(topology: &PcieTopology, graph: &InfrastructureGra
     issues
 }
 
+/// GPU peer-fabric topology is modeled independently from PCIe attachment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GpuPeerFabricKind {
+    NvLinkFullMesh,
+    NvSwitch,
+}
+
+/// One logical peer-fabric edge. For NVSwitch, the switch resource is an endpoint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GpuPeerLink {
+    pub identity: String,
+    pub source_identity: String,
+    pub target_identity: String,
+}
+
+/// Synthetic GPU peer connectivity, separate from PCIe topology.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GpuPeerFabricTopology {
+    pub kind: GpuPeerFabricKind,
+    pub links: Vec<GpuPeerLink>,
+}
+
 /// Declarative inputs for a reproducible multi-host virtual GPU cluster.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GpuClusterTemplate {
@@ -170,6 +193,8 @@ pub struct GpuClusterTemplate {
     pub switch_downstream_ports: u16,
     pub gpu_memory_gib: u32,
     pub numa_nodes_per_host: u8,
+    #[serde(default)]
+    pub gpu_peer_fabric: Option<GpuPeerFabricKind>,
     pub seed: u64,
 }
 
@@ -214,11 +239,13 @@ pub fn instantiate_gpu_cluster_template(
     let mut relationships = Vec::new();
     let mut devices = Vec::new();
     let mut links = Vec::new();
+    let mut peer_links = Vec::new();
 
     for host_index in 0..template.hosts {
         let host = format!("{}:host-{:03}", template.identity, host_index + 1);
         let root = format!("{host}:root-complex");
         let switch = format!("{host}:pcie-switch");
+        let peer_switch = format!("{host}:nvswitch");
         let mut host_attributes = BTreeMap::new();
         host_attributes.insert("virtual".into(), Value::Bool(true));
         host_attributes.insert("host_index".into(), Value::from(host_index + 1));
@@ -273,9 +300,23 @@ pub fn instantiate_gpu_cluster_template(
             lane_width: template.switch_uplink_lanes,
         });
 
+        if template.gpu_peer_fabric == Some(GpuPeerFabricKind::NvSwitch) {
+            resources.push(DiscoveredResource {
+                identity: peer_switch.clone(), kind: "nvswitch".into(),
+                attributes: BTreeMap::from([("virtual".into(), Value::Bool(true))]),
+                source: source.into(), observed_at: now, verified: false,
+            });
+            relationships.push(ResourceRelationship {
+                identity: format!("{host}:contains-nvswitch"), source_identity: host.clone(),
+                target_identity: peer_switch.clone(), kind: "contains".into(),
+                attributes: BTreeMap::new(), source: source.into(), observed_at: now, verified: false,
+            });
+        }
+        let mut host_gpus = Vec::new();
         for gpu_index in 0..template.gpus_per_host {
             let gpu = format!("{host}:gpu-{:02}", gpu_index + 1);
-            let numa = (gpu_index % u16::from(template.numa_nodes_per_host)) as u16;
+            let numa = gpu_index % u16::from(template.numa_nodes_per_host);
+            host_gpus.push(gpu.clone());
             resources.push(DiscoveredResource {
                 identity: gpu.clone(), kind: "gpu".into(),
                 attributes: BTreeMap::from([
@@ -300,9 +341,42 @@ pub fn instantiate_gpu_cluster_template(
             });
             links.push(PcieLink {
                 identity: format!("{host}:gpu-link-{:02}", gpu_index + 1),
-                upstream_identity: switch.clone(), downstream_identity: gpu,
+                upstream_identity: switch.clone(), downstream_identity: gpu.clone(),
                 generation: template.pcie_generation, lane_width: template.gpu_lanes,
             });
+            match template.gpu_peer_fabric {
+                Some(GpuPeerFabricKind::NvSwitch) => {
+                    peer_links.push(GpuPeerLink {
+                        identity: format!("{host}:nvswitch-link-{:02}", gpu_index + 1),
+                        source_identity: gpu.clone(), target_identity: peer_switch.clone(),
+                    });
+                    relationships.push(ResourceRelationship {
+                        identity: format!("{host}:peer-connects-nvswitch:{gpu_index:02}"),
+                        source_identity: gpu, target_identity: peer_switch.clone(),
+                        kind: "gpu_peer_connected_to".into(), attributes: BTreeMap::new(),
+                        source: source.into(), observed_at: now, verified: false,
+                    });
+                }
+                Some(GpuPeerFabricKind::NvLinkFullMesh) | None => {}
+            }
+        }
+        if template.gpu_peer_fabric == Some(GpuPeerFabricKind::NvLinkFullMesh) {
+            for left in 0..host_gpus.len() {
+                for right in (left + 1)..host_gpus.len() {
+                    let a = &host_gpus[left];
+                    let b = &host_gpus[right];
+                    peer_links.push(GpuPeerLink {
+                        identity: format!("{host}:nvlink:{left:02}:{right:02}"),
+                        source_identity: a.clone(), target_identity: b.clone(),
+                    });
+                    relationships.push(ResourceRelationship {
+                        identity: format!("{host}:nvlink-edge:{left:02}:{right:02}"),
+                        source_identity: a.clone(), target_identity: b.clone(),
+                        kind: "gpu_peer_connected_to".into(), attributes: BTreeMap::new(),
+                        source: source.into(), observed_at: now, verified: false,
+                    });
+                }
+            }
         }
     }
 
@@ -321,6 +395,7 @@ pub fn instantiate_gpu_cluster_template(
         source_manifest_revision: None,
         graph,
         pcie_topology: Some(pcie_topology),
+        gpu_peer_fabric: template.gpu_peer_fabric.map(|kind| GpuPeerFabricTopology { kind, links: peer_links }),
         geometry: BTreeMap::new(),
         poses: BTreeMap::new(),
         parameters: BTreeMap::from([
@@ -370,6 +445,8 @@ pub struct SimulationInstance {
     #[serde(default)]
     pub pcie_topology: Option<PcieTopology>,
     #[serde(default)]
+    pub gpu_peer_fabric: Option<GpuPeerFabricTopology>,
+    #[serde(default)]
     pub geometry: BTreeMap<String, GeometryAsset>,
     #[serde(default)]
     pub poses: BTreeMap<String, SpatialPose>,
@@ -414,6 +491,30 @@ pub fn validate_simulation(instance: &SimulationInstance) -> Vec<String> {
     }
     if let Some(topology) = &instance.pcie_topology {
         issues.extend(validate_pcie_topology(topology, &instance.graph));
+    }
+    if let Some(fabric) = &instance.gpu_peer_fabric {
+        let resource_ids = instance.graph.resources.iter().map(|r| r.identity.as_str()).collect::<HashSet<_>>();
+        let mut link_ids = HashSet::new();
+        let mut endpoint_pairs = HashSet::new();
+        for link in &fabric.links {
+            if link.identity.trim().is_empty() || !link_ids.insert(link.identity.as_str()) {
+                issues.push(format!("GPU peer link identity '{}' is empty or duplicated", link.identity));
+            }
+            if link.source_identity == link.target_identity {
+                issues.push(format!("GPU peer link '{}' cannot connect a resource to itself", link.identity));
+            }
+            if !resource_ids.contains(link.source_identity.as_str()) || !resource_ids.contains(link.target_identity.as_str()) {
+                issues.push(format!("GPU peer link '{}' references a resource missing from the graph", link.identity));
+            }
+            let pair = if link.source_identity <= link.target_identity {
+                (link.source_identity.as_str(), link.target_identity.as_str())
+            } else {
+                (link.target_identity.as_str(), link.source_identity.as_str())
+            };
+            if !endpoint_pairs.insert(pair) {
+                issues.push(format!("GPU peer endpoint pair on '{}' is duplicated", link.identity));
+            }
+        }
     }
     for issue in validate_graph(&instance.graph) {
         issues.push(format!("Graph relationship '{}': {}", issue.relationship_identity, issue.detail));
@@ -791,6 +892,7 @@ mod tests {
             switch_downstream_ports: 8,
             gpu_memory_gib: 288,
             numa_nodes_per_host: 2,
+            gpu_peer_fabric: None,
             seed: 42,
         }
     }
@@ -877,6 +979,7 @@ mod tests {
                 resources: vec![discovered("host-1")], relationships: vec![],
             },
             pcie_topology: None,
+            gpu_peer_fabric: None,
             geometry: BTreeMap::new(),
             poses: BTreeMap::from([("gpu-missing".into(), SpatialPose {
                 coordinate_frame: "rack-origin".into(), translation: [0.0, 0.0, 0.0],

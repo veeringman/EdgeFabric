@@ -116,3 +116,23 @@ pub async fn create(
         "qualification_approved": false
     })))
 }
+
+/// POST /api/v1/infrastructure/hardware-profiles/{id}/submit
+/// Submits a tenant-owned draft for review; this does not approve or qualify it.
+pub async fn submit(
+    State(state): State<AppState>,
+    auth: AuthContext,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<Value>> {
+    let row = InfrastructureHardwareProfileRepo::submit(&state.pool, auth.tenant_id, id)
+        .await.map_err(|error| {
+            tracing::error!(tenant_id = %auth.tenant_id, profile_id = %id, error = %error, "Hardware profile submission failed");
+            ApiError::internal("Failed to submit hardware profile")
+        })?.ok_or_else(|| ApiError::bad_request("Profile was not found in this tenant or is not in draft status"))?;
+    Ok(Json(json!({
+        "profile": row,
+        "submitted": true,
+        "qualification_approved": false,
+        "review_workflow": "pending_external_authorized_review"
+    })))
+}

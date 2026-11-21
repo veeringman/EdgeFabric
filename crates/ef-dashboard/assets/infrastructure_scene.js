@@ -27,6 +27,47 @@
     const material = new THREE.LineBasicMaterial({ color, transparent: true, opacity });
     return new THREE.Line(geometry, material);
   }
+  async function loadGeometryAsset(node, fallbackMesh, outline, root, modelById) {
+    const url = node.geometry_asset_url;
+    // Only same-origin API paths are accepted; no profile-supplied remote URLs.
+    if (typeof url !== "string" || !url.startsWith("/api/v1/infrastructure/geometry-assets/")) {
+      throw new Error("Untrusted geometry asset URL");
+    }
+    const token = window.localStorage.getItem("ef_token");
+    if (!token) throw new Error("Authenticated session token unavailable");
+    const response = await fetch(url, { headers: { Authorization: "Bearer " + token }, credentials: "same-origin" });
+    if (!response.ok) throw new Error("Geometry asset request failed: " + response.status);
+    const buffer = await response.arrayBuffer();
+    const digest = await crypto.subtle.digest("SHA-256", buffer);
+    const actual = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
+    if (actual.toLowerCase() !== String(node.geometry.sha256 || "").toLowerCase()) {
+      throw new Error("Geometry asset SHA-256 mismatch");
+    }
+    const loader = new THREE.GLTFLoader();
+    const gltf = await new Promise((resolve, reject) => loader.parse(buffer, "", resolve, reject));
+    const model = gltf.scene;
+    if (!model) throw new Error("GLB contains no scene");
+    const unit = String(node.geometry.units || "m").toLowerCase();
+    const scale = unit === "mm" || unit === "millimeter" || unit === "millimeters" ? 0.001
+      : unit === "cm" || unit === "centimeter" || unit === "centimeters" ? 0.01
+      : unit === "m" || unit === "meter" || unit === "meters" ? 1 : null;
+    if (scale === null) throw new Error("Unsupported or unspecified geometry units");
+    model.scale.setScalar(scale);
+    model.position.copy(fallbackMesh.position);
+    model.quaternion.copy(fallbackMesh.quaternion);
+    model.traverse(object => {
+      if (object.isMesh) {
+        object.castShadow = true;
+        object.receiveShadow = true;
+        object.userData.resourceId = node.id;
+      }
+    });
+    root.add(model);
+    fallbackMesh.visible = false;
+    outline.visible = false;
+    modelById.set(node.id, model);
+  }
+
   function init(containerId, document) {
     dispose(containerId);
     const container = window.document.getElementById(containerId);
@@ -53,6 +94,7 @@
     grid.position.y = -0.02; scene.add(grid);
     const root = new THREE.Group(); scene.add(root);
     const nodeById = new Map();
+    const modelById = new Map();
     const positions = new Map();
     const pending = new Set();
 
@@ -228,18 +270,26 @@
     }
     animate();
     let selectedMesh = null;
+    let selectedModel = null;
+    function setEmissive(object, color, intensity) {
+      if (!object) return;
+      object.traverse(child => {
+        if (!child.isMesh) return;
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach(material => {
+          if (material && material.emissive) { material.emissive.setHex(color); material.emissiveIntensity = intensity; }
+        });
+      });
+    }
     instances.set(containerId, {
       renderer, scene, camera, root, observer, raf, overlayGroups,
       select(resourceId) {
-        if (selectedMesh) {
-          selectedMesh.material.emissive.setHex(0x000000);
-          selectedMesh.material.emissiveIntensity = 0;
-        }
+        if (selectedMesh) { selectedMesh.material.emissive.setHex(0x000000); selectedMesh.material.emissiveIntensity = 0; }
+        setEmissive(selectedModel, 0x000000, 0);
         selectedMesh = nodeById.get(resourceId) || null;
-        if (selectedMesh) {
-          selectedMesh.material.emissive.setHex(0x60a5fa);
-          selectedMesh.material.emissiveIntensity = 0.8;
-        }
+        selectedModel = modelById.get(resourceId) || null;
+        if (selectedMesh && selectedMesh.visible) { selectedMesh.material.emissive.setHex(0x60a5fa); selectedMesh.material.emissiveIntensity = 0.8; }
+        setEmissive(selectedModel, 0x60a5fa, 0.8);
       },
       listeners: [
         ["pointerdown", onDown], ["pointermove", onMove], ["pointerup", onUp],

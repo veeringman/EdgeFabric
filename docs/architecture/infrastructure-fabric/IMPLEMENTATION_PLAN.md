@@ -29,6 +29,7 @@ Acceptance: existing EdgeFabric discovery is reused; no second scanner or duplic
 - [x] Add a bounded deterministic virtual GPU-cluster template expander with host/root-complex/PCIe-switch/GPU graph resources, typed PCIe links, switch-port checks and uplink oversubscription metadata.
 - [x] Structural NVLink full-mesh and NVSwitch peer-fabric topology, distinct from PCIe attachment paths.
 - [x] Structural NIC/DPU attachment paths and Ethernet/RoCE/InfiniBand fabric links with speed and switch-port validation.
+- [x] Deterministic rack placement with rack-unit slots, chassis/rack dimensions and spatial poses; logical A/B PDU feeds, optional per-feed UPS paths and surviving-feed capacity validation.
 - [x] Add standalone typed storage-path and CXL-memory topology primitives with graph endpoint, capacity, speed, generation, lane-width and API-size validation.
 - [x] Extend GPU-cluster templates to synthesize direct NVMe drives or shared NVMe-oF/Fibre Channel storage arrays, plus per-host CXL memory expanders with NUMA attachment metadata.
 - [x] Add deterministic rack placement, synthetic PDU/cooling-zone resources, declared component power envelopes, rack/PDU/cooling capacity checks and optional single-PDU-failure capacity validation.

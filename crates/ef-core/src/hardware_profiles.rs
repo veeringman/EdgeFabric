@@ -190,7 +190,10 @@ pub fn builtin_hardware_profiles() -> Vec<HardwareProfile> {
                     },
                     "x86_baseboard": "OEM_defined"
                 },
-                "specification_status": "preliminary_subject_to_change"
+                "specification_status": "preliminary_subject_to_change",
+                "constraints": {
+                    "gpus_per_host": { "equals": 8 }
+                }
             }),
             supported_components: vec!["gpu".into(), "host".into(), "cpu".into(), "nvlink".into(), "network".into(), "memory".into()],
             assets: Vec::new(),

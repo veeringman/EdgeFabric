@@ -106,6 +106,19 @@ impl HardwareProfile {
             if source.title.trim().is_empty() || source.uri.trim().is_empty() || source.publisher.trim().is_empty() {
                 issues.push("Each source requires a title, URI and publisher".into());
             }
+            if source.sha256.as_ref().is_some_and(|digest| digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit())) {
+                issues.push("Source SHA-256 must be 64 hexadecimal characters when supplied".into());
+            }
+        }
+        for component in &self.components {
+            if component.sources.len() > 100 || component.assets.len() > 100 {
+                issues.push(format!("Component '{}' may contain at most 100 sources and 100 assets", component.id));
+            }
+            for source in &component.sources {
+                if source.title.trim().is_empty() || source.uri.trim().is_empty() || source.publisher.trim().is_empty() {
+                    issues.push(format!("Component '{}' has a source without title, URI or publisher", component.id));
+                }
+            }
         }
         for asset in &self.assets {
             if asset.uri.trim().is_empty() || asset.sha256.trim().is_empty() || asset.license.trim().is_empty() {

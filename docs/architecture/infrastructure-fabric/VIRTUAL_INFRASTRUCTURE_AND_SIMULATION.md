@@ -61,7 +61,7 @@ The template expands into synthetic host, root-complex, PCIe-switch and GPU reso
 
 For the example above, the deterministic graph contains 2 hosts, 2 root complexes, 2 PCIe switches and 8 GPUs; 12 PCIe devices and 10 PCIe links. Synthetic resources are unverified and tagged with the simulation source. Repeated expansion yields the same resource identities and topology for the same template. The seed is retained as scenario provenance; this structural template currently does not introduce random placement.
 
-The template can optionally add a GPU peer fabric, independent of PCIe: `nv_link_full_mesh` creates direct GPU-to-GPU links within each host, while `nv_switch` creates a synthetic NVSwitch resource per host and GPU-to-switch peer links. The peer-fabric validator checks endpoint membership, self-links, duplicate identities and duplicate endpoint pairs. For two hosts with four GPUs each, full-mesh mode creates 12 peer links (six per host); NVSwitch mode creates eight GPU-to-switch links and two NVSwitch resources. These are structural abstractions: they do not assert a particular NVLink generation, bandwidth, switch radix, NVLink lane count, or measured peer performance. The template still does not emulate a GPU, launch a workload, or qualify hardware. NIC/DPU, network fabrics, storage and CXL memory now have separate structural topology models; rack power and cooling constraints remain follow-on work.
+The template can optionally add a GPU peer fabric, independent of PCIe: `nv_link_full_mesh` creates direct GPU-to-GPU links within each host, while `nv_switch` creates a synthetic NVSwitch resource per host and GPU-to-switch peer links. The peer-fabric validator checks endpoint membership, self-links, duplicate identities and duplicate endpoint pairs. For two hosts with four GPUs each, full-mesh mode creates 12 peer links (six per host); NVSwitch mode creates eight GPU-to-switch links and two NVSwitch resources. These are structural abstractions: they do not assert a particular NVLink generation, bandwidth, switch radix, NVLink lane count, or measured peer performance. The template still does not emulate a GPU, launch a workload, or qualify hardware. NIC/DPU, network fabrics, storage, CXL memory and rack power/cooling now have separate structural topology models.
 
 ## Storage and CXL topology primitives
 
@@ -106,6 +106,41 @@ Example additions to a GPU-cluster template:
 The template validates non-zero capacities and link rates, supported CXL generation/lane widths, per-host device bounds, aggregate resource limits and topology link limits. API responses report generated storage-link, CXL-device and CXL-link counts. Direct NVMe drive count and shared-array capacity are alternative modes: the fields not used by the selected mode are ignored.
 
 The generated topology is deterministic in identity and connectivity for a fixed template. Capacity and link speed are declared structural inputs, not measured throughput or performance predictions. The shared-array model is intentionally a simple single-switch/single-array topology; multipath, dual-fabric redundancy, RAID layouts, namespaces, drive endurance, IOPS and latency are not modeled. CXL memory devices are structural expanders; decoder windows, interleave sets, coherency behavior, pooling protocols and bandwidth contention are not modeled.
+
+## Rack placement, power feeds and cooling envelope
+
+The GPU-cluster template optionally accepts a `power_cooling` object. It deterministically places hosts into racks using `hosts_per_rack`, creates synthetic rack, PDU and cooling-zone resources, and records `contains`, `powered_by` and `cooled_by` relationships.
+
+The declared component envelopes are summed per host:
+- host chassis power;
+- GPU power multiplied by GPUs per host;
+- NIC power multiplied by configured NICs per host;
+- direct-NVMe drive power (shared storage-array power is not yet included);
+- CXL expander power.
+
+For each rack, the generator compares the resulting design load against rack power capacity, the configured PDU capacity and cooling capacity. When `require_redundant_pdu` is true, at least two PDUs are required and the capacity check uses the remaining PDU capacity after loss of one unit (an N+1-style capacity check). This is a simplified feed-capacity abstraction; it does not model A/B electrical paths, phase balancing, breaker curves, voltage, UPS/generator transitions or actual power telemetry.
+
+Example template addition:
+
+```json
+{
+  "power_cooling": {
+    "hosts_per_rack": 2,
+    "host_power_watts": 1200,
+    "gpu_power_watts": 700,
+    "nic_power_watts": 100,
+    "storage_device_power_watts": 30,
+    "cxl_device_power_watts": 50,
+    "rack_power_capacity_watts": 18000,
+    "pdus_per_rack": 2,
+    "pdu_capacity_watts": 12000,
+    "cooling_capacity_watts": 18000,
+    "require_redundant_pdu": true
+  }
+}
+```
+
+All values are declared design envelopes in watts, not measured draw, heat output or a CFD/thermal prediction. Shared-array storage power, switch power, conversion losses, power factor, transient peaks, airflow, coolant flow/temperature, hot/cold aisle containment and facility-level cooling plant constraints remain outside this first structural model. API responses report generated rack and PDU counts; rack records retain per-rack design load and capacity values.
 
 ## Example scenario
 

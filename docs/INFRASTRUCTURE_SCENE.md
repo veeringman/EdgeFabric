@@ -1,0 +1,55 @@
+# Infrastructure Simulation Scene Projection
+
+## Purpose
+
+The scene projection is a renderer-neutral view of an immutable, tenant-owned infrastructure simulation. It is derived from the same `SimulationInstance` resource graph and typed topology models used by validation and reconciliation. It is not a second inventory database and it does not execute a simulator.
+
+## Endpoint
+
+```http
+GET /api/v1/infrastructure/simulations/{id}/scene
+Authorization: Bearer <tenant JWT>
+```
+
+The simulation lookup is tenant-scoped. A simulation belonging to another tenant is returned as not found.
+
+## Scene document
+
+The response contains:
+
+- `scene_id` and `simulation_id`: stable scene and persisted simulation identifiers.
+- `coordinate_units`: `mm`; `coordinate_convention`: right-handed.
+- `nodes[]`: graph resources with stable IDs, kind, attributes, provenance, optional transform, optional axis-aligned bounds, optional geometry asset reference, and a render hint.
+- `edges[]`: graph relationships with stable IDs, source/target IDs, kind, attributes and provenance.
+- `topology_overlays`: typed PCIe, GPU peer, network, storage, CXL and rack power/cooling structures. These retain the domain-specific link properties instead of flattening every fabric into generic edges.
+- `scene_metadata`: node/edge and spatial/asset/fallback counts.
+- `fidelity`: explicit limits on what the scene represents.
+
+## Renderer behavior
+
+For each node, `render_hint` is one of:
+
+- `asset` — a geometry asset reference is present. The client resolves the asset through the configured artifact/object-storage integration and verifies its digest.
+- `bounds_primitive` — no asset is attached; render a box or other simple placeholder from `bounds_mm`.
+- `unresolved` — neither asset nor bounds are available; show the node in the scene hierarchy but do not invent dimensions.
+
+Transforms are optional. A missing transform must not be interpreted as a zero-position measurement. The scene projection does not embed binary geometry, vendor CAD, or proprietary GLB files.
+
+## Topology visualization
+
+Render graph edges as the general relationship layer. Use typed overlays for domain-specific visualization:
+
+- PCIe: upstream/downstream endpoints, generation and lane width.
+- GPU peer fabric: NVLink full-mesh or NVSwitch logical links, distinct from PCIe.
+- Network: Ethernet, RoCE or InfiniBand paths and configured link speed.
+- Storage: direct NVMe, NVMe-oF or Fibre Channel paths and configured capacity/rate.
+- CXL: memory expander attachment, generation, lane width and NUMA association.
+- Rack power/cooling: rack load/capacity, PDU and UPS identities, rack-unit placements and cooling design capacity.
+
+A renderer may expose independent visibility toggles for each overlay. Overlay edges should reference the same node IDs as the graph.
+
+## Fidelity and safety
+
+All resources in this endpoint are marked `inventory_class: simulated`. `execution_started` is always false. Geometry asset references are not proof of vendor approval or physical fit. Rack power and cooling values are declared design envelopes, not live telemetry or CFD. PCIe/NVLink/network/storage topology is structural and does not imply measured or predicted bandwidth, latency or application performance.
+
+The current projection is read-only. It cannot provision hardware, change physical inventory, start simulation workloads, or apply reconciliation plans.

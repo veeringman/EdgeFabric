@@ -131,3 +131,10 @@ Read-only built-ins can be copied into a tenant's immutable profile registry wit
 ### Component-level profile inventory
 
 Hardware profiles now support typed component entries in addition to the profile-wide `supported_components` class list. Each entry has a stable component ID, class, optional vendor/model/quantity, a facts object, optional component-specific provenance sources and optional licensed geometry assets. Unknown quantities remain absent. The built-in Rubin references use these entries for GPU, CPU, baseboard, compute-tray, NVLink-switch-tray, rack and NVLink-domain inventory. This inventory is descriptive; it does not synthesize missing cable maps, slot maps or physical dimensions.
+
+Reference material used for the built-in NVIDIA entries (retrieved 2026-11-21):
+
+- NVIDIA HGX Platform specifications: https://www.nvidia.com/en-us/data-center/hgx/
+- NVIDIA Vera Rubin POD architecture and Vera Rubin Ultra NVL576 topology: https://developer.nvidia.com/blog/nvidia-vera-rubin-pod-seven-chips-five-rack-scale-systems-one-ai-supercomputer
+
+The public NVIDIA sources are stored on the profile records themselves. Re-fetch and review source revisions before any real hardware qualification or procurement decision.

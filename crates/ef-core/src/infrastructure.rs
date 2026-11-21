@@ -256,7 +256,7 @@ pub fn instantiate_gpu_cluster_template(
         issues.push("Expanded GPU cluster may contain at most 10000 resources".into());
     }
     let network_resource_count = template.network_fabric.as_ref().map_or(0, |network| {
-        u32::from(template.hosts) * (u32::from(network.nics_per_host) + u32::from(network.dpu_per_host)) + 1
+        u32::from(template.hosts) * (u32::from(network.nics_per_host) + if network.dpu_per_host { 1 } else { 0 }) + 1
     });
     if u32::from(template.hosts) * (u32::from(template.gpus_per_host) + 3) + network_resource_count > 10_000 {
         issues.push("Expanded GPU cluster including network resources may contain at most 10000 resources".into());

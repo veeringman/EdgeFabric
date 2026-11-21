@@ -210,8 +210,20 @@
       renderer.render(scene, camera);
     }
     animate();
+    let selectedMesh = null;
     instances.set(containerId, {
       renderer, scene, camera, root, observer, raf, overlayGroups,
+      select(resourceId) {
+        if (selectedMesh) {
+          selectedMesh.material.emissive.setHex(0x000000);
+          selectedMesh.material.emissiveIntensity = 0;
+        }
+        selectedMesh = nodeById.get(resourceId) || null;
+        if (selectedMesh) {
+          selectedMesh.material.emissive.setHex(0x60a5fa);
+          selectedMesh.material.emissiveIntensity = 0.8;
+        }
+      },
       listeners: [
         ["pointerdown", onDown], ["pointermove", onMove], ["pointerup", onUp],
         ["pointercancel", onUp], ["wheel", onWheel], ["contextmenu", onContext]
@@ -231,11 +243,15 @@
     const old = instances.get(id);
     if (old) { old.dispose(); instances.delete(id); }
   }
+  function setSelected(id, resourceId) {
+    const item = instances.get(id);
+    if (item) item.select(resourceId);
+  }
   function setOverlays(id, state) {
     const item = instances.get(id);
     if (!item) return;
     Object.entries({ pcie: state.pcie, gpu: state.gpu, network: state.network, storage: state.storage, power: state.power })
       .forEach(([key, visible]) => { if (item.overlayGroups[key]) item.overlayGroups[key].visible = !!visible; });
   }
-  window.EfInfrastructureScene = { init, dispose, setOverlays };
+  window.EfInfrastructureScene = { init, dispose, setOverlays, setSelected };
 })();

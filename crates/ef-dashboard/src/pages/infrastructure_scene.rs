@@ -35,6 +35,7 @@ pub fn InfrastructureScenePage() -> impl IntoView {
     let (builtin_profiles, set_builtin_profiles) = signal(Vec::<Value>::new());
     let (builtin_profile_id, set_builtin_profile_id) = signal(String::new());
     let (cloning_profile, set_cloning_profile) = signal(false);
+    let (submitting_profile, set_submitting_profile) = signal(false);
     let (template_scenario, set_template_scenario) = signal("rubin-cluster-baseline".to_string());
     let (template_hosts, set_template_hosts) = signal("4".to_string());
     let (template_gpus, set_template_gpus) = signal("8".to_string());
@@ -94,6 +95,28 @@ pub fn InfrastructureScenePage() -> impl IntoView {
                 Err(err) => set_error.set(Some(err)),
             }
             set_cloning_profile.set(false);
+        });
+    };
+
+    let submit_selected_profile = move |_| {
+        let record_id = template_profile_record_id.get_untracked();
+        if record_id.is_empty() {
+            set_error.set(Some("Select a tenant hardware profile before submitting it.".into()));
+            return;
+        }
+        set_submitting_profile.set(true);
+        set_error.set(None);
+        leptos::task::spawn_local(async move {
+            let path = format!("/infrastructure/hardware-profiles/{record_id}/submit");
+            match crate::api::post::<_, Value>(&path, &serde_json::json!({})).await {
+                Ok(_) => {
+                    if let Ok(list) = crate::api::get::<Value>("/infrastructure/hardware-profiles").await {
+                        set_hardware_profiles.set(list["profiles"].as_array().cloned().unwrap_or_default());
+                    }
+                }
+                Err(err) => set_error.set(Some(err)),
+            }
+            set_submitting_profile.set(false);
         });
     };
 
@@ -348,6 +371,9 @@ pub fn InfrastructureScenePage() -> impl IntoView {
                             />
                         </select>
                     </label>
+                    <button class="btn btn-secondary" on:click=submit_selected_profile disabled=move || submitting_profile.get()>
+                        {move || if submitting_profile.get() { "Submitting profile…" } else { "Submit selected profile for review" }}
+                    </button>
                     <label>"Clone a built-in vendor reference into this tenant"
                         <select prop:value=move || builtin_profile_id.get() on:change=move |ev| set_builtin_profile_id.set(event_target_value(&ev))>
                             <option value="">"Select a built-in reference"</option>

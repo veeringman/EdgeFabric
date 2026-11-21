@@ -156,6 +156,170 @@ pub fn validate_pcie_topology(topology: &PcieTopology, graph: &InfrastructureGra
     issues
 }
 
+/// Declarative inputs for a reproducible multi-host virtual GPU cluster.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GpuClusterTemplate {
+    pub identity: String,
+    pub scenario_id: String,
+    pub hosts: u16,
+    pub gpus_per_host: u16,
+    pub pcie_generation: u8,
+    pub root_complex_lanes: u8,
+    pub switch_uplink_lanes: u8,
+    pub gpu_lanes: u8,
+    pub switch_downstream_ports: u16,
+    pub gpu_memory_gib: u32,
+    pub numa_nodes_per_host: u8,
+    pub seed: u64,
+}
+
+/// Expand a template into a deterministic synthetic graph and PCIe topology.
+/// Resource identities are stable for a given template; timestamps are metadata.
+pub fn instantiate_gpu_cluster_template(
+    template: &GpuClusterTemplate,
+) -> Result<SimulationInstance, Vec<String>> {
+    let mut issues = Vec::new();
+    if template.identity.trim().is_empty() { issues.push("Template identity is required".into()); }
+    if template.scenario_id.trim().is_empty() { issues.push("Scenario ID is required".into()); }
+    if template.hosts == 0 || template.hosts > 256 { issues.push("Hosts must be between 1 and 256".into()); }
+    if template.gpus_per_host == 0 || template.gpus_per_host > 64 { issues.push("GPUs per host must be between 1 and 64".into()); }
+    if template.numa_nodes_per_host == 0 || template.numa_nodes_per_host > 8 { issues.push("NUMA nodes per host must be between 1 and 8".into()); }
+    if ![1, 2, 4, 8, 16, 32].contains(&template.root_complex_lanes)
+        || ![1, 2, 4, 8, 16, 32].contains(&template.switch_uplink_lanes)
+        || ![1, 2, 4, 8, 16, 32].contains(&template.gpu_lanes) {
+        issues.push("PCIe lane widths must be one of 1, 2, 4, 8, 16 or 32".into());
+    }
+    if !(1..=7).contains(&template.pcie_generation) {
+        issues.push("PCIe generation must be between 1 and 7".into());
+    }
+    if template.gpu_memory_gib == 0 { issues.push("GPU memory must be greater than zero".into()); }
+    if template.switch_downstream_ports < template.gpus_per_host {
+        issues.push("PCIe switch downstream port count is smaller than GPUs per host".into());
+    }
+    if template.switch_uplink_lanes > template.root_complex_lanes {
+        issues.push("PCIe switch uplink exceeds root-complex lane capability".into());
+    }
+    if !issues.is_empty() { return Err(issues); }
+
+    let now = Utc::now();
+    let source = "edgefabric.simulation.gpu_cluster_template";
+    let mut resources = Vec::new();
+    let mut relationships = Vec::new();
+    let mut devices = Vec::new();
+    let mut links = Vec::new();
+
+    for host_index in 0..template.hosts {
+        let host = format!("{}:host-{:03}", template.identity, host_index + 1);
+        let root = format!("{host}:root-complex");
+        let switch = format!("{host}:pcie-switch");
+        let mut host_attributes = BTreeMap::new();
+        host_attributes.insert("virtual".into(), Value::Bool(true));
+        host_attributes.insert("host_index".into(), Value::from(host_index + 1));
+        host_attributes.insert("gpus".into(), Value::from(template.gpus_per_host));
+        host_attributes.insert("numa_nodes".into(), Value::from(template.numa_nodes_per_host));
+        resources.push(DiscoveredResource {
+            identity: host.clone(), kind: "host".into(), attributes: host_attributes,
+            source: source.into(), observed_at: now, verified: false,
+        });
+        resources.push(DiscoveredResource {
+            identity: root.clone(), kind: "pcie_root_complex".into(),
+            attributes: BTreeMap::from([("virtual".into(), Value::Bool(true))]),
+            source: source.into(), observed_at: now, verified: false,
+        });
+        resources.push(DiscoveredResource {
+            identity: switch.clone(), kind: "pcie_switch".into(),
+            attributes: BTreeMap::from([
+                ("virtual".into(), Value::Bool(true)),
+                ("downstream_ports".into(), Value::from(template.switch_downstream_ports)),
+                ("uplink_lanes".into(), Value::from(template.switch_uplink_lanes)),
+            ]),
+            source: source.into(), observed_at: now, verified: false,
+        });
+        relationships.push(ResourceRelationship {
+            identity: format!("{host}:contains-root"), source_identity: host.clone(),
+            target_identity: root.clone(), kind: "contains".into(), attributes: BTreeMap::new(),
+            source: source.into(), observed_at: now, verified: false,
+        });
+        relationships.push(ResourceRelationship {
+            identity: format!("{host}:contains-switch"), source_identity: host.clone(),
+            target_identity: switch.clone(), kind: "contains".into(), attributes: BTreeMap::new(),
+            source: source.into(), observed_at: now, verified: false,
+        });
+        devices.push(PcieDevice {
+            resource_identity: root.clone(), role: PcieDeviceRole::RootComplex,
+            max_generation: template.pcie_generation, max_lane_width: template.root_complex_lanes,
+            numa_node: Some(0),
+        });
+        devices.push(PcieDevice {
+            resource_identity: switch.clone(), role: PcieDeviceRole::Switch,
+            max_generation: template.pcie_generation, max_lane_width: 32, numa_node: Some(0),
+        });
+        links.push(PcieLink {
+            identity: format!("{host}:uplink"), upstream_identity: root.clone(),
+            downstream_identity: switch.clone(), generation: template.pcie_generation,
+            lane_width: template.switch_uplink_lanes,
+        });
+
+        for gpu_index in 0..template.gpus_per_host {
+            let gpu = format!("{host}:gpu-{:02}", gpu_index + 1);
+            let numa = (gpu_index % u16::from(template.numa_nodes_per_host)) as u16;
+            resources.push(DiscoveredResource {
+                identity: gpu.clone(), kind: "gpu".into(),
+                attributes: BTreeMap::from([
+                    ("virtual".into(), Value::Bool(true)),
+                    ("memory_gib".into(), Value::from(template.gpu_memory_gib)),
+                    ("numa_node".into(), Value::from(numa)),
+                    ("pcie_generation".into(), Value::from(template.pcie_generation)),
+                    ("pcie_lanes".into(), Value::from(template.gpu_lanes)),
+                ]),
+                source: source.into(), observed_at: now, verified: false,
+            });
+            relationships.push(ResourceRelationship {
+                identity: format!("{switch}:connects:{gpu_index:02}"),
+                source_identity: switch.clone(), target_identity: gpu.clone(),
+                kind: "connected_to".into(), attributes: BTreeMap::new(),
+                source: source.into(), observed_at: now, verified: false,
+            });
+            devices.push(PcieDevice {
+                resource_identity: gpu.clone(), role: PcieDeviceRole::Endpoint,
+                max_generation: template.pcie_generation, max_lane_width: template.gpu_lanes,
+                numa_node: Some(numa),
+            });
+            links.push(PcieLink {
+                identity: format!("{host}:gpu-link-{:02}", gpu_index + 1),
+                upstream_identity: switch.clone(), downstream_identity: gpu,
+                generation: template.pcie_generation, lane_width: template.gpu_lanes,
+            });
+        }
+    }
+
+    let graph = InfrastructureGraph {
+        observed_at: now, coverage_complete: true, resources, relationships,
+    };
+    let pcie_topology = PcieTopology { devices, links };
+    let instance = SimulationInstance {
+        identity: template.identity.clone(),
+        kind: SimulationKind::TopologySimulation,
+        scenario_id: template.scenario_id.clone(),
+        engine: "edgefabric.gpu_cluster_template".into(),
+        engine_version: "1.0.0".into(),
+        seed: template.seed,
+        created_at: now,
+        source_manifest_revision: None,
+        graph,
+        pcie_topology: Some(pcie_topology),
+        geometry: BTreeMap::new(),
+        poses: BTreeMap::new(),
+        parameters: BTreeMap::from([
+            ("template".into(), serde_json::to_value(template).unwrap_or(Value::Null)),
+            ("deterministic_topology".into(), Value::Bool(true)),
+            ("simulation_only".into(), Value::Bool(true)),
+        ]),
+    };
+    let validation = validate_simulation(&instance);
+    if validation.is_empty() { Ok(instance) } else { Err(validation) }
+}
+
 /// Position and orientation in a named coordinate frame. Translation units
 /// are defined by the referenced scene/model; rotation is a normalized quaternion.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -654,6 +818,7 @@ mod tests {
                 observed_at: Utc::now(), coverage_complete: false,
                 resources: vec![discovered("host-1")], relationships: vec![],
             },
+            pcie_topology: None,
             geometry: BTreeMap::new(),
             poses: BTreeMap::from([("gpu-missing".into(), SpatialPose {
                 coordinate_frame: "rack-origin".into(), translation: [0.0, 0.0, 0.0],

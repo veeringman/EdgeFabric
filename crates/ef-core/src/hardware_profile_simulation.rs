@@ -39,9 +39,9 @@ pub fn instantiate_hardware_profile(
             }
         }
     }
-    let expanded_count = profile.components.iter()
-        .map(|component| component.quantity.unwrap_or(1) as usize)
-        .sum::<usize>();
+    let expanded_count = profile.components.iter().fold(0usize, |total, component| {
+        total.saturating_add(usize::try_from(component.quantity.unwrap_or(1)).unwrap_or(10_001))
+    });
     if expanded_count > 9_999 {
         issues.push("Profile expansion exceeds the 10000-resource simulation limit".into());
     }

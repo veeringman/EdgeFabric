@@ -29,7 +29,7 @@
   }
   function init(containerId, document) {
     dispose(containerId);
-    const container = document && document.getElementById ? document : window.document.getElementById(containerId);
+    const container = window.document.getElementById(containerId);
     if (!container || !window.THREE || !document || !Array.isArray(document.nodes)) return;
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0b1220);
@@ -60,6 +60,8 @@
     // resource has a pose. Unplaced resources receive a deterministic layout.
     const sourceNodes = document.nodes;
     const nodesById = new Map(sourceNodes.map((n, i) => [n.id, { node: n, index: i }]));
+    const parentByChild = new Map();
+    (document.edges || []).filter(e => e.kind === "contains").forEach(e => parentByChild.set(e.target, e.source));
     function positionFor(id, depth) {
       if (positions.has(id)) return positions.get(id).clone();
       if (depth > 8 || pending.has(id)) return new THREE.Vector3();
@@ -71,6 +73,15 @@
         p = vec3(pose.translation, new THREE.Vector3()).multiplyScalar(0.001);
         const frame = pose.coordinate_frame;
         if (frame && frame !== "site-mm" && nodesById.has(frame)) p.add(positionFor(frame, depth + 1));
+      } else if (parentByChild.has(id)) {
+        const parentId = parentByChild.get(id);
+        const siblings = sourceNodes.filter(n => parentByChild.get(n.id) === parentId);
+        const siblingIndex = Math.max(0, siblings.findIndex(n => n.id === id));
+        p = positionFor(parentId, depth + 1).add(new THREE.Vector3(
+          ((siblingIndex % 3) - 1) * 0.16,
+          0.08 + Math.floor(siblingIndex / 3) * 0.07,
+          (Math.floor(siblingIndex / 3) - 0.5) * 0.14
+        ));
       } else {
         const i = entry ? entry.index : 0;
         const columns = Math.max(1, Math.ceil(Math.sqrt(sourceNodes.length)));
@@ -84,11 +95,17 @@
     sourceNodes.forEach((node, index) => {
       const bounds = node.bounds_mm || {};
       const hasBounds = Number(bounds.width_mm) > 0 && Number(bounds.height_mm) > 0 && Number(bounds.depth_mm) > 0;
+      const kind = String(node.kind || "resource").toLowerCase();
+      const fallbackSize = kind.includes("rack") ? new THREE.Vector3(0.65, 1.9, 1.0)
+        : kind.includes("host") ? new THREE.Vector3(0.58, 0.09, 0.78)
+        : kind.includes("gpu") || kind.includes("accelerator") ? new THREE.Vector3(0.24, 0.055, 0.18)
+        : kind.includes("switch") ? new THREE.Vector3(0.34, 0.06, 0.22)
+        : kind.includes("nic") || kind.includes("dpu") ? new THREE.Vector3(0.12, 0.035, 0.1)
+        : new THREE.Vector3(0.24, 0.12, 0.2);
       const size = hasBounds
         ? new THREE.Vector3(bounds.width_mm, bounds.height_mm, bounds.depth_mm).multiplyScalar(0.001)
-        : new THREE.Vector3(0.42, 0.24, 0.34);
+        : fallbackSize;
       size.set(Math.max(size.x, 0.08), Math.max(size.y, 0.06), Math.max(size.z, 0.08));
-      const kind = String(node.kind || "resource");
       const material = new THREE.MeshStandardMaterial({
         color: kindColor(kind), roughness: 0.48, metalness: 0.28,
         transparent: true, opacity: 0.94

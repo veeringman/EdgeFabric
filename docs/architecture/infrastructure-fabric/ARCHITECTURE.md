@@ -70,6 +70,20 @@ Relationships include `CONTAINS`, `HOSTED_BY`, `ATTACHED_TO`, `CONNECTED_TO`, `R
 
 Identity is EdgeFabric-stable and independent of vendor labels. Serial, UUID, PCI BDF, MAC and provider IDs are identifiers with provenance, not interchangeable primary keys. Never rely solely on mutable IP addresses. Ambiguous identity produces a conflict requiring resolution.
 
+## 6. Virtual infrastructure and simulation layer
+
+Simulation is a first-class provider-neutral capability, not a second inventory truth source. A simulation instance is an isolated, versioned scenario with an explicit simulation kind, engine/version, deterministic seed, source manifest revision, parameters and a synthetic resource graph. Synthetic resources and observations carry simulation provenance and must never be promoted to physically discovered or verified facts without a separate real provider observation and reconciliation decision.
+
+Support two complementary model families:
+
+- **Spatial/digital-twin models:** hierarchical site/room/row/rack/chassis/board layouts; coordinate frames; transforms; geometry assets; physical volumes; cable routes; power and cooling zones. Store geometry as content-addressed artifacts in existing artifact/object storage and reference it from graph resources. Keep graph identity and geometry identity separate.
+- **Virtual hardware/topology instances:** configurable hosts, CPU/NUMA/memory, PCIe switches and bridges, PCIe-connected GPUs, NICs/DPUs, NVLink/NVSwitch fabrics, storage and network topologies. Model PCIe generation, lane width, negotiated link state, switch hierarchy, NUMA affinity, bandwidth/latency constraints, power/thermal envelopes and accelerator interconnects as typed attributes/relationships.
+
+The simulator contract must expose model fidelity, supported phenomena, assumptions, uncertainty, engine/version, deterministic seed and input manifest hash. Distinguish topology validation, capacity/performance estimation, power/thermal modeling and hardware emulation; a topology simulator must not imply cycle-accurate GPU performance. Simulated qualification results are labeled separately from physical hardware qualification.
+
+A 3D viewer consumes graph and geometry APIs; it is not the system of record. Use standard interchange formats (for example glTF/GLB for real-time scenes and STEP/mesh/voxel references where appropriate), explicit units and coordinate frames, and level-of-detail/streaming for large sites. Do not embed large geometry blobs in relational graph rows.
+
+## 7. Reconciliation lifecycle
 ## 6. Reconciliation lifecycle
 
 1. Capture a time-bounded snapshot from existing discovery and selected providers.

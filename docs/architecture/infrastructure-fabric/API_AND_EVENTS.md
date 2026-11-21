@@ -28,6 +28,33 @@ Use existing EdgeFabric API versioning, authentication, tenant scoping, RBAC, pa
 
 Mutating or long-running actions return auditable job/operation references. Do not expose arbitrary shell execution as a general API. Map paths to existing router conventions after code inspection.
 
+## Implemented first slice
+
+The initial code slice exposes two authenticated, read-only endpoints backed by the existing tenant-scoped runner repository:
+
+- `GET /api/v1/infrastructure/inventory` returns normalized registered runners. Resource identity is `runner:<runner-uuid>`; probe facts are attributed to `edgefabric.runner_probe`, otherwise registration facts are attributed to `edgefabric.runner_registration`.
+- `POST /api/v1/infrastructure/reconcile` accepts a complete declaration set for the tenant's intended runner scope and compares it with the registered runner snapshot.
+
+Example request:
+
+```json
+{
+  "declarations": [
+    {
+      "identity": "runner:00000000-0000-0000-0000-000000000001",
+      "kind": "host",
+      "expected": {
+        "host_os": "linux",
+        "architecture": "x86_64",
+        "capabilities": ["ssh", "linux_runner"]
+      }
+    }
+  ]
+}
+```
+
+The current endpoint intentionally marks discovery coverage incomplete because registered runners are not equivalent to a complete physical-site/network scan. Therefore an absent declaration target is reported as partially discovered, not conclusively missing. Discovered runners outside the submitted declaration set are unexpected within that declared scope. Persistent manifest revisions, full multi-source graph assembly and site-wide coverage tracking remain subsequent implementation work.
+
 ## Event envelope
 
 Use the existing EdgeFabric event mechanism. Logical envelope:

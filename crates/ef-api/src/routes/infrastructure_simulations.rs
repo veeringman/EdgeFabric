@@ -348,6 +348,7 @@ fn project_simulation_scene(id: Uuid, instance: &SimulationInstance) -> Value {
         "scenario_id": instance.scenario_id,
         "simulation_kind": instance.kind,
         "engine": { "name": instance.engine, "version": instance.engine_version },
+        "hardware_profile_binding": instance.parameters.get("hardware_profile_binding").cloned().unwrap_or(Value::Null),
         "coordinate_units": "mm",
         "coordinate_convention": "right_handed",
         "inventory_class": "simulated",

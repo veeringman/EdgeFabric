@@ -226,6 +226,28 @@ mod tests {
     }
 
     #[test]
+    fn component_geometry_assets_are_preserved_as_references() {
+        let mut profile = builtin_hardware_profiles().into_iter()
+            .find(|profile| profile.id == "nvidia.vera-rubin-nvl72").unwrap();
+        profile.components[0].assets.push(crate::hardware_profiles::HardwareProfileAsset {
+            format: "glb".into(),
+            uri: "artifact://tenant-assets/rubin-gpu.glb".into(),
+            sha256: "a".repeat(64),
+            license: "licensed-for-internal-visualization".into(),
+            coordinate_system: Some("right_handed".into()),
+            units: Some("mm".into()),
+        });
+        let instance = instantiate_hardware_profile(&profile, "rubin-assets", "qualification", 11).unwrap();
+        let gpu = instance.graph.resources.iter()
+            .find(|resource| resource.kind == "gpu").unwrap();
+        assert_eq!(gpu.attributes["geometry_assets"][0]["format"], "glb");
+        assert_eq!(instance.geometry.len(), 72);
+        let geometry = instance.geometry.values().next().unwrap();
+        assert_eq!(geometry.format, "glb");
+        assert_eq!(geometry.units, "mm");
+    }
+
+    #[test]
     fn ultra_nvl576_expands_eight_racks_and_576_gpus() {
         let profile = builtin_hardware_profiles().into_iter()
             .find(|profile| profile.id == "nvidia.vera-rubin-ultra-nvl576").unwrap();

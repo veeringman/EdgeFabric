@@ -141,6 +141,9 @@ Example template addition:
 ```
 
 The rack template can additionally describe physical placement with `rack_units`, `host_height_u`, `rack_depth_mm`, `rack_width_mm`, `host_depth_mm`, `host_width_mm` and `rack_spacing_mm`. The generator assigns non-overlapping rack-unit slots and creates spatial poses in a named millimetre coordinate frame. The current arrangement is a deterministic row of racks and vertical host positions; it is not a CAD fit check for rails, cable bend radius, rear-door clearance or service access.
+When rack and chassis width/depth plus rack-unit dimensions are supplied, the simulation also emits axis-aligned `SpatialBounds` for rack and host scene objects. Bounds and poses are separate from optional content-addressed geometry assets, allowing a viewer to render dimensioned primitives before vendor CAD/GLB assets are available. Dimensions are normalized to millimetres; the standard rack-unit pitch is 44.45 mm.
+
+
 
 For redundant power, an even PDU count is split into independent logical A and B groups. Each host is attached to one PDU on each feed. Optional UPS units are created per feed, with PDU-to-UPS relationships and per-feed UPS capacity checks. Under redundant mode, the effective available capacity is the lesser of one feed's PDU capacity and its UPS capacity, so the rack load must fit on either surviving feed. This models capacity paths, not electrical protection coordination, actual circuit isolation or transfer behavior.
 

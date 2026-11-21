@@ -15,7 +15,7 @@ use components::sidebar::Sidebar;
 use pages::{
     admin::AdminPage, builds::BuildsPage, development_ide::DevelopmentIdePage, devices::DevicesPage, discovered_hosts::DiscoveredHostsPage,
     hw_pcb::HardwarePcbPage, hw_schematic::HardwareSchematicPage, hw_studio::HardwareStudioPage,
-    integrations::IntegrationsPage, jobs::JobsPage, login::LoginPage, logs::LogsPage,
+    integrations::IntegrationsPage, infrastructure_scene::InfrastructureScenePage, jobs::JobsPage, login::LoginPage, logs::LogsPage,
     ml_fabric::MlFabricPage,
     overview::OverviewPage, resources::ResourcesPage, quantum::QuantumPage, quantum_accelerators::QuantumAcceleratorsPage,
     quantum_designer::QuantumDesignerPage, quantum_jobs::QuantumJobsPage,
@@ -67,6 +67,7 @@ fn App() -> impl IntoView {
                 <Route path=path!("/integrations") view=move || view! { <AuthGuard><Shell><IntegrationsPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/logs") view=move || view! { <AuthGuard><Shell><LogsPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/admin") view=move || view! { <AuthGuard><Shell><AdminPage/></Shell></AuthGuard> }/>
+                <Route path=path!("/infrastructure/scene") view=move || view! { <AuthGuard><Shell><InfrastructureScenePage/></Shell></AuthGuard> }/>
                 <Route path=path!("/resources") view=move || view! { <AuthGuard><Shell><ResourcesPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/virtual-iot/new") view=move || view! { <AuthGuard><Shell><VirtualIotDesignerPage/></Shell></AuthGuard> }/>
                 <Route path=path!("/virtual-iot/edit") view=move || view! { <AuthGuard><Shell><VirtualIotDesignerPage/></Shell></AuthGuard> }/>

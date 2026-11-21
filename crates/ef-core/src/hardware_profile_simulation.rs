@@ -58,6 +58,8 @@ pub fn instantiate_hardware_profile(
             ("profile_version".into(), json!(profile.version)),
             ("vendor".into(), json!(profile.vendor)),
             ("qualification".into(), json!(profile.qualification)),
+            ("profile_facts".into(), profile.facts.clone()),
+            ("supported_components".into(), json!(profile.supported_components)),
             ("inventory_class".into(), json!("simulated")),
         ]),
         source: "hardware_profile".into(),
@@ -103,6 +105,9 @@ pub fn instantiate_hardware_profile(
             }
             if let Some(model) = &component.model {
                 attributes.insert("model".into(), Value::String(model.clone()));
+            }
+            if let Some(parent) = &component.parent_component_id {
+                attributes.insert("parent_component_id".into(), Value::String(parent.clone()));
             }
             resources.push(DiscoveredResource {
                 identity: resource_identity.clone(),

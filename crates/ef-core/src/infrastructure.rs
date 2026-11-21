@@ -217,6 +217,29 @@ pub struct NetworkFabricTopology {
     pub links: Vec<NetworkFabricLink>,
 }
 
+/// Per-cluster storage attachment and capacity configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StorageFabricTemplate {
+    pub kind: StorageFabricKind,
+    /// Used by direct NVMe; ignored for shared-array transports.
+    pub drives_per_host: u8,
+    pub capacity_gib_per_drive: u64,
+    /// Used by NVMe-oF and Fibre Channel shared-array transports.
+    pub shared_array_capacity_gib: u64,
+    pub link_speed_gbps: u32,
+    /// Required for shared-array transports; represents host-facing ports.
+    pub switch_ports: u32,
+}
+
+/// Per-host CXL memory expansion configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CxlMemoryTemplate {
+    pub devices_per_host: u8,
+    pub capacity_gib_per_device: u64,
+    pub generation: u8,
+    pub lane_width: u8,
+}
+
 /// Storage transport represented independently from PCIe and host networking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -288,6 +311,10 @@ pub struct GpuClusterTemplate {
     pub gpu_peer_fabric: Option<GpuPeerFabricKind>,
     #[serde(default)]
     pub network_fabric: Option<NetworkFabricTemplate>,
+    #[serde(default)]
+    pub storage: Option<StorageFabricTemplate>,
+    #[serde(default)]
+    pub cxl_memory: Option<CxlMemoryTemplate>,
     pub seed: u64,
 }
 
@@ -314,8 +341,17 @@ pub fn instantiate_gpu_cluster_template(
     let nvswitch_resource_count = if template.gpu_peer_fabric == Some(GpuPeerFabricKind::NvSwitch) {
         u32::from(template.hosts)
     } else { 0 };
+    let storage_resource_count = template.storage.as_ref().map_or(0, |storage| {
+        if storage.kind == StorageFabricKind::DirectNvme {
+            u32::from(template.hosts) * u32::from(storage.drives_per_host)
+        } else { 2 }
+    });
+    let cxl_resource_count = template.cxl_memory.as_ref().map_or(0, |cxl| {
+        u32::from(template.hosts) * u32::from(cxl.devices_per_host)
+    });
     if u32::from(template.hosts) * (u32::from(template.gpus_per_host) + 3)
-        + nvswitch_resource_count + network_resource_count > 10_000 {
+        + nvswitch_resource_count + network_resource_count
+        + storage_resource_count + cxl_resource_count > 10_000 {
         issues.push("Expanded GPU cluster including peer and network resources may contain at most 10000 resources".into());
     }
     if template.gpu_peer_fabric == Some(GpuPeerFabricKind::NvLinkFullMesh) {
@@ -350,12 +386,63 @@ pub fn instantiate_gpu_cluster_template(
     let mut links = Vec::new();
     let mut peer_links = Vec::new();
     let mut network_links = Vec::new();
+    let mut storage_links = Vec::new();
+    let mut cxl_devices = Vec::new();
+    let mut cxl_links = Vec::new();
 
     if let Some(network) = &template.network_fabric {
         if network.nics_per_host == 0 || network.nics_per_host > 16 { issues.push("NICs per host must be between 1 and 16".into()); }
         if network.ports_per_nic == 0 || network.ports_per_nic > 16 { issues.push("Ports per NIC must be between 1 and 16".into()); }
         if network.link_speed_gbps == 0 || network.link_speed_gbps > 10_000 { issues.push("Network link speed must be between 1 and 10000 Gbps".into()); }
         if network.switch_ports < u32::from(template.hosts) * u32::from(network.nics_per_host) { issues.push("Network switch port count is smaller than the total NIC uplinks".into()); }
+    }
+    if let Some(storage) = &template.storage {
+        if storage.link_speed_gbps == 0 || storage.link_speed_gbps > 10_000 {
+            issues.push("Storage link speed must be between 1 and 10000 Gbps".into());
+        }
+        match storage.kind {
+            StorageFabricKind::DirectNvme => {
+                if storage.drives_per_host == 0 || storage.drives_per_host > 32 {
+                    issues.push("Direct NVMe drives per host must be between 1 and 32".into());
+                }
+                if storage.capacity_gib_per_drive == 0 {
+                    issues.push("Direct NVMe drive capacity must be greater than zero".into());
+                }
+            }
+            StorageFabricKind::NvmeOfTcp | StorageFabricKind::NvmeOfRdma | StorageFabricKind::FibreChannel => {
+                if storage.shared_array_capacity_gib == 0 {
+                    issues.push("Shared storage array capacity must be greater than zero".into());
+                }
+                if storage.switch_ports < u32::from(template.hosts) {
+                    issues.push("Storage fabric switch port count is smaller than host count".into());
+                }
+            }
+        }
+    }
+    if let Some(cxl) = &template.cxl_memory {
+        if cxl.devices_per_host == 0 || cxl.devices_per_host > 16 {
+            issues.push("CXL memory devices per host must be between 1 and 16".into());
+        }
+        if cxl.capacity_gib_per_device == 0 {
+            issues.push("CXL memory device capacity must be greater than zero".into());
+        }
+        if !(1..=3).contains(&cxl.generation) {
+            issues.push("CXL generation must be between 1 and 3".into());
+        }
+        if ![1, 2, 4, 8, 16].contains(&cxl.lane_width) {
+            issues.push("CXL lane width must be one of 1, 2, 4, 8 or 16".into());
+        }
+    }
+    let storage_link_count = template.storage.as_ref().map_or(0, |storage| {
+        if storage.kind == StorageFabricKind::DirectNvme {
+            u32::from(template.hosts) * u32::from(storage.drives_per_host)
+        } else { u32::from(template.hosts) * 2 + 1 }
+    });
+    let cxl_link_count = template.cxl_memory.as_ref().map_or(0, |cxl| {
+        u32::from(template.hosts) * u32::from(cxl.devices_per_host)
+    });
+    if storage_link_count > 20_000 || cxl_link_count > 20_000 {
+        issues.push("Expanded storage or CXL topology may contain at most 20000 links".into());
     }
     if !issues.is_empty() { return Err(issues); }
 
@@ -366,6 +453,48 @@ pub fn instantiate_gpu_cluster_template(
             attributes: BTreeMap::from([("virtual".into(), Value::Bool(true)), ("ports".into(), Value::from(network.switch_ports)), ("fabric".into(), serde_json::to_value(network.kind).unwrap_or(Value::Null))]),
             source: source.into(), observed_at: now, verified: false,
         });
+    }
+
+    let storage_switch = format!("{}:storage-fabric-switch", template.identity);
+    let storage_array = format!("{}:storage-array", template.identity);
+    if let Some(storage) = &template.storage {
+        if storage.kind != StorageFabricKind::DirectNvme {
+            let switch_kind = match storage.kind {
+                StorageFabricKind::NvmeOfTcp | StorageFabricKind::NvmeOfRdma => "storage_fabric_switch",
+                StorageFabricKind::FibreChannel => "fibre_channel_switch",
+                StorageFabricKind::DirectNvme => unreachable!(),
+            };
+            resources.push(DiscoveredResource {
+                identity: storage_switch.clone(), kind: switch_kind.into(),
+                attributes: BTreeMap::from([
+                    ("virtual".into(), Value::Bool(true)),
+                    ("ports".into(), Value::from(storage.switch_ports)),
+                    ("transport".into(), serde_json::to_value(storage.kind).unwrap_or(Value::Null)),
+                ]),
+                source: source.into(), observed_at: now, verified: false,
+            });
+            resources.push(DiscoveredResource {
+                identity: storage_array.clone(), kind: "storage_array".into(),
+                attributes: BTreeMap::from([
+                    ("virtual".into(), Value::Bool(true)),
+                    ("capacity_gib".into(), Value::from(storage.shared_array_capacity_gib)),
+                    ("transport".into(), serde_json::to_value(storage.kind).unwrap_or(Value::Null)),
+                ]),
+                source: source.into(), observed_at: now, verified: false,
+            });
+            relationships.push(ResourceRelationship {
+                identity: format!("{}:storage-switch-array", template.identity),
+                source_identity: storage_switch.clone(), target_identity: storage_array.clone(),
+                kind: "storage_connected_to".into(), attributes: BTreeMap::new(),
+                source: source.into(), observed_at: now, verified: false,
+            });
+            storage_links.push(StorageFabricLink {
+                identity: format!("{}:storage-switch-array-link", template.identity),
+                source_identity: storage_switch.clone(), target_identity: storage_array.clone(),
+                kind: storage.kind, capacity_gib: storage.shared_array_capacity_gib,
+                link_speed_gbps: storage.link_speed_gbps,
+            });
+        }
     }
 
     for host_index in 0..template.hosts {
@@ -383,6 +512,80 @@ pub fn instantiate_gpu_cluster_template(
             identity: host.clone(), kind: "host".into(), attributes: host_attributes,
             source: source.into(), observed_at: now, verified: false,
         });
+        if let Some(storage) = &template.storage {
+            if storage.kind == StorageFabricKind::DirectNvme {
+                for drive_index in 0..storage.drives_per_host {
+                    let drive = format!("{host}:nvme-{:02}", drive_index + 1);
+                    resources.push(DiscoveredResource {
+                        identity: drive.clone(), kind: "nvme_ssd".into(),
+                        attributes: BTreeMap::from([
+                            ("virtual".into(), Value::Bool(true)),
+                            ("capacity_gib".into(), Value::from(storage.capacity_gib_per_drive)),
+                            ("transport".into(), serde_json::to_value(storage.kind).unwrap_or(Value::Null)),
+                        ]),
+                        source: source.into(), observed_at: now, verified: false,
+                    });
+                    relationships.push(ResourceRelationship {
+                        identity: format!("{host}:contains-nvme:{drive_index:02}"),
+                        source_identity: host.clone(), target_identity: drive.clone(),
+                        kind: "contains".into(), attributes: BTreeMap::new(),
+                        source: source.into(), observed_at: now, verified: false,
+                    });
+                    storage_links.push(StorageFabricLink {
+                        identity: format!("{host}:direct-nvme-link:{drive_index:02}"),
+                        source_identity: host.clone(), target_identity: drive,
+                        kind: storage.kind, capacity_gib: storage.capacity_gib_per_drive,
+                        link_speed_gbps: storage.link_speed_gbps,
+                    });
+                }
+            } else {
+                storage_links.push(StorageFabricLink {
+                    identity: format!("{host}:storage-uplink"),
+                    source_identity: host.clone(), target_identity: storage_switch.clone(),
+                    kind: storage.kind, capacity_gib: storage.shared_array_capacity_gib,
+                    link_speed_gbps: storage.link_speed_gbps,
+                });
+                relationships.push(ResourceRelationship {
+                    identity: format!("{host}:storage-switch-edge"),
+                    source_identity: host.clone(), target_identity: storage_switch.clone(),
+                    kind: "storage_connected_to".into(), attributes: BTreeMap::new(),
+                    source: source.into(), observed_at: now, verified: false,
+                });
+            }
+        }
+        if let Some(cxl) = &template.cxl_memory {
+            for device_index in 0..cxl.devices_per_host {
+                let memory = format!("{host}:cxl-memory-{:02}", device_index + 1);
+                let numa = u16::from(device_index) % u16::from(template.numa_nodes_per_host);
+                resources.push(DiscoveredResource {
+                    identity: memory.clone(), kind: "cxl_memory_expander".into(),
+                    attributes: BTreeMap::from([
+                        ("virtual".into(), Value::Bool(true)),
+                        ("capacity_gib".into(), Value::from(cxl.capacity_gib_per_device)),
+                        ("generation".into(), Value::from(cxl.generation)),
+                        ("lane_width".into(), Value::from(cxl.lane_width)),
+                        ("numa_node".into(), Value::from(numa)),
+                    ]),
+                    source: source.into(), observed_at: now, verified: false,
+                });
+                relationships.push(ResourceRelationship {
+                    identity: format!("{host}:contains-cxl-memory:{device_index:02}"),
+                    source_identity: host.clone(), target_identity: memory.clone(),
+                    kind: "memory_attached_to".into(), attributes: BTreeMap::new(),
+                    source: source.into(), observed_at: now, verified: false,
+                });
+                cxl_devices.push(CxlMemoryDevice {
+                    resource_identity: memory.clone(),
+                    capacity_gib: cxl.capacity_gib_per_device,
+                    numa_node: Some(numa),
+                });
+                cxl_links.push(CxlMemoryLink {
+                    identity: format!("{host}:cxl-link:{device_index:02}"),
+                    host_identity: host.clone(), memory_device_identity: memory,
+                    generation: cxl.generation, lane_width: cxl.lane_width,
+                });
+            }
+        }
         if let Some(network) = &template.network_fabric {
             for nic_index in 0..network.nics_per_host {
                 let nic = format!("{host}:nic-{:02}", nic_index + 1);
@@ -572,6 +775,9 @@ pub fn instantiate_gpu_cluster_template(
     if network_links.len() > 20_000 {
         return Err(vec!["Network fabric may contain at most 20000 links".into()]);
     }
+    if storage_links.len() > 20_000 || cxl_links.len() > 20_000 {
+        return Err(vec!["Storage and CXL topologies may contain at most 20000 links each".into()]);
+    }
 
     let graph = InfrastructureGraph {
         observed_at: now, coverage_complete: true, resources, relationships,
@@ -590,8 +796,8 @@ pub fn instantiate_gpu_cluster_template(
         pcie_topology: Some(pcie_topology),
         gpu_peer_fabric: template.gpu_peer_fabric.map(|kind| GpuPeerFabricTopology { kind, links: peer_links }),
         network_fabric: template.network_fabric.as_ref().map(|network| NetworkFabricTopology { kind: network.kind, links: network_links }),
-        storage_topology: None,
-        cxl_topology: None,
+        storage_topology: template.storage.as_ref().map(|_| StorageTopology { links: storage_links }),
+        cxl_topology: template.cxl_memory.as_ref().map(|_| CxlTopology { devices: cxl_devices, links: cxl_links }),
         geometry: BTreeMap::new(),
         poses: BTreeMap::new(),
         parameters: BTreeMap::from([
@@ -1188,6 +1394,8 @@ mod tests {
             numa_nodes_per_host: 2,
             gpu_peer_fabric: None,
             network_fabric: None,
+            storage: None,
+            cxl_memory: None,
             seed: 42,
         }
     }

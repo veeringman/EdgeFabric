@@ -94,7 +94,10 @@ pub fn api_router() -> Router<AppState> {
         .route("/runners/{id}/drain", post(runners::drain_runner))
         .route("/runners/{id}/probe", post(runners::probe_runner))
         .route("/runners/leases/{id}/release", post(runners::release_runner_lease))
-        // Infrastructure Fabric (read-only inventory and reconciliation)\n        .route("/infrastructure/inventory", get(infrastructure::inventory))\n        .route("/infrastructure/reconcile", post(infrastructure::reconcile_inventory))\n        // M6 Mini ML fabric
+        // Infrastructure Fabric (read-only inventory and reconciliation)
+        .route("/infrastructure/inventory", get(infrastructure::inventory))
+        .route("/infrastructure/reconcile", post(infrastructure::reconcile_inventory))
+        // M6 Mini ML fabric
         .route("/ml/nodes", get(ml::list_nodes))
         .route("/ml/nodes/heartbeat", post(ml::node_heartbeat))
         .route("/ml/clusters", get(ml::list_clusters).post(ml::create_cluster))

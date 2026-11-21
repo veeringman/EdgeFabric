@@ -108,6 +108,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/infrastructure/hardware-profiles/validate", post(infrastructure_hardware_profiles::validate))
         .route("/infrastructure/hardware-profiles", get(infrastructure_hardware_profiles::list).post(infrastructure_hardware_profiles::create))
         .route("/infrastructure/hardware-profiles/{id}", get(infrastructure_hardware_profiles::get))
+        .route("/infrastructure/hardware-profiles/{id}/submit", post(infrastructure_hardware_profiles::submit))
         // Declarative virtual infrastructure and spatial simulation registry.
         .route("/infrastructure/simulations/validate", post(infrastructure_simulations::validate))
         .route("/infrastructure/simulations/templates/gpu-cluster", post(infrastructure_simulations::create_gpu_cluster))

@@ -53,6 +53,10 @@ Use explicit edge types such as `CONTAINS`, `HOSTED_BY`, `ATTACHED_TO`, `CONNECT
 
 Relationships also need source, confidence, validity interval and discovery time. A declared cable map and an observed LLDP link are distinct claims until reconciled.
 
+## Implemented graph primitives
+
+The core crate now defines `ResourceRelationship` and `InfrastructureGraph` as provider-neutral, provenance-attributed graph types. `validate_graph` checks duplicate edge identities and missing or ambiguous endpoint identities without mutating the graph. These are domain primitives and unit-tested validation; they are not yet a persisted graph store or a tenant-facing graph API. Those layers must preserve tenant/site scope, source provenance, observation time and partial-coverage semantics.
+
 ## Capability model
 
 Capabilities describe verified behavior, not brand or model. Each descriptor has stable ID, schema version, supported resource kinds, typed input/output, parameter constraints, privilege requirements, safety class, provider compatibility, timeout/cancellation semantics and evidence contract.

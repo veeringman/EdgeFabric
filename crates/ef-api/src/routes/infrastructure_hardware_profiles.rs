@@ -40,13 +40,14 @@ pub async fn list(
         tracing::error!(tenant_id = %auth.tenant_id, error = %error, "Hardware profile listing failed");
         ApiError::internal("Failed to list hardware profiles")
     })?;
+    let count = rows.len();
     let builtins = if query.profile_id.as_deref().is_none_or(|id| id == "edgefabric.generic-gpu-node") {
         vec![generic_gpu_node_profile()]
     } else { Vec::new() };
     Ok(Json(json!({
         "profiles": rows,
         "built_in_profiles": builtins,
-        "count": rows.len(),
+        "count": count,
         "catalog": "edgefabric",
         "catalog_version": 2
     })))

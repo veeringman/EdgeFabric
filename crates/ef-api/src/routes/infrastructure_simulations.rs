@@ -34,6 +34,9 @@ fn validate_instance(instance: &SimulationInstance) -> Vec<String> {
     if instance.graph.relationships.len() > 20_000 {
         issues.push("A simulation graph may contain at most 20000 relationships".into());
     }
+    if instance.pcie_topology.as_ref().is_some_and(|topology| topology.devices.len() > 10_000 || topology.links.len() > 20_000) {
+        issues.push("A PCIe topology may contain at most 10000 devices and 20000 links".into());
+    }
     if instance.geometry.len() > 10_000 || instance.poses.len() > 10_000 {
         issues.push("A simulation may contain at most 10000 geometry or pose entries".into());
     }

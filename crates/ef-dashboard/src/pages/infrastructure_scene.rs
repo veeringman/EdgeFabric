@@ -172,7 +172,7 @@ pub fn InfrastructureScenePage() -> impl IntoView {
                 <div class="card infra-scene-empty">
                     <div class="infra-scene-empty-icon">"◇"</div>
                     <h2>"Load an infrastructure simulation"</h2>
-                    <p>"Create a simulation from Infrastructure → Simulations or the GPU cluster template API, then paste its ID above."</p>
+                    <p>"Create a simulation with the GPU cluster template endpoint or simulation registry API, then select its ID above."</p>
                     <p class="muted">"The viewer never provisions hardware or modifies physical inventory."</p>
                 </div>
             }>

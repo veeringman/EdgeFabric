@@ -13,6 +13,7 @@ pub mod integrations;
 pub mod starter_projects;
 pub mod resources;
 pub mod infrastructure;
+pub mod infrastructure_manifests;
 
 use axum::{Json, Router, extract::State, http::StatusCode, routing::{get, post, put}};
 use serde::Deserialize;
@@ -97,6 +98,8 @@ pub fn api_router() -> Router<AppState> {
         // Infrastructure Fabric (read-only inventory and reconciliation)
         .route("/infrastructure/inventory", get(infrastructure::inventory))
         .route("/infrastructure/reconcile", post(infrastructure::reconcile_inventory))
+        .route("/infrastructure/manifests", get(infrastructure_manifests::list).post(infrastructure_manifests::create))
+        .route("/infrastructure/manifests/{id}", get(infrastructure_manifests::get))
         // M6 Mini ML fabric
         .route("/ml/nodes", get(ml::list_nodes))
         .route("/ml/nodes/heartbeat", post(ml::node_heartbeat))

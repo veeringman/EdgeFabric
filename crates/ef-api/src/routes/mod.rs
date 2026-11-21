@@ -100,6 +100,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/infrastructure/reconcile", post(infrastructure::reconcile_inventory))
         .route("/infrastructure/manifests", get(infrastructure_manifests::list).post(infrastructure_manifests::create))
         .route("/infrastructure/manifests/{id}", get(infrastructure_manifests::get))
+        .route("/infrastructure/manifests/{id}/reconcile", post(infrastructure_manifests::reconcile_manifest))
         // M6 Mini ML fabric
         .route("/ml/nodes", get(ml::list_nodes))
         .route("/ml/nodes/heartbeat", post(ml::node_heartbeat))

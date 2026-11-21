@@ -5,7 +5,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use ef_core::infrastructure::{DiscoverySnapshot, ResourceDeclaration, reconcile};
+use ef_core::infrastructure::{DiscoverySnapshot, ResourceDeclaration, reconcile, validate_declarations};
 use ef_db::repo::{infrastructure_manifest::InfrastructureManifestRepo, runner::RunnerRepo};
 use crate::routes::infrastructure::runner_resource;
 use crate::middleware::auth_extractor::{AppState, AuthContext};
@@ -43,8 +43,12 @@ pub async fn create(
         .cloned()
         .filter(Value::is_array)
         .ok_or_else(|| ApiError::bad_request("Manifest document must contain a declarations array"))?;
-    serde_json::from_value::<Vec<ResourceDeclaration>>(declarations)
+    let declarations: Vec<ResourceDeclaration> = serde_json::from_value(declarations)
         .map_err(|error| ApiError::bad_request(format!("Invalid manifest declarations: {error}")))?;
+    let issues = validate_declarations(&declarations);
+    if !issues.is_empty() {
+        return Err(ApiError::bad_request(format!("Manifest validation failed: {}", issues.join("; "))));
+    }
 
     let row = InfrastructureManifestRepo::create(
         &state.pool, auth.tenant_id, name, body.version, &body.description, &body.document,
@@ -59,6 +63,33 @@ pub async fn create(
     })?;
 
     Ok(Json(json!({ "manifest": row, "read_only": true })))
+}
+
+/// POST /api/v1/infrastructure/manifests/validate
+/// Validates a manifest document without persisting it.
+pub async fn validate(
+    Json(body): Json<CreateManifestRequest>,
+) -> ApiResult<Json<Value>> {
+    let mut issues = Vec::new();
+    if body.name.trim().is_empty() || body.name.len() > 200 {
+        issues.push("Manifest name must contain 1 to 200 characters".to_string());
+    }
+    if body.version < 1 {
+        issues.push("Manifest version must be a positive integer".to_string());
+    }
+    let declarations = body.document.get("declarations")
+        .cloned()
+        .filter(Value::is_array)
+        .ok_or_else(|| ApiError::bad_request("Manifest document must contain a declarations array"))?;
+    let declarations: Vec<ResourceDeclaration> = serde_json::from_value(declarations)
+        .map_err(|error| ApiError::bad_request(format!("Invalid manifest declarations: {error}")))?;
+    issues.extend(validate_declarations(&declarations));
+    Ok(Json(json!({
+        "valid": issues.is_empty(),
+        "issues": issues,
+        "declaration_count": declarations.len(),
+        "persisted": false
+    })))
 }
 
 /// GET /api/v1/infrastructure/manifests

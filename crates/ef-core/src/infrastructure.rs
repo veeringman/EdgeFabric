@@ -330,6 +330,17 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_undeclared_discovery_identity_is_one_conflict() {
+        let result = reconcile(
+            &[],
+            &snapshot(vec![discovered("host-2"), discovered("host-2")], true),
+        );
+        assert_eq!(result.differences.len(), 1);
+        assert_eq!(result.differences[0].kind, DifferenceKind::IdentityConflict);
+        assert_eq!(result.differences[0].discovered.len(), 2);
+    }
+
+    #[test]
     fn undeclared_resource_is_unexpected() {
         let result = reconcile(&[], &snapshot(vec![discovered("host-2")], true));
         assert_eq!(result.differences[0].kind, DifferenceKind::Unexpected);

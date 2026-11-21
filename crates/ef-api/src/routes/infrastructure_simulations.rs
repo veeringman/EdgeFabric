@@ -228,3 +228,160 @@ pub async fn get(
         "execution_started": false
     })))
 }
+
+
+/// GET /api/v1/infrastructure/simulations/:id/scene
+/// Returns a renderer-neutral scene projection derived from the stored resource graph.
+pub async fn get_scene(
+    State(state): State<AppState>,
+    auth: AuthContext,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<Value>> {
+    let row = InfrastructureSimulationRepo::get(&state.pool, auth.tenant_id, id)
+        .await
+        .map_err(|error| {
+            tracing::error!(tenant_id = %auth.tenant_id, error = %error, "Simulation scene lookup failed");
+            ApiError::internal("Failed to load simulation scene")
+        })?
+        .ok_or_else(|| ApiError::not_found("Simulation not found"))?;
+
+    let instance: SimulationInstance = serde_json::from_value(row.document)
+        .map_err(|error| {
+            tracing::error!(simulation_id = %id, error = %error, "Stored simulation document is invalid");
+            ApiError::internal("Stored simulation document cannot be projected")
+        })?;
+
+    Ok(Json(project_simulation_scene(id, &instance)))
+}
+
+/// Build a stable, renderer-neutral scene document. Geometry references are
+/// optional; consumers should render bounds as primitive placeholders instead.
+fn project_simulation_scene(id: Uuid, instance: &SimulationInstance) -> Value {
+    let nodes: Vec<Value> = instance.graph.resources.iter().map(|resource| {
+        let identity = &resource.identity;
+        let geometry = instance.geometry.get(identity);
+        let pose = instance.poses.get(identity);
+        let bounds = instance.bounds.get(identity);
+        json!({
+            "id": identity,
+            "kind": resource.kind,
+            "attributes": resource.attributes,
+            "provenance": {
+                "source": resource.source,
+                "observed_at": resource.observed_at,
+                "verified": resource.verified,
+                "inventory_class": "simulated"
+            },
+            "transform": pose,
+            "bounds_mm": bounds,
+            "geometry": geometry,
+            "render_hint": if geometry.is_some() { "asset" } else if bounds.is_some() { "bounds_primitive" } else { "unresolved" }
+        })
+    }).collect();
+
+    let edges: Vec<Value> = instance.graph.relationships.iter().map(|edge| json!({
+        "id": edge.identity,
+        "source": edge.source_identity,
+        "target": edge.target_identity,
+        "kind": edge.kind,
+        "attributes": edge.attributes,
+        "provenance": {
+            "source": edge.source,
+            "observed_at": edge.observed_at,
+            "verified": edge.verified,
+            "inventory_class": "simulated"
+        }
+    })).collect();
+
+    let overlays = json!({
+        "pcie": instance.pcie_topology,
+        "gpu_peer_fabric": instance.gpu_peer_fabric,
+        "network": instance.network_fabric,
+        "storage": instance.storage_topology,
+        "cxl": instance.cxl_topology,
+        "rack_power_cooling": instance.rack_power_cooling
+    });
+
+    json!({
+        "scene_id": format!("simulation:{id}"),
+        "simulation_id": id,
+        "identity": instance.identity,
+        "scenario_id": instance.scenario_id,
+        "simulation_kind": instance.kind,
+        "engine": { "name": instance.engine, "version": instance.engine_version },
+        "coordinate_units": "mm",
+        "coordinate_convention": "right_handed",
+        "inventory_class": "simulated",
+        "execution_started": false,
+        "coverage_complete": instance.graph.coverage_complete,
+        "nodes": nodes,
+        "edges": edges,
+        "topology_overlays": overlays,
+        "scene_metadata": {
+            "node_count": nodes.len(),
+            "edge_count": edges.len(),
+            "asset_node_count": instance.geometry.len(),
+            "bounds_node_count": instance.bounds.len(),
+            "transformed_node_count": instance.poses.len(),
+            "primitive_fallback_count": nodes.iter().filter(|node| node["render_hint"] == "bounds_primitive").count(),
+            "unresolved_geometry_count": nodes.iter().filter(|node| node["render_hint"] == "unresolved").count()
+        },
+        "fidelity": {
+            "geometry": "asset_references_when_available_otherwise_bounds_primitives",
+            "power": "declared_design_envelope_not_live_telemetry",
+            "thermal": "declared_capacity_only_no_cfd",
+            "performance": "topology_only_no_measured_or_predicted_throughput"
+        }
+    })
+}
+
+#[cfg(test)]
+mod scene_projection_tests {
+    use super::*;
+    use chrono::Utc;
+    use ef_core::infrastructure::{DiscoveredResource, InfrastructureGraph, SimulationKind};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn scene_projection_uses_graph_and_explicit_primitive_fallbacks() {
+        let instance = SimulationInstance {
+            identity: "scene-test".into(),
+            kind: SimulationKind::SpatialVisualization,
+            scenario_id: "rack-a".into(),
+            engine: "test".into(),
+            engine_version: "1".into(),
+            seed: 7,
+            created_at: Utc::now(),
+            source_manifest_revision: None,
+            graph: InfrastructureGraph {
+                observed_at: Utc::now(),
+                coverage_complete: true,
+                resources: vec![DiscoveredResource {
+                    identity: "rack-1".into(),
+                    kind: "rack".into(),
+                    attributes: BTreeMap::new(),
+                    source: "test".into(),
+                    observed_at: Utc::now(),
+                    verified: false,
+                }],
+                relationships: vec![],
+            },
+            pcie_topology: None,
+            gpu_peer_fabric: None,
+            network_fabric: None,
+            storage_topology: None,
+            cxl_topology: None,
+            rack_power_cooling: None,
+            geometry: BTreeMap::new(),
+            poses: BTreeMap::new(),
+            bounds: BTreeMap::new(),
+            parameters: BTreeMap::new(),
+        };
+        let scene = project_simulation_scene(Uuid::nil(), &instance);
+        assert_eq!(scene["nodes"][0]["id"], "rack-1");
+        assert_eq!(scene["nodes"][0]["render_hint"], "unresolved");
+        assert_eq!(scene["inventory_class"], "simulated");
+        assert_eq!(scene["execution_started"], false);
+        assert_eq!(scene["scene_metadata"]["node_count"], 1);
+    }
+}

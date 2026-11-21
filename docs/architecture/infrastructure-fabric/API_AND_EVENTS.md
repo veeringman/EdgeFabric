@@ -55,6 +55,19 @@ Example request:
 
 The current endpoint intentionally marks discovery coverage incomplete because registered runners are not equivalent to a complete physical-site/network scan. Therefore an absent declaration target is reported as partially discovered, not conclusively missing. Discovered runners outside the submitted declaration set are unexpected within that declared scope. Versioned tenant-scoped manifest storage is implemented at `GET/POST /api/v1/infrastructure/manifests` and `GET /api/v1/infrastructure/manifests/{id}`. `POST /api/v1/infrastructure/manifests/validate` performs non-persistent structural validation, including empty and duplicate identities, and create applies the same checks before persistence. `POST /api/v1/infrastructure/manifests/{id}/reconcile` reconciles a stored revision against the current registered-runner inventory. Each `(tenant, name, version)` is immutable and unique; a new revision is created with a higher version. Full multi-source graph assembly and site-wide coverage tracking remain subsequent work.
 
+## Virtual infrastructure and spatial simulation registry
+
+A tenant-scoped simulation registry now stores immutable simulation input documents separately from physical inventory:
+
+- `POST /api/v1/infrastructure/simulations/validate` validates a simulation envelope, graph endpoints, geometry references and spatial transforms without persisting or executing it.
+- `POST /api/v1/infrastructure/simulations` stores a validated scenario input under the authenticated tenant. Simulation identity is unique within that tenant.
+- `GET /api/v1/infrastructure/simulations` lists the tenant's scenarios; optional `scenario_id` filters the result.
+- `GET /api/v1/infrastructure/simulations/{id}` retrieves a tenant-owned simulation record.
+
+The document carries simulation kind (hardware emulation, topology, capacity, power/thermal or spatial visualization), scenario and engine versions, deterministic seed, optional source-manifest revision, a normalized resource graph, content-addressed geometry references and per-resource poses in explicit coordinate frames. Geometry bytes remain in EdgeFabric artifact/object storage; the registry stores immutable references and hashes.
+
+This is a scenario registry and validation boundary, not a simulator runtime. It does not create virtual GPUs, execute workloads, mutate physical inventory or produce qualification evidence. Simulated resources remain explicitly classified as simulated. The next implementation step is deterministic virtual topology generation and provider-backed simulation adapters, followed by a 3D/volume viewer consuming graph and geometry APIs.
+
 ## Event envelope
 
 Use the existing EdgeFabric event mechanism. Logical envelope:

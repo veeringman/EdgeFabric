@@ -38,6 +38,7 @@ pub fn InfrastructureScenePage() -> impl IntoView {
     let (template_peer_fabric, set_template_peer_fabric) = signal("nv_switch".to_string());
     let (template_network, set_template_network) = signal("roce".to_string());
     let (template_dpu, set_template_dpu) = signal(true);
+    let (template_cxl, set_template_cxl) = signal(false);
     let (template_storage, set_template_storage) = signal("nvme_of_rdma".to_string());
     let (template_rack_hosts, set_template_rack_hosts) = signal("4".to_string());
     let (template_rack_units, set_template_rack_units) = signal("48".to_string());
@@ -111,7 +112,7 @@ pub fn InfrastructureScenePage() -> impl IntoView {
                     "switch_ports": u32::from(hosts) + 1
                 })
             },
-            "cxl_memory": null,
+            "cxl_memory": if template_cxl.get_untracked() { serde_json::json!({ "devices_per_host": 2, "capacity_gib_per_device": 256, "generation": 3, "lane_width": 16 }) } else { serde_json::Value::Null },
             "power_cooling": {
                 "hosts_per_rack": rack_hosts,
                 "host_power_watts": 1200,
@@ -331,6 +332,10 @@ pub fn InfrastructureScenePage() -> impl IntoView {
                     <label class="infra-scene-inline-check">
                         <input type="checkbox" prop:checked=move || template_dpu.get() on:change=move |ev| set_template_dpu.set(event_target_checked(&ev))/>
                         " DPU per host"
+                    </label>
+                    <label class="infra-scene-inline-check">
+                        <input type="checkbox" prop:checked=move || template_cxl.get() on:change=move |ev| set_template_cxl.set(event_target_checked(&ev))/>
+                        " CXL memory expansion (2 × 256 GiB per host)"
                     </label>
                     <label class="infra-scene-inline-check">
                         <input type="checkbox" prop:checked=move || template_redundant_power.get() on:change=move |ev| set_template_redundant_power.set(event_target_checked(&ev))/>

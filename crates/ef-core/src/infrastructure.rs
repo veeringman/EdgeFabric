@@ -258,6 +258,35 @@ pub fn reconcile(
     }
 }
 
+/// Validate manifest declarations before persistence or reconciliation.
+/// Returns all structural issues rather than failing at the first one.
+pub fn validate_declarations(declarations: &[ResourceDeclaration]) -> Vec<String> {
+    let mut issues = Vec::new();
+    if declarations.len() > 10_000 {
+        issues.push("A manifest may contain at most 10000 declarations".into());
+    }
+
+    let mut identities = HashSet::new();
+    for (index, declaration) in declarations.iter().enumerate() {
+        let identity = declaration.identity.trim();
+        let kind = declaration.kind.trim();
+        if identity.is_empty() {
+            issues.push(format!("declarations[{index}].identity must not be empty"));
+        } else if !identities.insert(identity.to_owned()) {
+            issues.push(format!("declarations[{index}] duplicates identity '{identity}'"));
+        }
+        if kind.is_empty() {
+            issues.push(format!("declarations[{index}].kind must not be empty"));
+        }
+        for field in declaration.expected.keys() {
+            if field.trim().is_empty() {
+                issues.push(format!("declarations[{index}] contains an empty expected attribute name"));
+            }
+        }
+    }
+    issues
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

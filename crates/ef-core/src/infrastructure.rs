@@ -982,17 +982,15 @@ pub fn instantiate_gpu_cluster_template(
                     relationships.push(ResourceRelationship { identity: format!("{pdu}:fed-by:{ups}"), source_identity: pdu.clone(), target_identity: ups.clone(), kind: "fed_by".into(), attributes: BTreeMap::new(), source: source.into(), observed_at: now, verified: false });
                 }
             }
-            for (host_index, host) in host_ids.iter().enumerate() {
+            for host in &host_ids {
                 let feeds = if power.require_redundant_pdu { vec!["A", "B"] } else { vec!["A"] };
                 for feed in feeds {
-                    if let Some((index, pdu)) = pdu_ids.iter().enumerate().find(|(index, _)| {
+                    if let Some((_, pdu)) = pdu_ids.iter().enumerate().find(|(index, _)| {
                         if !power.require_redundant_pdu { true } else if feed == "A" { *index < usize::from(power.pdus_per_rack / 2) } else { *index >= usize::from(power.pdus_per_rack / 2) }
                     }) {
-                        let _ = index;
                         relationships.push(ResourceRelationship { identity: format!("{host}:power-feed-{feed}"), source_identity: host.clone(), target_identity: pdu.clone(), kind: "powered_by".into(), attributes: BTreeMap::from([("feed".into(), Value::String(feed.into()))]), source: source.into(), observed_at: now, verified: false });
                     }
                 }
-                let _ = host_index;
             }
             rack_power_cooling.push(RackPowerCoolingRecord {
                 rack_identity: rack, host_identities: host_ids, pdu_identities: pdu_ids,

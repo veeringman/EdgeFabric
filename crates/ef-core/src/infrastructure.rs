@@ -1789,7 +1789,7 @@ mod tests {
         assert_eq!(topology.racks[0].ups_identities.len(), 0);
         assert_eq!(instance.poses.len(), 4);
         assert_eq!(instance.bounds.len(), 4);
-        assert!(instance.bounds["rack-power:rack-001"].height_mm > 1800.0);
+        assert!(instance.bounds["lab:gpu-cluster:rack-001"].height_mm > 1800.0);
         assert_eq!(instance.graph.resources.iter().filter(|r| r.kind == "rack").count(), 2);
         assert_eq!(instance.graph.resources.iter().filter(|r| r.kind == "power_distribution_unit").count(), 4);
         assert!(validate_simulation(&instance).is_empty());

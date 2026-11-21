@@ -74,6 +74,39 @@ The validators reject duplicate/empty identities, missing endpoints, self-links,
 
 These are topology and declared-capacity primitives, not a storage performance model or a CXL memory-coherency emulator. They do not predict IOPS, latency, bandwidth under contention, memory pooling behavior, decoder/interleave configuration, or NUMA performance. The current GPU-cluster template does not yet synthesize storage arrays, NVMe drives or CXL expanders; callers can supply these typed structures in a simulation document. Template expansion and richer CXL decoder/port modeling remain follow-on work.
 
+## Template-generated storage and CXL resources
+
+The GPU-cluster template now accepts optional `storage` and `cxl_memory` objects. These generate synthetic resources in the same graph as the hosts and GPUs, plus typed storage/CXL topology records and graph relationships.
+
+- `storage.kind: direct_nvme` creates the configured number of `nvme_ssd` resources per host and host-to-drive links. Set `drives_per_host`, `capacity_gib_per_drive` and `link_speed_gbps`.
+- `storage.kind: nvme_of_tcp`, `nvme_of_rdma` or `fibre_channel` creates one shared storage array and a matching fabric-switch resource. Each host gets a path to the switch, and the switch gets a path to the array. Configure `shared_array_capacity_gib`, `switch_ports` and `link_speed_gbps`.
+- `cxl_memory` creates the configured number of `cxl_memory_expander` resources per host, assigns NUMA nodes round-robin across the host's declared NUMA nodes, and creates CXL links carrying generation and lane width.
+
+Example additions to a GPU-cluster template:
+
+```json
+{
+  "storage": {
+    "kind": "nvme_of_rdma",
+    "drives_per_host": 0,
+    "capacity_gib_per_drive": 0,
+    "shared_array_capacity_gib": 1048576,
+    "link_speed_gbps": 400,
+    "switch_ports": 2
+  },
+  "cxl_memory": {
+    "devices_per_host": 2,
+    "capacity_gib_per_device": 1024,
+    "generation": 3,
+    "lane_width": 8
+  }
+}
+```
+
+The template validates non-zero capacities and link rates, supported CXL generation/lane widths, per-host device bounds, aggregate resource limits and topology link limits. API responses report generated storage-link, CXL-device and CXL-link counts. Direct NVMe drive count and shared-array capacity are alternative modes: the fields not used by the selected mode are ignored.
+
+The generated topology is deterministic in identity and connectivity for a fixed template. Capacity and link speed are declared structural inputs, not measured throughput or performance predictions. The shared-array model is intentionally a simple single-switch/single-array topology; multipath, dual-fabric redundancy, RAID layouts, namespaces, drive endurance, IOPS and latency are not modeled. CXL memory devices are structural expanders; decoder windows, interleave sets, coherency behavior, pooling protocols and bandwidth contention are not modeled.
+
 ## Example scenario
 
 The following is illustrative declarative intent, not a claim of tested or supported hardware. It describes two virtual hosts, each with four virtual GPUs behind a PCIe switch, and a separate GPU peer fabric relationship.

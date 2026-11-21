@@ -318,7 +318,7 @@ pub struct RackPowerCoolingRecord {
     pub pdu_identities: Vec<String>,
     pub design_load_watts: u64,
     pub rack_capacity_watts: u64,
-    pub pdu_capacity_after_single_failure_watts: u64,
+    pub effective_pdu_capacity_watts: u64,
     pub cooling_capacity_watts: u64,
     pub redundant_feed_required: bool,
 }
@@ -388,7 +388,12 @@ pub fn instantiate_gpu_cluster_template(
     });
     if u32::from(template.hosts) * (u32::from(template.gpus_per_host) + 3)
         + nvswitch_resource_count + network_resource_count
-        + storage_resource_count + cxl_resource_count > 10_000 {
+        + storage_resource_count + cxl_resource_count
+        + template.power_cooling.as_ref().map_or(0, |power| {
+            let racks = (u32::from(template.hosts) + u32::from(power.hosts_per_rack.max(1)) - 1)
+                / u32::from(power.hosts_per_rack.max(1));
+            racks.saturating_mul(u32::from(power.pdus_per_rack) + 2)
+        }) > 10_000 {
         issues.push("Expanded GPU cluster including peer, network, storage and CXL resources may contain at most 10000 resources".into());
     }
     if template.gpu_peer_fabric == Some(GpuPeerFabricKind::NvLinkFullMesh) {
@@ -902,7 +907,7 @@ pub fn instantiate_gpu_cluster_template(
             rack_power_cooling.push(RackPowerCoolingRecord {
                 rack_identity: rack, host_identities: host_ids, pdu_identities: pdu_ids,
                 design_load_watts: load, rack_capacity_watts: power.rack_power_capacity_watts,
-                pdu_capacity_after_single_failure_watts: surviving_pdu_capacity,
+                effective_pdu_capacity_watts: surviving_pdu_capacity,
                 cooling_capacity_watts: power.cooling_capacity_watts,
                 redundant_feed_required: power.require_redundant_pdu,
             });
@@ -1171,7 +1176,7 @@ pub fn validate_simulation(instance: &SimulationInstance) -> Vec<String> {
                 issues.push(format!("Rack '{}' is missing from the resource graph", rack.rack_identity));
             }
             if rack.design_load_watts > rack.rack_capacity_watts
-                || rack.design_load_watts > rack.pdu_capacity_after_single_failure_watts
+                || rack.design_load_watts > rack.effective_pdu_capacity_watts
                 || rack.design_load_watts > rack.cooling_capacity_watts {
                 issues.push(format!("Rack '{}' exceeds a declared power or cooling envelope", rack.rack_identity));
             }
@@ -1582,7 +1587,7 @@ mod tests {
         assert_eq!(topology.racks.len(), 2);
         assert_eq!(topology.racks[0].host_identities.len(), 1);
         assert_eq!(topology.racks[0].design_load_watts, 4000);
-        assert_eq!(topology.racks[0].pdu_capacity_after_single_failure_watts, 4500);
+        assert_eq!(topology.racks[0].effective_pdu_capacity_watts, 4500);
         assert_eq!(instance.graph.resources.iter().filter(|r| r.kind == "rack").count(), 2);
         assert_eq!(instance.graph.resources.iter().filter(|r| r.kind == "power_distribution_unit").count(), 4);
         assert!(validate_simulation(&instance).is_empty());

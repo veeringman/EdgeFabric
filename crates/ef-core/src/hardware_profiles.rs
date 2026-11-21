@@ -114,6 +114,12 @@ impl HardwareProfile {
                 issues.push(format!("Component '{}' facts must be a JSON object", component.id));
             }
         }
+        let expanded_component_count = self.components.iter().try_fold(1_u64, |total, component| {
+            total.checked_add(component.quantity.unwrap_or(1))
+        });
+        if expanded_component_count.is_none_or(|count| count > 10_000) {
+            issues.push("Expanded profile component inventory may contain at most 10000 resources".into());
+        }
         for component in &self.components {
             let mut visited = std::collections::HashSet::new();
             let mut current = Some(component.id.as_str());

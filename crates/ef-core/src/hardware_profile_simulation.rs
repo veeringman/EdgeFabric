@@ -67,6 +67,7 @@ pub fn instantiate_hardware_profile(
         verified: false,
     }];
     let mut relationships = Vec::new();
+    let mut geometry = BTreeMap::new();
     let mut instances_by_component: HashMap<String, Vec<String>> = HashMap::new();
     let mut pending = profile.components.iter().collect::<Vec<_>>();
     while !pending.is_empty() {
@@ -89,8 +90,17 @@ pub fn instantiate_hardware_profile(
             } else {
                 format!("{root_identity}/component/{}/unspecified", component.id)
             };
+            let geometry_assets = component.assets.iter().map(|asset| json!({
+                "format": asset.format,
+                "uri": asset.uri,
+                "sha256": asset.sha256,
+                "license": asset.license,
+                "coordinate_system": asset.coordinate_system,
+                "units": asset.units
+            })).collect::<Vec<_>>();
             let mut attributes = BTreeMap::from([
                 ("name".into(), Value::String(component.model.clone().unwrap_or_else(|| component.id.clone()))),
+                ("geometry_assets".into(), json!(geometry_assets)),
                 ("profile_component_id".into(), Value::String(component.id.clone())),
                 ("profile_component_index".into(), json!(index + 1)),
                 ("quantity_known".into(), Value::Bool(known_quantity)),
@@ -108,6 +118,14 @@ pub fn instantiate_hardware_profile(
             }
             if let Some(parent) = &component.parent_component_id {
                 attributes.insert("parent_component_id".into(), Value::String(parent.clone()));
+            }
+            if let Some(asset) = component.assets.iter().find(|asset| asset.units.as_ref().is_some_and(|units| !units.trim().is_empty())) {
+                geometry.insert(resource_identity.clone(), crate::infrastructure::GeometryAsset {
+                    asset_uri: asset.uri.clone(),
+                    sha256: asset.sha256.clone(),
+                    format: asset.format.clone(),
+                    units: asset.units.clone().unwrap_or_default(),
+                });
             }
             resources.push(DiscoveredResource {
                 identity: resource_identity.clone(),
@@ -158,7 +176,7 @@ pub fn instantiate_hardware_profile(
         storage_topology: None,
         cxl_topology: None,
         rack_power_cooling: None,
-        geometry: BTreeMap::new(),
+        geometry,
         poses: BTreeMap::new(),
         bounds: BTreeMap::new(),
         parameters: BTreeMap::from([

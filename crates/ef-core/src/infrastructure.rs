@@ -217,6 +217,59 @@ pub struct NetworkFabricTopology {
     pub links: Vec<NetworkFabricLink>,
 }
 
+/// Storage transport represented independently from PCIe and host networking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StorageFabricKind {
+    DirectNvme,
+    NvmeOfTcp,
+    NvmeOfRdma,
+    FibreChannel,
+}
+
+/// A logical storage path. Capacity is the addressable capacity represented by
+/// this path; speed is the configured link rate, not measured throughput.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StorageFabricLink {
+    pub identity: String,
+    pub source_identity: String,
+    pub target_identity: String,
+    pub kind: StorageFabricKind,
+    pub capacity_gib: u64,
+    pub link_speed_gbps: u32,
+}
+
+/// Storage paths can describe local NVMe or networked storage endpoints.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StorageTopology {
+    pub links: Vec<StorageFabricLink>,
+}
+
+/// CXL memory is modeled separately from ordinary PCIe endpoint inventory.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CxlMemoryDevice {
+    pub resource_identity: String,
+    pub capacity_gib: u64,
+    pub numa_node: Option<u16>,
+}
+
+/// One host-to-expander CXL memory attachment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CxlMemoryLink {
+    pub identity: String,
+    pub host_identity: String,
+    pub memory_device_identity: String,
+    pub generation: u8,
+    pub lane_width: u8,
+}
+
+/// CXL memory pooling/expansion topology and its addressable devices.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CxlTopology {
+    pub devices: Vec<CxlMemoryDevice>,
+    pub links: Vec<CxlMemoryLink>,
+}
+
 /// Declarative inputs for a reproducible multi-host virtual GPU cluster.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GpuClusterTemplate {
@@ -590,6 +643,10 @@ pub struct SimulationInstance {
     #[serde(default)]
     pub network_fabric: Option<NetworkFabricTopology>,
     #[serde(default)]
+    pub storage_topology: Option<StorageTopology>,
+    #[serde(default)]
+    pub cxl_topology: Option<CxlTopology>,
+    #[serde(default)]
     pub geometry: BTreeMap<String, GeometryAsset>,
     #[serde(default)]
     pub poses: BTreeMap<String, SpatialPose>,
@@ -662,6 +719,68 @@ pub fn validate_simulation(instance: &SimulationInstance) -> Vec<String> {
             }
             if link.fabric != fabric.kind {
                 issues.push(format!("Network link '{}' fabric kind differs from its topology", link.identity));
+            }
+        }
+    }
+    if let Some(storage) = &instance.storage_topology {
+        let resource_ids = instance.graph.resources.iter().map(|r| r.identity.as_str()).collect::<HashSet<_>>();
+        let mut link_ids = HashSet::new();
+        let mut endpoint_pairs = HashSet::new();
+        for link in &storage.links {
+            if link.identity.trim().is_empty() || !link_ids.insert(link.identity.as_str()) {
+                issues.push(format!("Storage link identity '{}' is empty or duplicated", link.identity));
+            }
+            if link.capacity_gib == 0 || link.link_speed_gbps == 0 {
+                issues.push(format!("Storage link '{}' requires non-zero capacity and link speed", link.identity));
+            }
+            if link.source_identity == link.target_identity {
+                issues.push(format!("Storage link '{}' cannot connect a resource to itself", link.identity));
+            }
+            if !resource_ids.contains(link.source_identity.as_str()) || !resource_ids.contains(link.target_identity.as_str()) {
+                issues.push(format!("Storage link '{}' references a resource missing from the graph", link.identity));
+            }
+            let pair = if link.source_identity <= link.target_identity {
+                (link.source_identity.as_str(), link.target_identity.as_str())
+            } else {
+                (link.target_identity.as_str(), link.source_identity.as_str())
+            };
+            if !endpoint_pairs.insert(pair) {
+                issues.push(format!("Storage endpoint pair on '{}' is duplicated", link.identity));
+            }
+        }
+    }
+    if let Some(cxl) = &instance.cxl_topology {
+        let resource_ids = instance.graph.resources.iter().map(|r| r.identity.as_str()).collect::<HashSet<_>>();
+        let mut devices = HashSet::new();
+        for device in &cxl.devices {
+            if device.resource_identity.trim().is_empty() || !devices.insert(device.resource_identity.as_str()) {
+                issues.push(format!("CXL memory device identity '{}' is empty or duplicated", device.resource_identity));
+            }
+            if device.capacity_gib == 0 {
+                issues.push(format!("CXL memory device '{}' has zero capacity", device.resource_identity));
+            }
+            if !resource_ids.contains(device.resource_identity.as_str()) {
+                issues.push(format!("CXL memory device '{}' is missing from the resource graph", device.resource_identity));
+            }
+        }
+        let mut link_ids = HashSet::new();
+        let mut endpoint_pairs = HashSet::new();
+        for link in &cxl.links {
+            if link.identity.trim().is_empty() || !link_ids.insert(link.identity.as_str()) {
+                issues.push(format!("CXL link identity '{}' is empty or duplicated", link.identity));
+            }
+            if link.host_identity == link.memory_device_identity {
+                issues.push(format!("CXL link '{}' cannot connect a resource to itself", link.identity));
+            }
+            if !(1..=3).contains(&link.generation) || ![1, 2, 4, 8, 16].contains(&link.lane_width) {
+                issues.push(format!("CXL link '{}' has an unsupported generation or lane width", link.identity));
+            }
+            if !resource_ids.contains(link.host_identity.as_str()) || !devices.contains(link.memory_device_identity.as_str()) {
+                issues.push(format!("CXL link '{}' must connect a graph host to a declared CXL memory device", link.identity));
+            }
+            let pair = (link.host_identity.as_str(), link.memory_device_identity.as_str());
+            if !endpoint_pairs.insert(pair) {
+                issues.push(format!("CXL endpoint pair on '{}' is duplicated", link.identity));
             }
         }
     }

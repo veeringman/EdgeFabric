@@ -55,7 +55,7 @@ pub async fn list(
         "tenant_profile_count": count,
         "built_in_profile_count": built_in_profile_count,
         "catalog": "edgefabric",
-        "catalog_version": 3
+        "catalog_version": 4
     })))
 }
 

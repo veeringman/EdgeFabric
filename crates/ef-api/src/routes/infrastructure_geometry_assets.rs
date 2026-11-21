@@ -116,7 +116,7 @@ fn validate_glb(bytes: &[u8]) -> Result<(), &'static str> {
     let json_bytes = &bytes[20..20 + first_chunk_length];
     let document: Value = serde_json::from_slice(json_bytes).map_err(|_| "GLB JSON chunk is invalid")?;
     if document["buffers"].as_array().is_some_and(|items| items.iter().any(|item| item.get("uri").and_then(Value::as_str).is_some_and(|uri| !uri.starts_with("data:")) ))
-        || document["images"].as_array().is_some_and(|items| items.iter().any(|item| item.get("uri").is_some()))
+        || document["images"].as_array().is_some_and(|items| items.iter().any(|item| item.get("uri").and_then(Value::as_str).is_some_and(|uri| !uri.starts_with("data:"))))
     {
         return Err("External GLB buffer or image URIs are not supported");
     }

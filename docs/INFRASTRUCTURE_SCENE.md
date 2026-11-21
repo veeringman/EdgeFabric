@@ -60,3 +60,11 @@ The current projection is read-only. It cannot provision hardware, change physic
 The Leptos dashboard exposes the viewer at `/infrastructure/scene` under the Infrastructure Fabric navigation section. It loads the tenant-scoped simulation registry, lets an operator select/paste a simulation UUID, and requests the scene endpoint. The Three.js renderer provides orbit, zoom and pan controls, a resource list/inspector, and independent visibility toggles for PCIe, GPU peer, network, storage/CXL and power overlays.
 
 The renderer currently uses bounded primitive geometry for spatial resources. Geometry asset references are retained in the scene response but are not yet fetched or rendered by the browser; this avoids treating an unresolved asset URI as a usable CAD model. The viewer remains read-only.
+\n
+### Dashboard simulation builder
+
+The same dashboard page includes a GPU cluster template builder. It submits a deterministic template to `POST /api/v1/infrastructure/simulations/templates/gpu-cluster` and opens the returned tenant-owned simulation in the scene viewer.
+
+The current builder exposes host/GPU counts, PCIe generation, GPU memory, NVLink/NVSwitch selection, Ethernet/RoCE/InfiniBand network selection, optional per-host DPU, direct NVMe or shared NVMe-oF/Fibre Channel storage, optional CXL memory expansion, hosts-per-rack, rack-unit capacity, and redundant A/B power with UPS. Chassis dimensions, per-device power assumptions, link rates and storage capacities are starter-profile values in this iteration; they are not vendor-certified specifications. Backend template validation remains authoritative and may reject a configuration whose declared rack, power, cooling, port or topology budgets do not fit.
+
+The builder does not create vendor-specific HGX/DGX CAD geometry and does not claim Rubin compatibility from a generic topology. Vendor-qualified chassis and component profiles are a separate next step.

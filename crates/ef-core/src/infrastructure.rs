@@ -220,15 +220,29 @@ pub fn reconcile(
         }
     }
 
-    for resource in &snapshot.resources {
-        if !declarations.iter().any(|d| d.identity == resource.identity) {
+    for (identity, resources) in &by_identity {
+        if declarations.iter().any(|d| d.identity == *identity) {
+            continue;
+        }
+
+        if resources.len() > 1 {
+            differences.push(ReconciliationDifference {
+                kind: DifferenceKind::IdentityConflict,
+                identity: (*identity).to_string(),
+                resource_kind: resources[0].kind.clone(),
+                fields: Vec::new(),
+                declared: None,
+                discovered: resources.iter().map(|resource| (*resource).clone()).collect(),
+                detail: "Multiple discovered resources claim the same identity".into(),
+            });
+        } else if let Some(resource) = resources.first() {
             differences.push(ReconciliationDifference {
                 kind: DifferenceKind::Unexpected,
                 identity: resource.identity.clone(),
                 resource_kind: resource.kind.clone(),
                 fields: Vec::new(),
                 declared: None,
-                discovered: vec![resource.clone()],
+                discovered: vec![(*resource).clone()],
                 detail: "Discovered resource has no matching declaration".into(),
             });
         }

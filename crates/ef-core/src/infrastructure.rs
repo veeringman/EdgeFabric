@@ -418,7 +418,8 @@ pub fn instantiate_gpu_cluster_template(
         + template.power_cooling.as_ref().map_or(0, |power| {
             let racks = (u32::from(template.hosts) + u32::from(power.hosts_per_rack.max(1)) - 1)
                 / u32::from(power.hosts_per_rack.max(1));
-            racks.saturating_mul(u32::from(power.pdus_per_rack) + 2)
+            racks.saturating_mul(u32::from(power.pdus_per_rack)
+                + u32::from(power.ups_per_feed) * if power.require_redundant_pdu { 2 } else { 1 } + 2)
         }) > 10_000 {
         issues.push("Expanded GPU cluster including peer, network, storage and CXL resources may contain at most 10000 resources".into());
     }
@@ -529,7 +530,7 @@ pub fn instantiate_gpu_cluster_template(
         }
         let count = (u32::from(template.hosts) + u32::from(power.hosts_per_rack.max(1)) - 1)
             / u32::from(power.hosts_per_rack.max(1));
-        if count.saturating_mul(u32::from(power.pdus_per_rack) + 2) > 20_000 {
+        if count.saturating_mul(u32::from(power.pdus_per_rack) + u32::from(power.ups_per_feed) * if power.require_redundant_pdu { 2 } else { 1 } + 2) > 20_000 {
             issues.push("Rack power/cooling topology may contain at most 20000 resources".into());
         }
     }
@@ -1700,6 +1701,8 @@ mod tests {
             nic_power_watts: 100, storage_device_power_watts: 30, cxl_device_power_watts: 50,
             rack_power_capacity_watts: 5000, pdus_per_rack: 2, pdu_capacity_watts: 4500,
             cooling_capacity_watts: 5000, require_redundant_pdu: true,
+            rack_units: 42, host_height_u: 4, rack_depth_mm: 1200, host_depth_mm: 1000,
+            rack_spacing_mm: 1500, ups_per_feed: 0, ups_capacity_watts: 0,
         });
         let instance = instantiate_gpu_cluster_template(&template).unwrap();
         let topology = instance.rack_power_cooling.as_ref().unwrap();

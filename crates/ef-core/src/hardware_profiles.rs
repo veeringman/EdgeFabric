@@ -25,6 +25,10 @@ pub struct HardwareProfileAsset {
     pub units: Option<String>,
 }
 
+fn default_component_facts() -> serde_json::Value {
+    serde_json::json!({})
+}
+
 /// A first-class component entry inside a system or rack profile.
 /// Quantity is omitted when the authoritative source does not specify it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,7 +41,7 @@ pub struct HardwareProfileComponent {
     /// Parent component class ID; absent means directly contained by the profile root.
     #[serde(default)]
     pub parent_component_id: Option<String>,
-    #[serde(default)]
+    #[serde(default = "default_component_facts")]
     pub facts: serde_json::Value,
     #[serde(default)]
     pub sources: Vec<HardwareProfileSource>,

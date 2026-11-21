@@ -179,6 +179,44 @@ pub struct GpuPeerFabricTopology {
     pub links: Vec<GpuPeerLink>,
 }
 
+/// Network transport represented by a simulated cluster fabric.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NetworkFabricKind {
+    Ethernet,
+    Roce,
+    InfiniBand,
+}
+
+/// Per-host network attachment and shared fabric configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NetworkFabricTemplate {
+    pub kind: NetworkFabricKind,
+    pub nics_per_host: u8,
+    pub ports_per_nic: u8,
+    pub link_speed_gbps: u32,
+    pub switch_ports: u32,
+    #[serde(default)]
+    pub dpu_per_host: bool,
+}
+
+/// One physical/logical network hop in a synthetic topology.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NetworkFabricLink {
+    pub identity: String,
+    pub source_identity: String,
+    pub target_identity: String,
+    pub speed_gbps: u32,
+    pub fabric: NetworkFabricKind,
+}
+
+/// Network connectivity remains distinct from PCIe and GPU peer fabrics.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NetworkFabricTopology {
+    pub kind: NetworkFabricKind,
+    pub links: Vec<NetworkFabricLink>,
+}
+
 /// Declarative inputs for a reproducible multi-host virtual GPU cluster.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GpuClusterTemplate {
@@ -195,6 +233,8 @@ pub struct GpuClusterTemplate {
     pub numa_nodes_per_host: u8,
     #[serde(default)]
     pub gpu_peer_fabric: Option<GpuPeerFabricKind>,
+    #[serde(default)]
+    pub network_fabric: Option<NetworkFabricTemplate>,
     pub seed: u64,
 }
 
@@ -240,6 +280,24 @@ pub fn instantiate_gpu_cluster_template(
     let mut devices = Vec::new();
     let mut links = Vec::new();
     let mut peer_links = Vec::new();
+    let mut network_links = Vec::new();
+
+    if let Some(network) = &template.network_fabric {
+        if network.nics_per_host == 0 || network.nics_per_host > 16 { issues.push("NICs per host must be between 1 and 16".into()); }
+        if network.ports_per_nic == 0 || network.ports_per_nic > 16 { issues.push("Ports per NIC must be between 1 and 16".into()); }
+        if network.link_speed_gbps == 0 || network.link_speed_gbps > 10_000 { issues.push("Network link speed must be between 1 and 10000 Gbps".into()); }
+        if network.switch_ports < u32::from(template.hosts) * u32::from(network.nics_per_host) { issues.push("Network switch port count is smaller than the total NIC uplinks".into()); }
+    }
+    if !issues.is_empty() { return Err(issues); }
+
+    let network_switch = format!("{}:network-fabric-switch", template.identity);
+    if let Some(network) = &template.network_fabric {
+        resources.push(DiscoveredResource {
+            identity: network_switch.clone(), kind: match network.kind { NetworkFabricKind::Ethernet => "ethernet_switch", NetworkFabricKind::Roce => "roce_switch", NetworkFabricKind::InfiniBand => "infiniband_switch" }.into(),
+            attributes: BTreeMap::from([("virtual".into(), Value::Bool(true)), ("ports".into(), Value::from(network.switch_ports)), ("fabric".into(), serde_json::to_value(network.kind).unwrap_or(Value::Null))]),
+            source: source.into(), observed_at: now, verified: false,
+        });
+    }
 
     for host_index in 0..template.hosts {
         let host = format!("{}:host-{:03}", template.identity, host_index + 1);
@@ -256,6 +314,65 @@ pub fn instantiate_gpu_cluster_template(
             identity: host.clone(), kind: "host".into(), attributes: host_attributes,
             source: source.into(), observed_at: now, verified: false,
         });
+        if let Some(network) = &template.network_fabric {
+            for nic_index in 0..network.nics_per_host {
+                let nic = format!("{host}:nic-{:02}", nic_index + 1);
+                resources.push(DiscoveredResource {
+                    identity: nic.clone(), kind: "network_adapter".into(),
+                    attributes: BTreeMap::from([
+                        ("virtual".into(), Value::Bool(true)),
+                        ("ports".into(), Value::from(network.ports_per_nic)),
+                        ("speed_gbps".into(), Value::from(network.link_speed_gbps)),
+                        ("fabric".into(), serde_json::to_value(network.kind).unwrap_or(Value::Null)),
+                    ]),
+                    source: source.into(), observed_at: now, verified: false,
+                });
+                relationships.push(ResourceRelationship {
+                    identity: format!("{host}:contains:{nic_index}:nic"),
+                    source_identity: host.clone(), target_identity: nic.clone(),
+                    kind: "contains".into(), attributes: BTreeMap::new(),
+                    source: source.into(), observed_at: now, verified: false,
+                });
+                let endpoint = if network.dpu_per_host {
+                    let dpu = format!("{host}:dpu");
+                    if !resources.iter().any(|r| r.identity == dpu) {
+                        resources.push(DiscoveredResource {
+                            identity: dpu.clone(), kind: "dpu".into(),
+                            attributes: BTreeMap::from([("virtual".into(), Value::Bool(true))]),
+                            source: source.into(), observed_at: now, verified: false,
+                        });
+                        relationships.push(ResourceRelationship {
+                            identity: format!("{host}:contains:dpu"), source_identity: host.clone(),
+                            target_identity: dpu.clone(), kind: "contains".into(),
+                            attributes: BTreeMap::new(), source: source.into(), observed_at: now, verified: false,
+                        });
+                    }
+                    network_links.push(NetworkFabricLink {
+                        identity: format!("{host}:nic-dpu:{nic_index:02}"),
+                        source_identity: nic.clone(), target_identity: dpu.clone(),
+                        speed_gbps: network.link_speed_gbps, fabric: network.kind,
+                    });
+                    relationships.push(ResourceRelationship {
+                        identity: format!("{host}:nic-dpu-edge:{nic_index:02}"),
+                        source_identity: nic, target_identity: dpu.clone(),
+                        kind: "network_attached_to".into(), attributes: BTreeMap::new(),
+                        source: source.into(), observed_at: now, verified: false,
+                    });
+                    dpu
+                } else { nic.clone() };
+                network_links.push(NetworkFabricLink {
+                    identity: format!("{host}:fabric-uplink:{nic_index:02}"),
+                    source_identity: endpoint.clone(), target_identity: network_switch.clone(),
+                    speed_gbps: network.link_speed_gbps, fabric: network.kind,
+                });
+                relationships.push(ResourceRelationship {
+                    identity: format!("{host}:fabric-uplink-edge:{nic_index:02}"),
+                    source_identity: endpoint, target_identity: network_switch.clone(),
+                    kind: "network_connected_to".into(), attributes: BTreeMap::new(),
+                    source: source.into(), observed_at: now, verified: false,
+                });
+            }
+        }
         resources.push(DiscoveredResource {
             identity: root.clone(), kind: "pcie_root_complex".into(),
             attributes: BTreeMap::from([("virtual".into(), Value::Bool(true))]),
@@ -396,6 +513,7 @@ pub fn instantiate_gpu_cluster_template(
         graph,
         pcie_topology: Some(pcie_topology),
         gpu_peer_fabric: template.gpu_peer_fabric.map(|kind| GpuPeerFabricTopology { kind, links: peer_links }),
+        network_fabric: template.network_fabric.as_ref().map(|network| NetworkFabricTopology { kind: network.kind, links: network_links }),
         geometry: BTreeMap::new(),
         poses: BTreeMap::new(),
         parameters: BTreeMap::from([
@@ -447,6 +565,8 @@ pub struct SimulationInstance {
     #[serde(default)]
     pub gpu_peer_fabric: Option<GpuPeerFabricTopology>,
     #[serde(default)]
+    pub network_fabric: Option<NetworkFabricTopology>,
+    #[serde(default)]
     pub geometry: BTreeMap<String, GeometryAsset>,
     #[serde(default)]
     pub poses: BTreeMap<String, SpatialPose>,
@@ -491,6 +611,36 @@ pub fn validate_simulation(instance: &SimulationInstance) -> Vec<String> {
     }
     if let Some(topology) = &instance.pcie_topology {
         issues.extend(validate_pcie_topology(topology, &instance.graph));
+    }
+    if let Some(fabric) = &instance.network_fabric {
+        let resource_ids = instance.graph.resources.iter().map(|r| r.identity.as_str()).collect::<HashSet<_>>();
+        let mut link_ids = HashSet::new();
+        let mut endpoint_pairs = HashSet::new();
+        for link in &fabric.links {
+            if link.identity.trim().is_empty() || !link_ids.insert(link.identity.as_str()) {
+                issues.push(format!("Network link identity '{}' is empty or duplicated", link.identity));
+            }
+            if link.speed_gbps == 0 {
+                issues.push(format!("Network link '{}' has zero speed", link.identity));
+            }
+            if link.source_identity == link.target_identity {
+                issues.push(format!("Network link '{}' cannot connect a resource to itself", link.identity));
+            }
+            if !resource_ids.contains(link.source_identity.as_str()) || !resource_ids.contains(link.target_identity.as_str()) {
+                issues.push(format!("Network link '{}' references a resource missing from the graph", link.identity));
+            }
+            let pair = if link.source_identity <= link.target_identity {
+                (link.source_identity.as_str(), link.target_identity.as_str())
+            } else {
+                (link.target_identity.as_str(), link.source_identity.as_str())
+            };
+            if !endpoint_pairs.insert(pair) {
+                issues.push(format!("Network endpoint pair on '{}' is duplicated", link.identity));
+            }
+            if link.fabric != fabric.kind {
+                issues.push(format!("Network link '{}' fabric kind differs from its topology", link.identity));
+            }
+        }
     }
     if let Some(fabric) = &instance.gpu_peer_fabric {
         let resource_ids = instance.graph.resources.iter().map(|r| r.identity.as_str()).collect::<HashSet<_>>();
@@ -893,6 +1043,7 @@ mod tests {
             gpu_memory_gib: 288,
             numa_nodes_per_host: 2,
             gpu_peer_fabric: None,
+            network_fabric: None,
             seed: 42,
         }
     }
@@ -1008,6 +1159,7 @@ mod tests {
             },
             pcie_topology: None,
             gpu_peer_fabric: None,
+            network_fabric: None,
             geometry: BTreeMap::new(),
             poses: BTreeMap::from([("gpu-missing".into(), SpatialPose {
                 coordinate_frame: "rack-origin".into(), translation: [0.0, 0.0, 0.0],

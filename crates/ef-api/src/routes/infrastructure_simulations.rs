@@ -1,7 +1,9 @@
 //! Tenant-scoped simulation scenario registry. This API validates and stores
 //! reproducible simulation inputs; it does not execute a simulator.
 use axum::{Json, extract::{Path, Query, State}, http::StatusCode};
+use ef_core::hardware_profiles::HardwareProfile;
 use ef_core::infrastructure::{GpuClusterTemplate, SimulationInstance, instantiate_gpu_cluster_template, validate_simulation};
+use ef_db::repo::infrastructure_hardware_profile::InfrastructureHardwareProfileRepo;
 use ef_db::repo::infrastructure_simulation::InfrastructureSimulationRepo;
 use serde::Deserialize;
 use serde_json::{Value, json};

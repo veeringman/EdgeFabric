@@ -1,10 +1,13 @@
 //! Tenant-scoped, versioned declarative infrastructure manifest APIs.
 use axum::{Json, extract::{Path, State}, http::StatusCode};
+use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use ef_db::repo::infrastructure_manifest::InfrastructureManifestRepo;
+use ef_core::infrastructure::{DiscoverySnapshot, ResourceDeclaration, reconcile};
+use ef_db::repo::{infrastructure_manifest::InfrastructureManifestRepo, runner::RunnerRepo};
+use crate::routes::infrastructure::runner_resource;
 use crate::middleware::auth_extractor::{AppState, AuthContext};
 use crate::middleware::error_response::ApiError;
 
@@ -83,4 +86,56 @@ pub async fn get(
         })?
         .ok_or_else(|| ApiError::not_found("Infrastructure manifest not found"))?;
     Ok(Json(json!({ "manifest": manifest })))
+}
+
+/// POST /api/v1/infrastructure/manifests/:id/reconcile
+/// Reconciles a stored manifest against the current registered-runner snapshot.
+pub async fn reconcile_manifest(
+    State(state): State<AppState>,
+    auth: AuthContext,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<Value>> {
+    let manifest = InfrastructureManifestRepo::get(&state.pool, auth.tenant_id, id)
+        .await
+        .map_err(|error| {
+            tracing::error!(tenant_id = %auth.tenant_id, error = %error, "Infrastructure manifest lookup failed");
+            ApiError::internal("Failed to load infrastructure manifest")
+        })?
+        .ok_or_else(|| ApiError::not_found("Infrastructure manifest not found"))?;
+
+    let declarations_value = manifest.document.get("declarations")
+        .cloned()
+        .ok_or_else(|| ApiError::bad_request("Manifest document has no declarations array"))?;
+    let declarations: Vec<ResourceDeclaration> = serde_json::from_value(declarations_value)
+        .map_err(|error| ApiError::bad_request(format!("Invalid manifest declarations: {error}")))?;
+
+    let runners = RunnerRepo::list_by_tenant(&state.pool, auth.tenant_id)
+        .await
+        .map_err(|error| {
+            tracing::error!(tenant_id = %auth.tenant_id, error = %error, "Infrastructure reconciliation query failed");
+            ApiError::internal("Failed to load infrastructure inventory")
+        })?;
+    let resources = runners.iter().map(runner_resource).collect();
+    let snapshot = DiscoverySnapshot {
+        observed_at: Utc::now(),
+        coverage_complete: false,
+        resources,
+    };
+    let result = reconcile(&declarations, &snapshot);
+
+    Ok(Json(json!({
+        "manifest": {
+            "id": manifest.id,
+            "name": manifest.name,
+            "version": manifest.version
+        },
+        "result": result,
+        "scope": { "tenant_id": auth.tenant_id },
+        "source": "edgefabric.runner_inventory",
+        "read_only": true,
+        "limitations": [
+            "Only registered runners are included in this initial inventory slice.",
+            "Unregistered physical resources cannot be classified as missing until complete discovery coverage is available."
+        ]
+    })))
 }

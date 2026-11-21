@@ -43,6 +43,12 @@ fn validate_instance(instance: &SimulationInstance) -> Vec<String> {
     if instance.network_fabric.as_ref().is_some_and(|fabric| fabric.links.len() > 20_000) {
         issues.push("A network fabric may contain at most 20000 links".into());
     }
+    if instance.storage_topology.as_ref().is_some_and(|topology| topology.links.len() > 20_000) {
+        issues.push("A storage topology may contain at most 20000 links".into());
+    }
+    if instance.cxl_topology.as_ref().is_some_and(|topology| topology.devices.len() > 10_000 || topology.links.len() > 20_000) {
+        issues.push("A CXL topology may contain at most 10000 memory devices and 20000 links".into());
+    }
     if instance.geometry.len() > 10_000 || instance.poses.len() > 10_000 {
         issues.push("A simulation may contain at most 10000 geometry or pose entries".into());
     }
@@ -165,6 +171,9 @@ pub async fn create_gpu_cluster(
         "gpu_peer_link_count": instance.gpu_peer_fabric.as_ref().map_or(0, |fabric| fabric.links.len()),
         "network_fabric_kind": instance.network_fabric.as_ref().map(|fabric| fabric.kind),
         "network_fabric_link_count": instance.network_fabric.as_ref().map_or(0, |fabric| fabric.links.len()),
+        "storage_link_count": instance.storage_topology.as_ref().map_or(0, |topology| topology.links.len()),
+        "cxl_memory_device_count": instance.cxl_topology.as_ref().map_or(0, |topology| topology.devices.len()),
+        "cxl_link_count": instance.cxl_topology.as_ref().map_or(0, |topology| topology.links.len()),
         "deterministic_topology": true,
         "physical_inventory_mutated": false,
         "execution_started": false

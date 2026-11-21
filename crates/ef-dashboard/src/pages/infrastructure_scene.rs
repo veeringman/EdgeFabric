@@ -31,6 +31,7 @@ pub fn InfrastructureScenePage() -> impl IntoView {
     let canvas_id = "ef-infrastructure-scene-canvas";
     let (template_identity, set_template_identity) = signal("rubin-qualification-lab".to_string());
     let (template_profile_record_id, set_template_profile_record_id) = signal(String::new());
+    let (hardware_profiles, set_hardware_profiles) = signal(Vec::<Value>::new());
     let (template_scenario, set_template_scenario) = signal("rubin-cluster-baseline".to_string());
     let (template_hosts, set_template_hosts) = signal("4".to_string());
     let (template_gpus, set_template_gpus) = signal("8".to_string());
@@ -51,6 +52,15 @@ pub fn InfrastructureScenePage() -> impl IntoView {
         leptos::task::spawn_local(async move {
             if let Ok(response) = crate::api::get::<Value>("/infrastructure/simulations").await {
                 set_simulations.set(response["simulations"].as_array().cloned().unwrap_or_default());
+            }
+        });
+    });
+
+    // Load tenant-owned profile versions for the optional simulation binding.
+    Effect::new(move || {
+        leptos::task::spawn_local(async move {
+            if let Ok(response) = crate::api::get::<Value>("/infrastructure/hardware-profiles").await {
+                set_hardware_profiles.set(response["profiles"].as_array().cloned().unwrap_or_default());
             }
         });
     });
@@ -286,8 +296,25 @@ pub fn InfrastructureScenePage() -> impl IntoView {
                     <label>"Scenario ID"
                         <input type="text" prop:value=move || template_scenario.get() on:input=move |ev| set_template_scenario.set(event_target_value(&ev))/>
                     </label>
-                    <label>"Hardware profile version UUID (optional)"
-                        <input type="text" placeholder="Tenant profile UUID from the hardware profile registry" prop:value=move || template_profile_record_id.get() on:input=move |ev| set_template_profile_record_id.set(event_target_value(&ev))/>
+                    <label>"Hardware profile version (optional)"
+                        <select prop:value=move || template_profile_record_id.get() on:change=move |ev| set_template_profile_record_id.set(event_target_value(&ev))>
+                            <option value="">"No hardware profile"</option>
+                            <For
+                                each=move || hardware_profiles.get()
+                                key=|profile| profile["id"].as_str().unwrap_or_default().to_string()
+                                children=move |profile| {
+                                    let id = profile["id"].as_str().unwrap_or_default().to_string();
+                                    let label = format!(
+                                        "{} v{} · {} / {}",
+                                        profile["document"]["display_name"].as_str().unwrap_or("Hardware profile"),
+                                        profile["version"].as_i64().unwrap_or(0),
+                                        profile["qualification"].as_str().unwrap_or("unknown"),
+                                        profile["review_status"].as_str().unwrap_or("unknown")
+                                    );
+                                    view! { <option value=id>{label}</option> }
+                                }
+                            />
+                        </select>
                     </label>
                     <label>"Hosts"
                         <input type="number" min="1" max="256" prop:value=move || template_hosts.get() on:input=move |ev| set_template_hosts.set(event_target_value(&ev))/>

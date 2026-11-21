@@ -118,7 +118,7 @@ The declared component envelopes are summed per host:
 - direct-NVMe drive power (shared storage-array power is not yet included);
 - CXL expander power.
 
-For each rack, the generator compares the resulting design load against rack power capacity, the configured PDU capacity and cooling capacity. When `require_redundant_pdu` is true, at least two PDUs are required and the capacity check uses the remaining PDU capacity after loss of one unit (an N+1-style capacity check). This is a simplified feed-capacity abstraction; it does not model A/B electrical paths, phase balancing, breaker curves, voltage, UPS/generator transitions or actual power telemetry.
+For each rack, the generator compares the resulting design load against rack power capacity, the configured PDU capacity and cooling capacity. When `require_redundant_pdu` is true, at least two PDUs are required and the capacity check uses the remaining PDU capacity after loss of one unit (an N+1-style capacity check). This is a simplified feed-capacity abstraction; it does not model phase balancing, breaker curves, voltage, UPS/generator transition dynamics or actual power telemetry.
 
 Example template addition:
 
@@ -139,6 +139,10 @@ Example template addition:
   }
 }
 ```
+
+The rack template can additionally describe physical placement with `rack_units`, `host_height_u`, `rack_depth_mm`, `host_depth_mm` and `rack_spacing_mm`. The generator assigns non-overlapping rack-unit slots and creates spatial poses in a named millimetre coordinate frame. The current arrangement is a deterministic row of racks and vertical host positions; it is not a CAD fit check for rails, cable bend radius, rear-door clearance or service access.
+
+For redundant power, an even PDU count is split into independent logical A and B groups. Each host is attached to one PDU on each feed. Optional UPS units are created per feed, with PDU-to-UPS relationships and per-feed UPS capacity checks. Under redundant mode, the effective available capacity is the lesser of one feed's PDU capacity and its UPS capacity, so the rack load must fit on either surviving feed. This models capacity paths, not electrical protection coordination, actual circuit isolation or transfer behavior.
 
 All values are declared design envelopes in watts, not measured draw, heat output or a CFD/thermal prediction. Shared-array storage power, switch power, conversion losses, power factor, transient peaks, airflow, coolant flow/temperature, hot/cold aisle containment and facility-level cooling plant constraints remain outside this first structural model. API responses report generated rack and PDU counts; rack records retain per-rack design load and capacity values.
 

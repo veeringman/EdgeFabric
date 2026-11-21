@@ -162,6 +162,7 @@ graph LR
 | **Edge Node** | Physical rack hosting real devices + local agent |
 | **Runner** | Build executor (macOS/Linux/Windows host) with capability tags (`xcode`, `simctl`, `fastlane`, …) |
 | **Virtual IoT** | Software-defined IoT device backed by a VeerOS controller profile |
+| **Infrastructure Digital Twin** | Tenant-scoped 3D simulation scenes for GPU clusters, PCIe/NVLink, network, storage/CXL, rack layout and power paths |
 | **Chip Backend** | Simulation/emulation target — `vFPGA` (veer-vm software) or `FPGA` (hardware board) |
 | **Schematic** | Domain-agnostic graph (instances + wires) rendered by the shared editor with a `SymbolLibrary` skin |
 | **PDK** | Open or vendor process design kit (SKY130, GF180MCU, IHP-SG13G2, …) attached to chip projects |

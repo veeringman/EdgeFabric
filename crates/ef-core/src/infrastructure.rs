@@ -918,6 +918,34 @@ mod tests {
     }
 
     #[test]
+    fn gpu_cluster_template_builds_nvlink_full_mesh_separately_from_pcie() {
+        let mut template = sample_gpu_template();
+        template.gpu_peer_fabric = Some(GpuPeerFabricKind::NvLinkFullMesh);
+        let instance = instantiate_gpu_cluster_template(&template).unwrap();
+        let fabric = instance.gpu_peer_fabric.as_ref().unwrap();
+        assert_eq!(fabric.kind, GpuPeerFabricKind::NvLinkFullMesh);
+        assert_eq!(fabric.links.len(), 12); // 4 GPUs choose 2, for each of 2 hosts.
+        assert_eq!(instance.pcie_topology.as_ref().unwrap().links.len(), 10);
+        assert!(fabric.links.iter().all(|link| link.source_identity.contains(":gpu-")
+            && link.target_identity.contains(":gpu-")));
+        assert!(validate_simulation(&instance).is_empty());
+    }
+
+    #[test]
+    fn gpu_cluster_template_builds_nvswitch_domains_separately_from_pcie() {
+        let mut template = sample_gpu_template();
+        template.gpu_peer_fabric = Some(GpuPeerFabricKind::NvSwitch);
+        let instance = instantiate_gpu_cluster_template(&template).unwrap();
+        let fabric = instance.gpu_peer_fabric.as_ref().unwrap();
+        assert_eq!(fabric.kind, GpuPeerFabricKind::NvSwitch);
+        assert_eq!(fabric.links.len(), 8);
+        assert_eq!(instance.graph.resources.iter().filter(|r| r.kind == "nvswitch").count(), 2);
+        assert_eq!(instance.pcie_topology.as_ref().unwrap().links.len(), 10);
+        assert!(fabric.links.iter().all(|link| link.target_identity.ends_with(":nvswitch")));
+        assert!(validate_simulation(&instance).is_empty());
+    }
+
+    #[test]
     fn gpu_cluster_template_rejects_insufficient_switch_ports() {
         let mut template = sample_gpu_template();
         template.switch_downstream_ports = 2;

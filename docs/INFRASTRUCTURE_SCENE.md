@@ -82,3 +82,16 @@ A profile is versioned and carries optional vendor/product identity, structured 
 The built-in `edgefabric.generic-gpu-node` profile is explicitly `template_only`. It has no vendor, product model, dimensions, port map, power envelope or CAD asset. It is suitable for generic topology authoring only. No Rubin or Rubin Ultra product profile is currently published by this catalog. Those profiles must be populated from authoritative vendor documentation and reviewed CAD/asset packages before they can be used for physical qualification.
 
 This first catalog is read-only and built into the API; tenant-persisted profile authoring, approval workflow, profile-to-simulation binding and asset resolution are subsequent implementation steps. Profile validation does not persist input and never changes a simulation or physical inventory.
+
+### Tenant-persisted profile versions
+
+The catalog now supports tenant-owned immutable profile versions:
+
+- `GET /api/v1/infrastructure/hardware-profiles` — lists tenant versions and the built-in generic template. An optional `profile_id` query filters tenant versions.
+- `GET /api/v1/infrastructure/hardware-profiles/{uuid}` — retrieves one profile version within the caller's tenant.
+- `POST /api/v1/infrastructure/hardware-profiles/validate` — validates a payload without saving it.
+- `POST /api/v1/infrastructure/hardware-profiles` — validates and stores a new immutable version.
+
+The database enforces uniqueness for `(tenant_id, profile_id, version)`; a changed profile is a new version rather than an update. Stored records begin in `draft` review state. The schema reserves `submitted`, `approved` and `rejected` states for a subsequent controlled review workflow; this iteration does not expose approval transitions and does not grant qualification based on registration. The qualification field is provenance metadata supplied in the submitted document, not an independently verified assertion by EdgeFabric.
+
+Tenant isolation is enforced in repository queries. The built-in generic profile remains a separate read-only template and is not implicitly copied into a tenant's registry. Profile-to-simulation binding and physical-fit qualification remain subsequent steps.

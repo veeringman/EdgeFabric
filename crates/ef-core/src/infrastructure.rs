@@ -590,6 +590,8 @@ pub fn instantiate_gpu_cluster_template(
         pcie_topology: Some(pcie_topology),
         gpu_peer_fabric: template.gpu_peer_fabric.map(|kind| GpuPeerFabricTopology { kind, links: peer_links }),
         network_fabric: template.network_fabric.as_ref().map(|network| NetworkFabricTopology { kind: network.kind, links: network_links }),
+        storage_topology: None,
+        cxl_topology: None,
         geometry: BTreeMap::new(),
         poses: BTreeMap::new(),
         parameters: BTreeMap::from([

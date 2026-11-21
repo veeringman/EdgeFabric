@@ -144,6 +144,9 @@ pub fn Sidebar() -> impl IntoView {
                 <A href="/logs"><span class="nav-icon"><NavIcon name="logs".to_string()/></span><span>"Logs"</span></A>
                 <A href="/resources"><span class="nav-icon"><NavIcon name="download".to_string()/></span><span>"Downloads"</span></A>
 
+                <div class="nav-section-title">"Infrastructure Fabric"</div>
+                <A href="/infrastructure/scene"><span class="nav-icon"><NavIcon name="silicon".to_string()/></span><span>"3D Infrastructure Twin"</span></A>
+
                 <div class="nav-section-title">"IoT & Integrations"</div>
                 <A href="/virtual-iot/new"><span class="nav-icon"><NavIcon name="iot".to_string()/></span><span>"IoT Designer"</span></A>
                 <A href="/virtual-iot/backends"><span class="nav-icon"><NavIcon name="iot".to_string()/></span><span>"IoT Backends"</span></A>

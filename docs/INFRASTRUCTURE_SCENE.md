@@ -114,7 +114,7 @@ Profile authors may supply machine-readable numeric limits under `facts.constrai
 
 Only explicitly declared numeric constraints are evaluated. Missing constraints or missing observations remain `unknown`; EdgeFabric does not infer values. Evaluation status is `pass`, `fail`, `partial`, or `unknown`. This is a profile-vs-template structural check, not a vendor certification, electrical simulation, thermal/CFD model, measured performance result, or physical deployment approval.
 
-A tenant may submit a draft profile for review with `POST /api/v1/infrastructure/hardware-profiles/{id}/submit`. This is a one-way `draft` to `submitted` transition scoped to the owning tenant. Approval and rejection are deliberately not exposed by this endpoint; they require a separately authorized review workflow. Submission never grants qualification.
+A tenant may submit a draft profile for review with `POST /api/v1/infrastructure/hardware-profiles/{id}/submit`. This is a one-way `draft` to `submitted` transition scoped to the owning tenant and emits an append-only audit event. Approval and rejection are deliberately not exposed by this endpoint: the current authentication context carries tenant identity but no reviewer role or user principal, so a safe privileged review transition cannot yet be enforced. Submission never grants qualification.
 
 ### NVIDIA Rubin and Vera Rubin Ultra reference catalog
 

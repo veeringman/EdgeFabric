@@ -308,6 +308,28 @@ pub struct RackPowerCoolingTemplate {
     pub cooling_capacity_watts: u64,
     #[serde(default)]
     pub require_redundant_pdu: bool,
+    #[serde(default)]
+    pub rack_units: u16,
+    #[serde(default)]
+    pub host_height_u: u16,
+    #[serde(default)]
+    pub rack_depth_mm: u32,
+    #[serde(default)]
+    pub host_depth_mm: u32,
+    #[serde(default)]
+    pub rack_spacing_mm: u32,
+    #[serde(default)]
+    pub ups_per_feed: u8,
+    #[serde(default)]
+    pub ups_capacity_watts: u64,
+}
+
+/// Physical dimensions and rack-unit placement generated for a virtual rack.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RackUnitPlacement {
+    pub host_identity: String,
+    pub start_u: u16,
+    pub height_u: u16,
 }
 
 /// Per-rack declared load and capacity assessment.
@@ -321,6 +343,10 @@ pub struct RackPowerCoolingRecord {
     pub effective_pdu_capacity_watts: u64,
     pub cooling_capacity_watts: u64,
     pub redundant_feed_required: bool,
+    #[serde(default)]
+    pub ups_identities: Vec<String>,
+    #[serde(default)]
+    pub placements: Vec<RackUnitPlacement>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -485,6 +511,18 @@ pub fn instantiate_gpu_cluster_template(
         }
         if power.pdus_per_rack == 0 || power.pdus_per_rack > 8 {
             issues.push("PDUs per rack must be between 1 and 8".into());
+        }
+        if power.require_redundant_pdu && power.pdus_per_rack % 2 != 0 {
+            issues.push("Redundant A/B power requires an even number of PDUs per rack".into());
+        }
+        if power.rack_units > 0 && (power.host_height_u == 0 || u32::from(power.hosts_per_rack) * u32::from(power.host_height_u) > u32::from(power.rack_units)) {
+            issues.push("Rack-unit capacity is insufficient for the configured host placement".into());
+        }
+        if (power.rack_depth_mm > 0 && power.host_depth_mm > power.rack_depth_mm) {
+            issues.push("Host chassis depth exceeds rack depth".into());
+        }
+        if power.ups_per_feed > 0 && power.ups_capacity_watts == 0 {
+            issues.push("UPS capacity must be non-zero when UPS units are configured".into());
         }
         if power.require_redundant_pdu && power.pdus_per_rack < 2 {
             issues.push("Redundant PDU mode requires at least two PDUs per rack".into());
@@ -848,11 +886,22 @@ pub fn instantiate_gpu_cluster_template(
             let rack = format!("{}:rack-{:03}", template.identity, rack_index + 1);
             let host_ids = (first..first + count).map(|i| format!("{}:host-{:03}", template.identity, i + 1)).collect::<Vec<_>>();
             let pdu_ids = (0..power.pdus_per_rack).map(|i| format!("{rack}:pdu-{:02}", i + 1)).collect::<Vec<_>>();
+            let ups_ids = (0..(power.ups_per_feed.saturating_mul(if power.require_redundant_pdu { 2 } else { 1 }))).map(|i| format!("{rack}:ups-{:02}", i + 1)).collect::<Vec<_>>();
+            let mut placements = Vec::new();
+            for (slot, host) in host_ids.iter().enumerate() {
+                let height = power.host_height_u.max(1);
+                let start_u = (slot as u16).saturating_mul(height).saturating_add(1);
+                placements.push(RackUnitPlacement { host_identity: host.clone(), start_u, height_u: height });
+            }
             let cooling = format!("{rack}:cooling-zone");
             let load = host_load.saturating_mul(u64::from(count));
-            let surviving_pdu_capacity = power.pdu_capacity_watts.saturating_mul(u64::from(
-                power.pdus_per_rack.saturating_sub(if power.require_redundant_pdu { 1 } else { 0 })
-            ));
+            let pdu_capacity_per_feed = if power.require_redundant_pdu {
+                power.pdu_capacity_watts.saturating_mul(u64::from(power.pdus_per_rack / 2))
+            } else { power.pdu_capacity_watts.saturating_mul(u64::from(power.pdus_per_rack)) };
+            let ups_capacity_per_feed = if power.ups_per_feed > 0 {
+                power.ups_capacity_watts.saturating_mul(u64::from(power.ups_per_feed))
+            } else { u64::MAX };
+            let surviving_pdu_capacity = pdu_capacity_per_feed.min(ups_capacity_per_feed);
             if load > power.rack_power_capacity_watts {
                 issues.push(format!("Rack '{rack}' design load {load} W exceeds rack capacity {} W", power.rack_power_capacity_watts));
             }
@@ -869,6 +918,8 @@ pub fn instantiate_gpu_cluster_template(
                     ("design_load_watts".into(), Value::from(load)),
                     ("power_capacity_watts".into(), Value::from(power.rack_power_capacity_watts)),
                     ("cooling_capacity_watts".into(), Value::from(power.cooling_capacity_watts)),
+                    ("rack_units".into(), Value::from(power.rack_units)),
+                    ("rack_depth_mm".into(), Value::from(power.rack_depth_mm)),
                 ]),
                 source: source.into(), observed_at: now, verified: false,
             });
@@ -890,12 +941,13 @@ pub fn instantiate_gpu_cluster_template(
                     kind: "contains".into(), attributes: BTreeMap::new(), source: source.into(), observed_at: now, verified: false,
                 });
             }
-            for pdu in &pdu_ids {
+            for (pdu_index, pdu) in pdu_ids.iter().enumerate() {
                 resources.push(DiscoveredResource {
                     identity: pdu.clone(), kind: "power_distribution_unit".into(),
                     attributes: BTreeMap::from([
                         ("virtual".into(), Value::Bool(true)),
                         ("capacity_watts".into(), Value::from(power.pdu_capacity_watts)),
+                        ("feed".into(), Value::String(if power.require_redundant_pdu { if pdu_index < usize::from(power.pdus_per_rack / 2) { "A".into() } else { "B".into() } } else { "A".into() })),
                     ]),
                     source: source.into(), observed_at: now, verified: false,
                 });
@@ -904,12 +956,38 @@ pub fn instantiate_gpu_cluster_template(
                     kind: "powered_by".into(), attributes: BTreeMap::new(), source: source.into(), observed_at: now, verified: false,
                 });
             }
+            for (ups_index, ups) in ups_ids.iter().enumerate() {
+                let feed = if power.require_redundant_pdu && ups_index >= usize::from(power.ups_per_feed) { "B" } else { "A" };
+                resources.push(DiscoveredResource {
+                    identity: ups.clone(), kind: "ups".into(),
+                    attributes: BTreeMap::from([("virtual".into(), Value::Bool(true)), ("capacity_watts".into(), Value::from(power.ups_capacity_watts)), ("feed".into(), Value::String(feed.into()))]),
+                    source: source.into(), observed_at: now, verified: false,
+                });
+                let feed_pdus = pdu_ids.iter().enumerate().filter(|(index, _)| !power.require_redundant_pdu || (if *index < usize::from(power.pdus_per_rack / 2) { "A" } else { "B" }) == feed).map(|(_, id)| id).collect::<Vec<_>>();
+                for pdu in feed_pdus {
+                    relationships.push(ResourceRelationship { identity: format!("{pdu}:fed-by:{ups}"), source_identity: pdu.clone(), target_identity: ups.clone(), kind: "fed_by".into(), attributes: BTreeMap::new(), source: source.into(), observed_at: now, verified: false });
+                }
+            }
+            for (host_index, host) in host_ids.iter().enumerate() {
+                let feeds = if power.require_redundant_pdu { vec!["A", "B"] } else { vec!["A"] };
+                for feed in feeds {
+                    if let Some((index, pdu)) = pdu_ids.iter().enumerate().find(|(index, _)| {
+                        if !power.require_redundant_pdu { true } else if feed == "A" { *index < usize::from(power.pdus_per_rack / 2) } else { *index >= usize::from(power.pdus_per_rack / 2) }
+                    }) {
+                        let _ = index;
+                        relationships.push(ResourceRelationship { identity: format!("{host}:power-feed-{feed}"), source_identity: host.clone(), target_identity: pdu.clone(), kind: "powered_by".into(), attributes: BTreeMap::from([("feed".into(), Value::String(feed.into()))]), source: source.into(), observed_at: now, verified: false });
+                    }
+                }
+                let _ = host_index;
+            }
             rack_power_cooling.push(RackPowerCoolingRecord {
                 rack_identity: rack, host_identities: host_ids, pdu_identities: pdu_ids,
                 design_load_watts: load, rack_capacity_watts: power.rack_power_capacity_watts,
                 effective_pdu_capacity_watts: surviving_pdu_capacity,
                 cooling_capacity_watts: power.cooling_capacity_watts,
                 redundant_feed_required: power.require_redundant_pdu,
+                ups_identities: ups_ids,
+                placements,
             });
         }
         if !issues.is_empty() { return Err(issues); }
@@ -928,6 +1006,26 @@ pub fn instantiate_gpu_cluster_template(
     let graph = InfrastructureGraph {
         observed_at: now, coverage_complete: true, resources, relationships,
     };
+    let mut poses = BTreeMap::new();
+    if let Some(power) = &template.power_cooling {
+        let spacing = f64::from(power.rack_spacing_mm.max(1200));
+        for (rack_index, rack) in rack_power_cooling.iter().enumerate() {
+            poses.insert(rack.rack_identity.clone(), SpatialPose {
+                coordinate_frame: "site-mm".into(),
+                translation: [rack_index as f64 * spacing, 0.0, 0.0],
+                rotation_xyzw: [0.0, 0.0, 0.0, 1.0],
+                scale: [1.0, 1.0, 1.0],
+            });
+            for placement in &rack.placements {
+                poses.insert(placement.host_identity.clone(), SpatialPose {
+                    coordinate_frame: rack.rack_identity.clone(),
+                    translation: [0.0, 0.0, f64::from(placement.start_u.saturating_sub(1)) * 44.45],
+                    rotation_xyzw: [0.0, 0.0, 0.0, 1.0],
+                    scale: [1.0, 1.0, 1.0],
+                });
+            }
+        }
+    }
     let pcie_topology = PcieTopology { devices, links };
     let instance = SimulationInstance {
         identity: template.identity.clone(),
@@ -946,7 +1044,7 @@ pub fn instantiate_gpu_cluster_template(
         cxl_topology: template.cxl_memory.as_ref().map(|_| CxlTopology { devices: cxl_devices, links: cxl_links }),
         rack_power_cooling: template.power_cooling.as_ref().map(|_| RackPowerCoolingTopology { racks: rack_power_cooling }),
         geometry: BTreeMap::new(),
-        poses: BTreeMap::new(),
+        poses,
         parameters: BTreeMap::from([
             ("template".into(), serde_json::to_value(template).unwrap_or(Value::Null)),
             ("deterministic_topology".into(), Value::Bool(true)),
@@ -1574,6 +1672,27 @@ mod tests {
     }
 
     #[test]
+    fn gpu_cluster_template_models_ab_power_and_ups_capacity() {
+        let mut template = sample_gpu_template();
+        template.power_cooling = Some(RackPowerCoolingTemplate {
+            hosts_per_rack: 1, host_power_watts: 1000, gpu_power_watts: 500,
+            nic_power_watts: 0, storage_device_power_watts: 0, cxl_device_power_watts: 0,
+            rack_power_capacity_watts: 10000, pdus_per_rack: 2, pdu_capacity_watts: 5000,
+            cooling_capacity_watts: 10000, require_redundant_pdu: true,
+            rack_units: 42, host_height_u: 4, rack_depth_mm: 1200, host_depth_mm: 1000,
+            rack_spacing_mm: 1500, ups_per_feed: 1, ups_capacity_watts: 4000,
+        });
+        let instance = instantiate_gpu_cluster_template(&template).unwrap();
+        let rack = &instance.rack_power_cooling.as_ref().unwrap().racks[0];
+        assert_eq!(rack.ups_identities.len(), 2);
+        assert_eq!(rack.effective_pdu_capacity_watts, 4000);
+        assert_eq!(rack.placements[0].height_u, 4);
+        assert!(instance.graph.resources.iter().filter(|r| r.kind == "ups").count() == 4);
+        assert!(instance.graph.relationships.iter().any(|r| r.kind == "fed_by"));
+        assert!(instance.graph.relationships.iter().any(|r| r.attributes.get("feed") == Some(&Value::String("B".into()))));
+    }
+
+    #[test]
     fn gpu_cluster_template_places_hosts_and_checks_rack_power_cooling() {
         let mut template = sample_gpu_template();
         template.power_cooling = Some(RackPowerCoolingTemplate {
@@ -1588,6 +1707,9 @@ mod tests {
         assert_eq!(topology.racks[0].host_identities.len(), 1);
         assert_eq!(topology.racks[0].design_load_watts, 4000);
         assert_eq!(topology.racks[0].effective_pdu_capacity_watts, 4500);
+        assert_eq!(topology.racks[0].placements[0].start_u, 1);
+        assert_eq!(topology.racks[0].ups_identities.len(), 0);
+        assert_eq!(instance.poses.len(), 4);
         assert_eq!(instance.graph.resources.iter().filter(|r| r.kind == "rack").count(), 2);
         assert_eq!(instance.graph.resources.iter().filter(|r| r.kind == "power_distribution_unit").count(), 4);
         assert!(validate_simulation(&instance).is_empty());

@@ -15,7 +15,7 @@ Deliverable: repository-fit architecture decision, sequence diagrams and minimal
 
 - Normalize existing discovered hosts, devices, network facts and runner hardware metadata into resource/fact views.
 - Preserve source attribution and stable identity mapping.
-- Add typed relationships and queryable topology.
+- Core typed relationship and graph-validation primitives are now implemented; next add tenant-scoped persistence, provenance-aware observations and queryable topology after ownership boundaries are established.
 - Expose read-only inventory APIs using existing auth, tenant and pagination conventions.
 - Add simulation fixtures and integration tests.
 
@@ -61,13 +61,14 @@ Acceptance: no S4/S5 action can execute without policy-required approval and ful
 
 ## First vertical slice
 
-Start with one discovered generic host and its existing probe metadata:
-1. Read current discovered host/runner data.
-2. Normalize CPU, memory, OS, architecture, PCI/accelerator facts with provenance.
-3. Declare expected node manifest.
-4. Reconcile declaration against discovered facts.
-5. Display drift and evidence in read-only mode.
-6. Exercise the same flow with simulation fixtures in CI.
+Continue with the existing tenant-scoped runner slice while the global agent/discovered-host ownership model is resolved:
+1. Read registered runners through the existing tenant-scoped repository.
+2. Normalize available CPU, memory, OS, architecture and accelerator probe facts with source provenance.
+3. Validate and persist versioned expected-resource declarations.
+4. Reconcile declarations against the bounded runner snapshot and persist reconciliation history.
+5. Introduce graph persistence and topology APIs with tenant/site isolation tests.
+6. Integrate agent-discovered hosts only after agent ownership and authorization are made tenant-safe.
+7. Exercise the flow with deterministic simulation fixtures; do not assume CI runs while repository Actions are disabled.
 
 Do not begin with broad firmware orchestration or assume Rubin/Rubin Ultra qualification support exists before provider/hardware validation.
 

@@ -138,3 +138,11 @@ Reference material used for the built-in NVIDIA entries (retrieved 2026-11-21):
 - NVIDIA Vera Rubin POD architecture and Vera Rubin Ultra NVL576 topology: https://developer.nvidia.com/blog/nvidia-vera-rubin-pod-seven-chips-five-rack-scale-systems-one-ai-supercomputer
 
 The public NVIDIA sources are stored on the profile records themselves. Re-fetch and review source revisions before any real hardware qualification or procurement decision.
+
+### Profile-derived structural simulation
+
+A tenant-owned profile with component inventory can now be expanded into a structural simulation with `POST /api/v1/infrastructure/simulations/templates/hardware-profile`. The request contains `identity`, `scenario_id`, `hardware_profile_record_id` and optional `seed`. The endpoint expands each declared component quantity into simulated resource nodes and builds only the declared containment hierarchy. Component quantities that are unknown remain represented as unspecified component nodes rather than guessed counts.
+
+The dashboard offers **Create profile-derived component twin** after a tenant profile has been selected. For Vera Rubin NVL72, the reference component inventory expands 72 GPUs, 36 Vera CPUs, 18 compute trays, 9 NVLink switch trays, 144 ConnectX-9 SuperNICs and 18 BlueField-4 DPUs. For Vera Rubin Ultra NVL576, it expands eight MGX NVL racks, 576 GPUs and one NVLink-domain resource. Parent-child containment is represented; detailed NVLink edge/cable routing is not fabricated.
+
+The generated graph is always marked with incomplete physical discovery coverage. It contains no vendor CAD geometry, measured telemetry, PCIe slot map, explicit cable topology, facility power model or CFD. The 3D viewer therefore uses generic visual primitives until licensed geometry assets and coordinate metadata are supplied. This profile-derived twin is a structural planning artifact, not an exact hardware emulator or qualification result.

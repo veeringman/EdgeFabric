@@ -20,6 +20,7 @@ pub fn InfrastructureScenePage() -> impl IntoView {
     let (simulations, set_simulations) = signal(Vec::<Value>::new());
     let (scene, set_scene) = signal(Option::<Value>::None);
     let (selected, set_selected) = signal(String::new());
+    let (node_filter, set_node_filter) = signal(String::new());
     let (loading, set_loading) = signal(false);
     let (error, set_error) = signal(Option::<String>::None);
     let (overlay_pcie, set_overlay_pcie) = signal(true);
@@ -188,6 +189,15 @@ pub fn InfrastructureScenePage() -> impl IntoView {
     }
 
     let nodes = move || scene.get().map(|s| s["nodes"].as_array().cloned().unwrap_or_default()).unwrap_or_default();
+    let visible_nodes = move || {
+        let query = node_filter.get().trim().to_ascii_lowercase();
+        nodes().into_iter().filter(|node| {
+            query.is_empty()
+                || node["id"].as_str().unwrap_or("").to_ascii_lowercase().contains(&query)
+                || node["kind"].as_str().unwrap_or("").to_ascii_lowercase().contains(&query)
+                || node_label(node).to_ascii_lowercase().contains(&query)
+        }).collect::<Vec<_>>()
+    };
     let selected_node = move || {
         let id = selected.get();
         nodes().into_iter().find(|n| n["id"].as_str() == Some(id.as_str()))
@@ -311,8 +321,12 @@ pub fn InfrastructureScenePage() -> impl IntoView {
                     </div>
                     <aside class="infra-scene-inspector card">
                         <h3>"Resource explorer"</h3>
+                        <input class="infra-scene-node-search" type="search" placeholder="Filter by name, type or identity"
+                            prop:value=move || node_filter.get()
+                            on:input=move |ev| set_node_filter.set(event_target_value(&ev))/>
+                        <div class="infra-scene-node-count">{move || format!("{} of {} resources", visible_nodes().len(), nodes().len())}</div>
                         <div class="infra-scene-node-list">
-                            {move || nodes().into_iter().map(|node| {
+                            {move || visible_nodes().into_iter().map(|node| {
                                 let id = node["id"].as_str().unwrap_or("").to_string();
                                 let label = node_label(&node);
                                 let kind = node["kind"].as_str().unwrap_or("resource").to_string();

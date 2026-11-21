@@ -49,7 +49,7 @@
     const gltf = await new Promise((resolve, reject) => loader.parse(buffer, "", resolve, reject));
     const model = gltf.scene;
     if (!model) throw new Error("GLB contains no scene");
-    const unit = String(node.geometry.units || "m").toLowerCase();
+    const unit = String(node.geometry.units || "").toLowerCase();
     const scale = unit === "mm" || unit === "millimeter" || unit === "millimeters" ? 0.001
       : unit === "cm" || unit === "centimeter" || unit === "centimeters" ? 0.01
       : unit === "m" || unit === "meter" || unit === "meters" ? 1 : null;

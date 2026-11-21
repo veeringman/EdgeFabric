@@ -18,6 +18,7 @@ fn node_label(node: &Value) -> String {
 #[component]
 pub fn InfrastructureScenePage() -> impl IntoView {
     let (simulation_id, set_simulation_id) = signal(String::new());
+    let (simulations, set_simulations) = signal(Vec::<Value>::new());
     let (scene, set_scene) = signal(Option::<Value>::None);
     let (selected, set_selected) = signal(String::new());
     let (loading, set_loading) = signal(false);
@@ -28,6 +29,15 @@ pub fn InfrastructureScenePage() -> impl IntoView {
     let (overlay_storage, set_overlay_storage) = signal(true);
     let (overlay_power, set_overlay_power) = signal(true);
     let canvas_id = "ef-infrastructure-scene-canvas";
+
+    // Load the tenant-scoped simulation registry for convenient ID discovery.
+    Effect::new(move || {
+        leptos::task::spawn_local(async move {
+            if let Ok(response) = crate::api::get::<Value>("/infrastructure/simulations").await {
+                set_simulations.set(response["simulations"].as_array().cloned().unwrap_or_default());
+            }
+        });
+    });
 
     let load_scene = move |_| {
         let id = simulation_id.get_untracked().trim().to_string();
@@ -111,13 +121,25 @@ pub fn InfrastructureScenePage() -> impl IntoView {
                     <input
                         id="infra-simulation-id"
                         type="text"
-                        placeholder="Paste a saved simulation UUID"
+                        placeholder="Paste or select a saved simulation UUID"
+                        attr:list="infra-simulation-options"
                         prop:value=move || simulation_id.get()
                         on:input=move |ev| set_simulation_id.set(event_target_value(&ev))
                     />
+                    <datalist id="infra-simulation-options">
+                        {move || simulations.get().into_iter().map(|simulation| {
+                            let id = simulation["id"].as_str().unwrap_or("").to_string();
+                            let label = format!("{} · {}", simulation["identity"].as_str().unwrap_or("Simulation"),
+                                simulation["scenario_id"].as_str().unwrap_or("scenario"));
+                            view! { <option value=id label=label></option> }
+                        }).collect_view()}
+                    </datalist>
                     <button class="btn btn-primary" on:click=load_scene disabled=move || loading.get()>
                         {move || if loading.get() { "Loading…" } else { "Load scene" }}
                     </button>
+                </div>
+                <div class="muted" style="font-size:0.72rem">
+                    {move || format!("{} tenant-owned simulations available", simulations.get().len())}
                 </div>
                 <Show when=move || error.get().is_some()>
                     <p class="infra-scene-error">{move || error.get().unwrap_or_default()}</p>

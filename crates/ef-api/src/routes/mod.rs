@@ -15,6 +15,7 @@ pub mod resources;
 pub mod infrastructure;
 pub mod infrastructure_manifests;
 pub mod infrastructure_simulations;
+pub mod infrastructure_hardware_profiles;
 
 use axum::{Json, Router, extract::State, http::StatusCode, routing::{get, post, put}};
 use serde::Deserialize;
@@ -103,6 +104,10 @@ pub fn api_router() -> Router<AppState> {
         .route("/infrastructure/manifests/validate", post(infrastructure_manifests::validate))
         .route("/infrastructure/manifests/{id}", get(infrastructure_manifests::get))
         .route("/infrastructure/manifests/{id}/reconcile", post(infrastructure_manifests::reconcile_manifest))
+        // Versioned hardware profile catalog.
+        .route("/infrastructure/hardware-profiles/validate", post(infrastructure_hardware_profiles::validate))
+        .route("/infrastructure/hardware-profiles", get(infrastructure_hardware_profiles::list))
+        .route("/infrastructure/hardware-profiles/{id}", get(infrastructure_hardware_profiles::get))
         // Declarative virtual infrastructure and spatial simulation registry.
         .route("/infrastructure/simulations/validate", post(infrastructure_simulations::validate))
         .route("/infrastructure/simulations/templates/gpu-cluster", post(infrastructure_simulations::create_gpu_cluster))

@@ -125,7 +125,7 @@ fn runner_resource(runner: &RunnerRow) -> DiscoveredResource {
         } else {
             "edgefabric.runner_registration".into()
         },
-        observed_at: runner.last_probe_at.unwrap_or(runner.updated_at),
+        observed_at: runner.last_probe_at.clone().unwrap_or_else(|| runner.updated_at.clone()),
         verified: probe_verified,
     }
 }

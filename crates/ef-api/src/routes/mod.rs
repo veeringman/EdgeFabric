@@ -106,6 +106,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/infrastructure/manifests/{id}/reconcile", post(infrastructure_manifests::reconcile_manifest))
         // Versioned hardware profile catalog.
         .route("/infrastructure/hardware-profiles/validate", post(infrastructure_hardware_profiles::validate))
+        .route("/infrastructure/hardware-profiles/clone", post(infrastructure_hardware_profiles::clone_builtin))
         .route("/infrastructure/hardware-profiles", get(infrastructure_hardware_profiles::list).post(infrastructure_hardware_profiles::create))
         .route("/infrastructure/hardware-profiles/{id}", get(infrastructure_hardware_profiles::get))
         .route("/infrastructure/hardware-profiles/{id}/submit", post(infrastructure_hardware_profiles::submit))

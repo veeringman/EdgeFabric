@@ -31,6 +31,37 @@ A GPU cluster scenario should represent more than a number of GPUs. Model:
 
 A link's theoretical bandwidth, negotiated bandwidth and measured throughput are different facts. Preserve each with units, directionality, source and confidence. Do not infer end-to-end GPU collective performance from PCIe link width alone.
 
+## Implemented virtual GPU cluster template
+
+The first template expander is available through the tenant-scoped API:
+
+`POST /api/v1/infrastructure/simulations/templates/gpu-cluster`
+
+Example request:
+
+```json
+{
+  "identity": "lab:gpu-cluster",
+  "scenario_id": "rubin-qualification-lab",
+  "hosts": 2,
+  "gpus_per_host": 4,
+  "pcie_generation": 6,
+  "root_complex_lanes": 32,
+  "switch_uplink_lanes": 16,
+  "gpu_lanes": 16,
+  "switch_downstream_ports": 8,
+  "gpu_memory_gib": 288,
+  "numa_nodes_per_host": 2,
+  "seed": 42
+}
+```
+
+The template expands into synthetic host, root-complex, PCIe-switch and GPU resources, containment/connection relationships, and typed PCIe links. It validates host/GPU/NUMA bounds, PCIe generations and lane widths, switch port counts, and root-complex uplink limits. Each switch records its downstream lane budget and the ratio between aggregate GPU downstream lanes and uplink lanes. This is a structural oversubscription indicator, not a measured bandwidth or performance prediction.
+
+For the example above, the deterministic graph contains 2 hosts, 2 root complexes, 2 PCIe switches and 8 GPUs; 12 PCIe devices and 10 PCIe links. Synthetic resources are unverified and tagged with the simulation source. Repeated expansion yields the same resource identities and topology for the same template. The seed is retained as scenario provenance; this structural template currently does not introduce random placement.
+
+The current template creates PCIe topology only. NVLink/NVSwitch, NIC/DPU, network fabrics, storage, power and cooling are subsequent typed extensions. It does not emulate a GPU, launch a workload, or qualify hardware.
+
 ## Example scenario
 
 The following is illustrative declarative intent, not a claim of tested or supported hardware. It describes two virtual hosts, each with four virtual GPUs behind a PCIe switch, and a separate GPU peer fabric relationship.

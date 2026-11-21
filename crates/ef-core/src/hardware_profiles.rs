@@ -114,6 +114,19 @@ impl HardwareProfile {
                 issues.push(format!("Component '{}' facts must be a JSON object", component.id));
             }
         }
+        for component in &self.components {
+            let mut visited = std::collections::HashSet::new();
+            let mut current = Some(component.id.as_str());
+            while let Some(component_id) = current {
+                if !visited.insert(component_id) {
+                    issues.push(format!("Component containment cycle includes '{}'", component.id));
+                    break;
+                }
+                current = self.components.iter()
+                    .find(|candidate| candidate.id == component_id)
+                    .and_then(|candidate| candidate.parent_component_id.as_deref());
+            }
+        }
         for source in &self.sources {
             if source.title.trim().is_empty() || source.uri.trim().is_empty() || source.publisher.trim().is_empty() {
                 issues.push("Each source requires a title, URI and publisher".into());

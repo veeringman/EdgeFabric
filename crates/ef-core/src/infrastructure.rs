@@ -1526,7 +1526,7 @@ mod tests {
             capacity_gib_per_drive: 0,
             shared_array_capacity_gib: 1_048_576,
             link_speed_gbps: 400,
-            switch_ports: 2,
+            switch_ports: 3,
         });
         let instance = instantiate_gpu_cluster_template(&template).unwrap();
         let storage = instance.storage_topology.as_ref().unwrap();

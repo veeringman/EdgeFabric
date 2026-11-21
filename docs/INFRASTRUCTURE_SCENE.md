@@ -130,7 +130,7 @@ Read-only built-ins can be copied into a tenant's immutable profile registry wit
 
 ### Component-level profile inventory
 
-Hardware profiles now support typed component entries in addition to the profile-wide `supported_components` class list. Each entry has a stable component ID, class, optional vendor/model/quantity, a facts object, optional component-specific provenance sources and optional licensed geometry assets. Unknown quantities remain absent. The built-in Rubin references use these entries for GPU, CPU, baseboard, compute-tray, NVLink-switch-tray, rack and NVLink-domain inventory. This inventory is descriptive; it does not synthesize missing cable maps, slot maps or physical dimensions.
+Hardware profiles now support typed component entries in addition to the profile-wide `supported_components` class list. Each entry has a stable component ID, class, optional vendor/model/quantity, an optional parent component ID for containment, a facts object, optional component-specific provenance sources and optional licensed geometry assets. Unknown quantities remain absent. The built-in Rubin references use these entries for GPU, CPU, baseboard, compute-tray, NVLink-switch-tray, rack and NVLink-domain inventory. This inventory is descriptive; it does not synthesize missing cable maps, slot maps or physical dimensions.
 
 Reference material used for the built-in NVIDIA entries (retrieved 2026-11-21):
 

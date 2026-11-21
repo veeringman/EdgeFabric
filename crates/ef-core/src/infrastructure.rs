@@ -272,11 +272,18 @@ pub fn validate_declarations(declarations: &[ResourceDeclaration]) -> Vec<String
         let kind = declaration.kind.trim();
         if identity.is_empty() {
             issues.push(format!("declarations[{index}].identity must not be empty"));
-        } else if !identities.insert(identity.to_owned()) {
-            issues.push(format!("declarations[{index}] duplicates identity '{identity}'"));
+        } else {
+            if declaration.identity != identity {
+                issues.push(format!("declarations[{index}].identity must not have leading or trailing whitespace"));
+            }
+            if !identities.insert(identity.to_owned()) {
+                issues.push(format!("declarations[{index}] duplicates identity '{identity}'"));
+            }
         }
         if kind.is_empty() {
             issues.push(format!("declarations[{index}].kind must not be empty"));
+        } else if declaration.kind != kind {
+            issues.push(format!("declarations[{index}].kind must not have leading or trailing whitespace"));
         }
         for field in declaration.expected.keys() {
             if field.trim().is_empty() {

@@ -92,7 +92,7 @@ pub async fn reconcile_inventory(
     })))
 }
 
-fn runner_resource(runner: &RunnerRow) -> DiscoveredResource {
+pub(crate) fn runner_resource(runner: &RunnerRow) -> DiscoveredResource {
     let mut attributes = BTreeMap::new();
     attributes.insert("name".into(), json!(runner.name));
     attributes.insert("runner_class".into(), json!(runner.runner_class));

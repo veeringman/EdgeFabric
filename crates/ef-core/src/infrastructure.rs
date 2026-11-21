@@ -436,7 +436,7 @@ pub fn instantiate_gpu_cluster_template(
     let storage_link_count = template.storage.as_ref().map_or(0, |storage| {
         if storage.kind == StorageFabricKind::DirectNvme {
             u32::from(template.hosts) * u32::from(storage.drives_per_host)
-        } else { u32::from(template.hosts) * 2 + 1 }
+        } else { u32::from(template.hosts) + 1 }
     });
     let cxl_link_count = template.cxl_memory.as_ref().map_or(0, |cxl| {
         u32::from(template.hosts) * u32::from(cxl.devices_per_host)

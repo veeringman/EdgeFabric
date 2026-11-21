@@ -1324,6 +1324,67 @@ mod tests {
     }
 
     #[test]
+    fn simulation_validates_storage_and_cxl_as_distinct_topologies() {
+        let mut instance = SimulationInstance {
+            identity: "sim-storage-cxl".into(),
+            kind: SimulationKind::TopologySimulation,
+            scenario_id: "storage-cxl-lab".into(),
+            engine: "fixture".into(),
+            engine_version: "1".into(),
+            seed: 7,
+            created_at: Utc::now(),
+            source_manifest_revision: None,
+            graph: InfrastructureGraph {
+                observed_at: Utc::now(),
+                coverage_complete: true,
+                resources: vec![
+                    discovered("host-1"),
+                    discovered("nvme-array-1"),
+                    discovered("cxl-expander-1"),
+                ],
+                relationships: vec![],
+            },
+            pcie_topology: None,
+            gpu_peer_fabric: None,
+            network_fabric: None,
+            storage_topology: Some(StorageTopology {
+                links: vec![StorageFabricLink {
+                    identity: "nvmeof-path-1".into(),
+                    source_identity: "host-1".into(),
+                    target_identity: "nvme-array-1".into(),
+                    kind: StorageFabricKind::NvmeOfRdma,
+                    capacity_gib: 1024 * 1024,
+                    link_speed_gbps: 400,
+                }],
+            }),
+            cxl_topology: Some(CxlTopology {
+                devices: vec![CxlMemoryDevice {
+                    resource_identity: "cxl-expander-1".into(),
+                    capacity_gib: 2048,
+                    numa_node: Some(1),
+                }],
+                links: vec![CxlMemoryLink {
+                    identity: "cxl-host-expander-1".into(),
+                    host_identity: "host-1".into(),
+                    memory_device_identity: "cxl-expander-1".into(),
+                    generation: 3,
+                    lane_width: 16,
+                }],
+            }),
+            geometry: BTreeMap::new(),
+            poses: BTreeMap::new(),
+            parameters: BTreeMap::new(),
+        };
+        assert!(validate_simulation(&instance).is_empty());
+
+        instance.storage_topology.as_mut().unwrap().links[0].capacity_gib = 0;
+        instance.cxl_topology.as_mut().unwrap().links[0].generation = 4;
+        let issues = validate_simulation(&instance);
+        assert!(issues.iter().any(|issue| issue.contains("non-zero capacity")));
+        assert!(issues.iter().any(|issue| issue.contains("unsupported generation")));
+    }
+
+    #[test]
     fn simulation_rejects_spatial_metadata_for_unknown_resource() {
         let instance = SimulationInstance {
             identity: "sim-1".into(),
@@ -1341,6 +1402,8 @@ mod tests {
             pcie_topology: None,
             gpu_peer_fabric: None,
             network_fabric: None,
+            storage_topology: None,
+            cxl_topology: None,
             geometry: BTreeMap::new(),
             poses: BTreeMap::from([("gpu-missing".into(), SpatialPose {
                 coordinate_frame: "rack-origin".into(), translation: [0.0, 0.0, 0.0],

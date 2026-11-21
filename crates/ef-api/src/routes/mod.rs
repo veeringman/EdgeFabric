@@ -14,6 +14,7 @@ pub mod starter_projects;
 pub mod resources;
 pub mod infrastructure;
 pub mod infrastructure_manifests;
+pub mod infrastructure_simulations;
 
 use axum::{Json, Router, extract::State, http::StatusCode, routing::{get, post, put}};
 use serde::Deserialize;
@@ -102,6 +103,10 @@ pub fn api_router() -> Router<AppState> {
         .route("/infrastructure/manifests/validate", post(infrastructure_manifests::validate))
         .route("/infrastructure/manifests/{id}", get(infrastructure_manifests::get))
         .route("/infrastructure/manifests/{id}/reconcile", post(infrastructure_manifests::reconcile_manifest))
+        // Declarative virtual infrastructure and spatial simulation registry.
+        .route("/infrastructure/simulations/validate", post(infrastructure_simulations::validate))
+        .route("/infrastructure/simulations", get(infrastructure_simulations::list).post(infrastructure_simulations::create))
+        .route("/infrastructure/simulations/{id}", get(infrastructure_simulations::get))
         // M6 Mini ML fabric
         .route("/ml/nodes", get(ml::list_nodes))
         .route("/ml/nodes/heartbeat", post(ml::node_heartbeat))

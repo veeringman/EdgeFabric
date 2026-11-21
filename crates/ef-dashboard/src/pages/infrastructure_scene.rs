@@ -32,6 +32,9 @@ pub fn InfrastructureScenePage() -> impl IntoView {
     let (template_identity, set_template_identity) = signal("rubin-qualification-lab".to_string());
     let (template_profile_record_id, set_template_profile_record_id) = signal(String::new());
     let (hardware_profiles, set_hardware_profiles) = signal(Vec::<Value>::new());
+    let (builtin_profiles, set_builtin_profiles) = signal(Vec::<Value>::new());
+    let (builtin_profile_id, set_builtin_profile_id) = signal(String::new());
+    let (cloning_profile, set_cloning_profile) = signal(false);
     let (template_scenario, set_template_scenario) = signal("rubin-cluster-baseline".to_string());
     let (template_hosts, set_template_hosts) = signal("4".to_string());
     let (template_gpus, set_template_gpus) = signal("8".to_string());
@@ -61,9 +64,38 @@ pub fn InfrastructureScenePage() -> impl IntoView {
         leptos::task::spawn_local(async move {
             if let Ok(response) = crate::api::get::<Value>("/infrastructure/hardware-profiles").await {
                 set_hardware_profiles.set(response["profiles"].as_array().cloned().unwrap_or_default());
+                set_builtin_profiles.set(response["built_in_profiles"].as_array().cloned().unwrap_or_default());
             }
         });
     });
+
+    let clone_builtin_profile = move |_| {
+        let profile_id = builtin_profile_id.get_untracked();
+        if profile_id.is_empty() {
+            set_error.set(Some("Select a built-in hardware profile to clone.".into()));
+            return;
+        }
+        set_cloning_profile.set(true);
+        set_error.set(None);
+        leptos::task::spawn_local(async move {
+            let body = serde_json::json!({ "profile_id": profile_id });
+            match crate::api::post::<_, Value>("/infrastructure/hardware-profiles/clone", &body).await {
+                Ok(response) => {
+                    let record_id = response["profile"]["id"].as_str().unwrap_or("").to_string();
+                    if let Ok(list) = crate::api::get::<Value>("/infrastructure/hardware-profiles").await {
+                        set_hardware_profiles.set(list["profiles"].as_array().cloned().unwrap_or_default());
+                    }
+                    if !record_id.is_empty() {
+                        set_template_profile_record_id.set(record_id);
+                    } else {
+                        set_error.set(Some("Profile was cloned, but the API response omitted its record UUID.".into()));
+                    }
+                }
+                Err(err) => set_error.set(Some(err)),
+            }
+            set_cloning_profile.set(false);
+        });
+    };
 
     let create_simulation = move |_| {
         let identity = template_identity.get_untracked().trim().to_string();
@@ -316,6 +348,23 @@ pub fn InfrastructureScenePage() -> impl IntoView {
                             />
                         </select>
                     </label>
+                    <label>"Clone a built-in vendor reference into this tenant"
+                        <select prop:value=move || builtin_profile_id.get() on:change=move |ev| set_builtin_profile_id.set(event_target_value(&ev))>
+                            <option value="">"Select a built-in reference"</option>
+                            <For
+                                each=move || builtin_profiles.get()
+                                key=|profile| profile["id"].as_str().unwrap_or_default().to_string()
+                                children=move |profile| {
+                                    let id = profile["id"].as_str().unwrap_or_default().to_string();
+                                    let label = profile["display_name"].as_str().unwrap_or("Built-in profile").to_string();
+                                    view! { <option value=id>{label}</option> }
+                                }
+                            />
+                        </select>
+                    </label>
+                    <button class="btn btn-secondary" on:click=clone_builtin_profile disabled=move || cloning_profile.get()>
+                        {move || if cloning_profile.get() { "Cloning profile…" } else { "Clone selected profile" }}
+                    </button>
                     <label>"Hosts"
                         <input type="number" min="1" max="256" prop:value=move || template_hosts.get() on:input=move |ev| set_template_hosts.set(event_target_value(&ev))/>
                     </label>

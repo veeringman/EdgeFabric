@@ -108,6 +108,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/infrastructure/simulations/templates/gpu-cluster", post(infrastructure_simulations::create_gpu_cluster))
         .route("/infrastructure/simulations", get(infrastructure_simulations::list).post(infrastructure_simulations::create))
         .route("/infrastructure/simulations/{id}", get(infrastructure_simulations::get))
+        .route("/infrastructure/simulations/{id}/scene", get(infrastructure_simulations::get_scene))
         // M6 Mini ML fabric
         .route("/ml/nodes", get(ml::list_nodes))
         .route("/ml/nodes/heartbeat", post(ml::node_heartbeat))

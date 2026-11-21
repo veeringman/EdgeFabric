@@ -255,6 +255,12 @@ pub fn instantiate_gpu_cluster_template(
     if u32::from(template.hosts) * (u32::from(template.gpus_per_host) + 3) > 10_000 {
         issues.push("Expanded GPU cluster may contain at most 10000 resources".into());
     }
+    let network_resource_count = template.network_fabric.as_ref().map_or(0, |network| {
+        u32::from(template.hosts) * (u32::from(network.nics_per_host) + u32::from(network.dpu_per_host)) + 1
+    });
+    if u32::from(template.hosts) * (u32::from(template.gpus_per_host) + 3) + network_resource_count > 10_000 {
+        issues.push("Expanded GPU cluster including network resources may contain at most 10000 resources".into());
+    }
     if template.numa_nodes_per_host == 0 || template.numa_nodes_per_host > 8 { issues.push("NUMA nodes per host must be between 1 and 8".into()); }
     if ![1, 2, 4, 8, 16, 32].contains(&template.root_complex_lanes)
         || ![1, 2, 4, 8, 16, 32].contains(&template.switch_uplink_lanes)
@@ -1094,6 +1100,43 @@ mod tests {
         assert_eq!(instance.pcie_topology.as_ref().unwrap().links.len(), 10);
         assert!(fabric.links.iter().all(|link| link.target_identity.ends_with(":nvswitch")));
         assert!(validate_simulation(&instance).is_empty());
+    }
+
+    #[test]
+    fn gpu_cluster_template_models_roce_nics_dpus_and_fabric_paths() {
+        let mut template = sample_gpu_template();
+        template.network_fabric = Some(NetworkFabricTemplate {
+            kind: NetworkFabricKind::Roce,
+            nics_per_host: 2,
+            ports_per_nic: 2,
+            link_speed_gbps: 400,
+            switch_ports: 4,
+            dpu_per_host: true,
+        });
+        let instance = instantiate_gpu_cluster_template(&template).unwrap();
+        let fabric = instance.network_fabric.as_ref().unwrap();
+        assert_eq!(fabric.kind, NetworkFabricKind::Roce);
+        assert_eq!(fabric.links.len(), 8);
+        assert_eq!(instance.graph.resources.iter().filter(|r| r.kind == "network_adapter").count(), 4);
+        assert_eq!(instance.graph.resources.iter().filter(|r| r.kind == "dpu").count(), 2);
+        assert_eq!(instance.graph.resources.iter().filter(|r| r.kind == "roce_switch").count(), 1);
+        assert!(fabric.links.iter().all(|link| link.speed_gbps == 400));
+        assert!(validate_simulation(&instance).is_empty());
+    }
+
+    #[test]
+    fn gpu_cluster_template_rejects_insufficient_network_switch_ports() {
+        let mut template = sample_gpu_template();
+        template.network_fabric = Some(NetworkFabricTemplate {
+            kind: NetworkFabricKind::InfiniBand,
+            nics_per_host: 2,
+            ports_per_nic: 1,
+            link_speed_gbps: 800,
+            switch_ports: 3,
+            dpu_per_host: false,
+        });
+        let issues = instantiate_gpu_cluster_template(&template).unwrap_err();
+        assert!(issues.iter().any(|issue| issue.contains("network switch port count")));
     }
 
     #[test]

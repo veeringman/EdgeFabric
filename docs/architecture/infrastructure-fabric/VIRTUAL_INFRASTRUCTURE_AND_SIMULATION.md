@@ -162,3 +162,10 @@ Every result records engine/version, model version, input manifest hash, seed, p
 5. 3D viewer consuming scene and graph APIs.
 6. Capacity and power/thermal models with explicit fidelity.
 7. Performance modeling and hardware emulation only when backed by validated engines and reference measurements.
+
+
+## NIC, DPU and network fabric topology
+
+The GPU-cluster template optionally accepts a `network_fabric` object with a fabric kind (`ethernet`, `roce` or `infini_band`), NICs per host, ports per NIC, link speed in Gbps, aggregate switch port count and an optional per-host DPU. Expansion creates synthetic NIC and fabric-switch resources, optional DPU resources, host containment relationships and explicit NIC-to-DPU-to-switch or NIC-to-switch links. Network paths are a separate topology from PCIe attachment and GPU peer connectivity. The validator checks endpoint existence, non-zero speed, duplicate links and fabric-kind consistency; template validation also checks NIC counts, speed bounds and aggregate switch-port capacity.
+
+For example, two hosts with two 400-Gbps RoCE NICs each and one DPU per host produce four NIC resources, two DPU resources, one shared RoCE switch, and eight logical links (NIC-to-DPU and DPU-to-switch). This is a structural capacity/topology description, not a claim about a specific NIC, DPU, switch model, RDMA configuration, routing, oversubscription behavior or measured throughput.

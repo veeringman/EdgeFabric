@@ -96,3 +96,9 @@ The catalog now supports tenant-owned immutable profile versions:
 The database enforces uniqueness for `(tenant_id, profile_id, version)`; a changed profile is a new version rather than an update. Stored records begin in `draft` review state. The schema reserves `submitted`, `approved` and `rejected` states for a subsequent controlled review workflow; this iteration does not expose approval transitions and does not grant qualification based on registration. The qualification field is provenance metadata supplied in the submitted document, not an independently verified assertion by EdgeFabric.
 
 Tenant isolation is enforced in repository queries. The built-in generic profile remains a separate read-only template and is not implicitly copied into a tenant's registry. Profile-to-simulation binding and physical-fit qualification remain subsequent steps.
+
+### Hardware profile binding on GPU cluster simulations
+
+The GPU cluster template endpoint accepts an optional top-level `hardware_profile_record_id` UUID alongside the existing flattened template fields. When supplied, the API resolves that immutable record inside the caller's tenant, checks that the stored document's profile ID and version agree with its database metadata, and embeds a read-only `hardware_profile_binding` record in the simulation parameters. The create response and scene projection expose the binding, including qualification and review-status metadata.
+
+The dashboard builder exposes the optional profile-version UUID field. Obtain candidate UUIDs from `GET /api/v1/infrastructure/hardware-profiles`. The reference does not copy mutable profile data into the simulation and does not confer vendor qualification. It currently records association and provenance only; physical fit, PCIe lane mapping, power/cooling limits, cable maps and vendor-specific topology are not yet evaluated against profile facts. The referenced profile must remain in the same tenant.

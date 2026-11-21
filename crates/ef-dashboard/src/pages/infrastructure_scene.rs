@@ -420,7 +420,9 @@ pub fn InfrastructureScenePage() -> impl IntoView {
                         <select prop:value=move || builtin_profile_id.get() on:change=move |ev| set_builtin_profile_id.set(event_target_value(&ev))>
                             <option value="">"Select a built-in reference"</option>
                             <For
-                                each=move || builtin_profiles.get()
+                                each=move || builtin_profiles.get().into_iter()
+                                    .filter(|profile| profile["components"].as_array().is_some_and(|items| !items.is_empty()))
+                                    .collect::<Vec<_>>()
                                 key=|profile| profile["id"].as_str().unwrap_or_default().to_string()
                                 children=move |profile| {
                                     let id = profile["id"].as_str().unwrap_or_default().to_string();

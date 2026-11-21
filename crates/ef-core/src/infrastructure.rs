@@ -513,6 +513,13 @@ pub fn instantiate_gpu_cluster_template(
         }
     }
 
+    if relationships.len() > 20_000 {
+        return Err(vec!["Expanded GPU cluster may contain at most 20000 graph relationships".into()]);
+    }
+    if network_links.len() > 20_000 {
+        return Err(vec!["Network fabric may contain at most 20000 links".into()]);
+    }
+
     let graph = InfrastructureGraph {
         observed_at: now, coverage_complete: true, resources, relationships,
     };

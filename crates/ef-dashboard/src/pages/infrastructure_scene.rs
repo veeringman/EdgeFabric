@@ -36,6 +36,12 @@ pub fn InfrastructureScenePage() -> impl IntoView {
     let (template_generation, set_template_generation) = signal("6".to_string());
     let (template_gpu_memory, set_template_gpu_memory) = signal("192".to_string());
     let (template_peer_fabric, set_template_peer_fabric) = signal("nv_switch".to_string());
+    let (template_network, set_template_network) = signal("roce".to_string());
+    let (template_dpu, set_template_dpu) = signal(true);
+    let (template_storage, set_template_storage) = signal("nvme_of_rdma".to_string());
+    let (template_rack_hosts, set_template_rack_hosts) = signal("4".to_string());
+    let (template_rack_units, set_template_rack_units) = signal("48".to_string());
+    let (template_redundant_power, set_template_redundant_power) = signal(true);
     let (creating, set_creating) = signal(false);
 
     // Load the tenant-scoped simulation registry for convenient ID discovery.
@@ -55,6 +61,12 @@ pub fn InfrastructureScenePage() -> impl IntoView {
         let pcie_generation = template_generation.get_untracked().parse::<u8>().unwrap_or(0);
         let gpu_memory_gib = template_gpu_memory.get_untracked().parse::<u32>().unwrap_or(0);
         let peer = template_peer_fabric.get_untracked();
+        let network = template_network.get_untracked();
+        let dpu = template_dpu.get_untracked();
+        let storage = template_storage.get_untracked();
+        let rack_hosts = template_rack_hosts.get_untracked().parse::<u16>().unwrap_or(0);
+        let rack_units = template_rack_units.get_untracked().parse::<u16>().unwrap_or(0);
+        let redundant_power = template_redundant_power.get_untracked();
         if identity.is_empty() || scenario_id.is_empty() {
             set_error.set(Some("Simulation identity and scenario are required.".into()));
             return;
@@ -72,10 +84,56 @@ pub fn InfrastructureScenePage() -> impl IntoView {
             "gpu_memory_gib": gpu_memory_gib,
             "numa_nodes_per_host": 2,
             "gpu_peer_fabric": if peer == "none" { serde_json::Value::Null } else { serde_json::Value::String(peer) },
-            "network_fabric": null,
-            "storage": null,
+            "network_fabric": if network == "none" { serde_json::Value::Null } else { serde_json::json!({
+                "kind": network,
+                "nics_per_host": 2,
+                "ports_per_nic": 1,
+                "link_speed_gbps": 400,
+                "switch_ports": u32::from(hosts) * 2,
+                "dpu_per_host": dpu
+            }) },
+            "storage": if storage == "none" { serde_json::Value::Null } else if storage == "direct_nvme" {
+                serde_json::json!({
+                    "kind": storage,
+                    "drives_per_host": 4,
+                    "capacity_gib_per_drive": 3840,
+                    "shared_array_capacity_gib": 0,
+                    "link_speed_gbps": 64,
+                    "switch_ports": 0
+                })
+            } else {
+                serde_json::json!({
+                    "kind": storage,
+                    "drives_per_host": 0,
+                    "capacity_gib_per_drive": 0,
+                    "shared_array_capacity_gib": 102400,
+                    "link_speed_gbps": 400,
+                    "switch_ports": u32::from(hosts) + 1
+                })
+            },
             "cxl_memory": null,
-            "power_cooling": null,
+            "power_cooling": {
+                "hosts_per_rack": rack_hosts,
+                "host_power_watts": 1200,
+                "gpu_power_watts": 700,
+                "nic_power_watts": 50,
+                "storage_device_power_watts": 25,
+                "cxl_device_power_watts": 50,
+                "rack_power_capacity_watts": 60000,
+                "pdus_per_rack": if redundant_power { 4 } else { 2 },
+                "pdu_capacity_watts": 30000,
+                "cooling_capacity_watts": 60000,
+                "require_redundant_pdu": redundant_power,
+                "rack_units": rack_units,
+                "host_height_u": 4,
+                "rack_depth_mm": 1200,
+                "rack_width_mm": 600,
+                "host_depth_mm": 900,
+                "host_width_mm": 440,
+                "rack_spacing_mm": 1200,
+                "ups_per_feed": if redundant_power { 1 } else { 0 },
+                "ups_capacity_watts": if redundant_power { 30000 } else { 0 }
+            },
             "seed": 1
         });
         set_creating.set(true);
@@ -247,11 +305,42 @@ pub fn InfrastructureScenePage() -> impl IntoView {
                             <option value="none">"No peer fabric"</option>
                         </select>
                     </label>
+                    <label>"Host network fabric"
+                        <select prop:value=move || template_network.get() on:change=move |ev| set_template_network.set(event_target_value(&ev))>
+                            <option value="roce">"RoCE / Ethernet"</option>
+                            <option value="ethernet">"Ethernet"</option>
+                            <option value="infini_band">"InfiniBand"</option>
+                            <option value="none">"No network fabric"</option>
+                        </select>
+                    </label>
+                    <label>"Storage fabric"
+                        <select prop:value=move || template_storage.get() on:change=move |ev| set_template_storage.set(event_target_value(&ev))>
+                            <option value="nvme_of_rdma">"NVMe-oF / RDMA"</option>
+                            <option value="nvme_of_tcp">"NVMe-oF / TCP"</option>
+                            <option value="direct_nvme">"Direct NVMe"</option>
+                            <option value="fibre_channel">"Fibre Channel"</option>
+                            <option value="none">"No storage"</option>
+                        </select>
+                    </label>
+                    <label>"Hosts per rack"
+                        <input type="number" min="1" max="64" prop:value=move || template_rack_hosts.get() on:input=move |ev| set_template_rack_hosts.set(event_target_value(&ev))/>
+                    </label>
+                    <label>"Rack capacity (U)"
+                        <input type="number" min="1" max="100" prop:value=move || template_rack_units.get() on:input=move |ev| set_template_rack_units.set(event_target_value(&ev))/>
+                    </label>
+                    <label class="infra-scene-inline-check">
+                        <input type="checkbox" prop:checked=move || template_dpu.get() on:change=move |ev| set_template_dpu.set(event_target_checked(&ev))/>
+                        " DPU per host"
+                    </label>
+                    <label class="infra-scene-inline-check">
+                        <input type="checkbox" prop:checked=move || template_redundant_power.get() on:change=move |ev| set_template_redundant_power.set(event_target_checked(&ev))/>
+                        " Redundant A/B power with UPS"
+                    </label>
                 </div>
                 <button class="btn btn-primary" on:click=create_simulation disabled=move || creating.get()>
                     {move || if creating.get() { "Creating simulation…" } else { "Create and open 3D twin" }}
                 </button>
-                <p class="muted" style="font-size:0.72rem">"Starter profile: PCIe x16 root/uplink/GPU lanes, 2 NUMA nodes, deterministic seed 1. Optional network, storage, CXL and rack power/cooling can be added in the next builder iteration."</p>
+                <p class="muted" style="font-size:0.72rem">"Starter assumptions: 400 Gbps network/storage links, fixed chassis power envelope and 4U hosts. Values are structural planning inputs, not measured performance or thermal predictions."</p>
             </div>
 
             <div class="infra-scene-load card">

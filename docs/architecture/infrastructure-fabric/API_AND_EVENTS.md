@@ -110,3 +110,8 @@ Events are notifications, not the sole source of truth. Consumers detect sequenc
 ## Operation request
 
 An operation names target resource IDs or bounded selector, capability ID/version constraint, typed parameters, deadline, idempotency key, requested safety class, evidence requirements and any maintenance-window/approval reference. The server resolves the provider; clients cannot select arbitrary executables. The plan pins provider/capability versions and records preconditions.
+
+
+### GPU peer-fabric template options
+
+The GPU-cluster template accepts optional `gpu_peer_fabric`: `nv_link_full_mesh` generates direct per-host GPU peer edges, while `nv_switch` generates a synthetic per-host NVSwitch resource and GPU-to-switch peer edges. These edges are validated and counted independently of PCIe links. They are structural abstractions only; the API does not claim NVLink generation, bandwidth, switch radix or measured performance.

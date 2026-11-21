@@ -61,6 +61,26 @@ impl InfrastructureHardwareProfileRepo {
         .await
     }
 
+    /// One-way draft -> submitted transition. Approval/rejection is intentionally
+    /// not exposed here; those require a separately authorized review workflow.
+    pub async fn submit(
+        pool: &PgPool,
+        tenant_id: Uuid,
+        id: Uuid,
+    ) -> Result<Option<InfrastructureHardwareProfileRow>, sqlx::Error> {
+        sqlx::query_as::<_, InfrastructureHardwareProfileRow>(
+            r#"UPDATE infrastructure_hardware_profiles
+               SET review_status = 'submitted'
+               WHERE tenant_id = $1 AND id = $2 AND review_status = 'draft'
+               RETURNING id, tenant_id, profile_id, version, qualification,
+                         review_status, document, created_at"#,
+        )
+        .bind(tenant_id)
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+    }
+
     pub async fn get(
         pool: &PgPool,
         tenant_id: Uuid,

@@ -1,7 +1,7 @@
 //! Tenant-scoped simulation scenario registry. This API validates and stores
 //! reproducible simulation inputs; it does not execute a simulator.
 use axum::{Json, extract::{Path, Query, State}, http::StatusCode};
-use ef_core::infrastructure::{SimulationInstance, validate_simulation};
+use ef_core::infrastructure::{GpuClusterTemplate, SimulationInstance, instantiate_gpu_cluster_template, validate_simulation};
 use ef_db::repo::infrastructure_simulation::InfrastructureSimulationRepo;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -105,6 +105,57 @@ pub async fn create(
     Ok(Json(json!({
         "simulation": row,
         "inventory_class": "simulated",
+        "physical_inventory_mutated": false,
+        "execution_started": false
+    })))
+}
+
+/// POST /api/v1/infrastructure/simulations/templates/gpu-cluster
+/// Deterministically expands and persists a virtual multi-host GPU cluster.
+pub async fn create_gpu_cluster(
+    State(state): State<AppState>,
+    auth: AuthContext,
+    Json(template): Json<GpuClusterTemplate>,
+) -> ApiResult<Json<Value>> {
+    let instance = instantiate_gpu_cluster_template(&template)
+        .map_err(|issues| ApiError::bad_request(format!(
+            "GPU cluster template validation failed: {}", issues.join("; ")
+        )))?;
+    let document = serde_json::to_value(&instance)
+        .map_err(|error| ApiError::bad_request(format!("Invalid simulation document: {error}")))?;
+    let seed = i64::try_from(instance.seed)
+        .map_err(|_| ApiError::bad_request("Simulation seed must be within the signed 64-bit range"))?;
+    let row = InfrastructureSimulationRepo::create(
+        &state.pool,
+        auth.tenant_id,
+        &instance.identity,
+        "topology_simulation",
+        &instance.scenario_id,
+        &instance.engine,
+        &instance.engine_version,
+        seed,
+        instance.source_manifest_revision.as_deref(),
+        &document,
+    )
+    .await
+    .map_err(|error| {
+        if let sqlx::Error::Database(db_error) = &error {
+            if db_error.code().as_deref() == Some("23505") {
+                return ApiError::bad_request("A simulation with this identity already exists in this tenant");
+            }
+        }
+        tracing::error!(tenant_id = %auth.tenant_id, error = %error, "GPU cluster simulation persistence failed");
+        ApiError::internal("Failed to store GPU cluster simulation")
+    })?;
+
+    Ok(Json(json!({
+        "simulation": row,
+        "inventory_class": "simulated",
+        "resource_count": instance.graph.resources.len(),
+        "relationship_count": instance.graph.relationships.len(),
+        "pcie_device_count": instance.pcie_topology.as_ref().map_or(0, |topology| topology.devices.len()),
+        "pcie_link_count": instance.pcie_topology.as_ref().map_or(0, |topology| topology.links.len()),
+        "deterministic_topology": true,
         "physical_inventory_mutated": false,
         "execution_started": false
     })))

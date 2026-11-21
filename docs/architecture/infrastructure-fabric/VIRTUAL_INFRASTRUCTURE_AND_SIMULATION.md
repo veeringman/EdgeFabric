@@ -92,7 +92,7 @@ Example additions to a GPU-cluster template:
     "capacity_gib_per_drive": 0,
     "shared_array_capacity_gib": 1048576,
     "link_speed_gbps": 400,
-    "switch_ports": 2
+    "switch_ports": 3
   },
   "cxl_memory": {
     "devices_per_host": 2,

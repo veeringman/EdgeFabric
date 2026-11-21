@@ -60,6 +60,14 @@ pub fn instantiate_hardware_profile(
             ("qualification".into(), json!(profile.qualification)),
             ("profile_facts".into(), profile.facts.clone()),
             ("supported_components".into(), json!(profile.supported_components)),
+            ("geometry_assets".into(), json!(profile.assets.iter().map(|asset| json!({
+                "format": asset.format,
+                "uri": asset.uri,
+                "sha256": asset.sha256,
+                "license": asset.license,
+                "coordinate_system": asset.coordinate_system,
+                "units": asset.units
+            })).collect::<Vec<_>>())),
             ("inventory_class".into(), json!("simulated")),
         ]),
         source: "hardware_profile".into(),
@@ -68,6 +76,14 @@ pub fn instantiate_hardware_profile(
     }];
     let mut relationships = Vec::new();
     let mut geometry = BTreeMap::new();
+    if let Some(asset) = profile.assets.iter().find(|asset| asset.units.as_ref().is_some_and(|units| !units.trim().is_empty())) {
+        geometry.insert(root_identity.clone(), crate::infrastructure::GeometryAsset {
+            asset_uri: asset.uri.clone(),
+            sha256: asset.sha256.clone(),
+            format: asset.format.clone(),
+            units: asset.units.clone().unwrap_or_default(),
+        });
+    }
     let mut instances_by_component: HashMap<String, Vec<String>> = HashMap::new();
     let mut pending = profile.components.iter().collect::<Vec<_>>();
     while !pending.is_empty() {

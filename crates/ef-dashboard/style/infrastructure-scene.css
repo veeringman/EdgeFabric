@@ -68,3 +68,7 @@
 .infra-scene-load > .btn { align-self:flex-start; }
 @media (max-width:1000px) { .infra-scene-builder-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media (max-width:520px) { .infra-scene-builder-grid { grid-template-columns:1fr; } }
+
+
+.infra-scene-node-search { width:100%; box-sizing:border-box; margin:0 0 .35rem; padding:.55rem .65rem; border:1px solid var(--border); border-radius:6px; background:var(--bg-input); color:var(--text-primary); font:inherit; font-size:.76rem; }
+.infra-scene-node-count { color:var(--text-muted); font-size:.66rem; margin-bottom:.25rem; }

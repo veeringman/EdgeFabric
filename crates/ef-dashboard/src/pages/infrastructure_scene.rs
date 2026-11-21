@@ -30,6 +30,7 @@ pub fn InfrastructureScenePage() -> impl IntoView {
     let (overlay_power, set_overlay_power) = signal(true);
     let canvas_id = "ef-infrastructure-scene-canvas";
     let (template_identity, set_template_identity) = signal("rubin-qualification-lab".to_string());
+    let (template_profile_record_id, set_template_profile_record_id) = signal(String::new());
     let (template_scenario, set_template_scenario) = signal("rubin-cluster-baseline".to_string());
     let (template_hosts, set_template_hosts) = signal("4".to_string());
     let (template_gpus, set_template_gpus) = signal("8".to_string());
@@ -72,8 +73,10 @@ pub fn InfrastructureScenePage() -> impl IntoView {
             set_error.set(Some("Simulation identity and scenario are required.".into()));
             return;
         }
+        let profile_record_id = template_profile_record_id.get_untracked().trim().to_string();
         let body = serde_json::json!({
             "identity": identity,
+            "hardware_profile_record_id": if profile_record_id.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(profile_record_id) },
             "scenario_id": scenario_id,
             "hosts": hosts,
             "gpus_per_host": gpus_per_host,
@@ -283,6 +286,9 @@ pub fn InfrastructureScenePage() -> impl IntoView {
                     <label>"Scenario ID"
                         <input type="text" prop:value=move || template_scenario.get() on:input=move |ev| set_template_scenario.set(event_target_value(&ev))/>
                     </label>
+                    <label>"Hardware profile version UUID (optional)"
+                        <input type="text" placeholder="Tenant profile UUID from the hardware profile registry" prop:value=move || template_profile_record_id.get() on:input=move |ev| set_template_profile_record_id.set(event_target_value(&ev))/>
+                    </label>
                     <label>"Hosts"
                         <input type="number" min="1" max="256" prop:value=move || template_hosts.get() on:input=move |ev| set_template_hosts.set(event_target_value(&ev))/>
                     </label>
@@ -345,7 +351,7 @@ pub fn InfrastructureScenePage() -> impl IntoView {
                 <button class="btn btn-primary" on:click=create_simulation disabled=move || creating.get()>
                     {move || if creating.get() { "Creating simulation…" } else { "Create and open 3D twin" }}
                 </button>
-                <p class="muted" style="font-size:0.72rem">"Starter assumptions: 400 Gbps network/storage links, fixed chassis power envelope and 4U hosts. Values are structural planning inputs, not measured performance or thermal predictions."</p>
+                <p class="muted" style="font-size:0.72rem">"Optional profile binding references an immutable tenant profile version. A reference records provenance and review metadata; it does not assert physical qualification. Starter assumptions: 400 Gbps links, fixed chassis power envelope and 4U hosts."</p>
             </div>
 
             <div class="infra-scene-load card">

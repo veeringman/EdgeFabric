@@ -5,7 +5,7 @@ use axum::{
     body::{Body, to_bytes},
     extract::State,
     http::{HeaderMap, HeaderValue, StatusCode, header},
-    response::{IntoResponse, Response},
+    response::Response,
     Json,
 };
 use serde_json::{Value, json};
@@ -24,6 +24,7 @@ const GLB_MEDIA_TYPE: &str = "model/gltf-binary";
 #[derive(Debug, FromRow)]
 struct GeometryAssetRow {
     id: Uuid,
+    tenant_id: Uuid,
     sha256: String,
     format: String,
     media_type: String,
@@ -174,7 +175,7 @@ pub async fn download(
     axum::extract::Path(id): axum::extract::Path<Uuid>,
 ) -> ApiResult<Response> {
     let row = sqlx::query_as::<_, GeometryAssetRow>(
-        r#"SELECT id, sha256, format, media_type, size_bytes, storage_key
+        r#"SELECT id, tenant_id, sha256, format, media_type, size_bytes, storage_key
            FROM infrastructure_geometry_assets WHERE id = $1 AND tenant_id = $2"#
     ).bind(id).bind(auth.tenant_id).fetch_optional(&state.pool).await
         .map_err(|error| { tracing::error!(error = %error, "Geometry asset lookup failed"); ApiError::internal("Failed to load geometry asset") })?

@@ -315,7 +315,11 @@ pub struct RackPowerCoolingTemplate {
     #[serde(default)]
     pub rack_depth_mm: u32,
     #[serde(default)]
+    pub rack_width_mm: u32,
+    #[serde(default)]
     pub host_depth_mm: u32,
+    #[serde(default)]
+    pub host_width_mm: u32,
     #[serde(default)]
     pub rack_spacing_mm: u32,
     #[serde(default)]
@@ -522,6 +526,9 @@ pub fn instantiate_gpu_cluster_template(
         if (power.rack_depth_mm > 0 && power.host_depth_mm > power.rack_depth_mm) {
             issues.push("Host chassis depth exceeds rack depth".into());
         }
+        if power.rack_width_mm > 0 && power.host_width_mm > power.rack_width_mm {
+            issues.push("Host chassis width exceeds rack width".into());
+        }
         if power.ups_per_feed > 0 && power.ups_capacity_watts == 0 {
             issues.push("UPS capacity must be non-zero when UPS units are configured".into());
         }
@@ -609,6 +616,11 @@ pub fn instantiate_gpu_cluster_template(
         host_attributes.insert("gpus".into(), Value::from(template.gpus_per_host));
         host_attributes.insert("numa_nodes".into(), Value::from(template.numa_nodes_per_host));
         host_attributes.insert("simulation_seed".into(), Value::from(template.seed));
+        if let Some(power) = &template.power_cooling {
+            host_attributes.insert("chassis_depth_mm".into(), Value::from(power.host_depth_mm));
+            host_attributes.insert("chassis_width_mm".into(), Value::from(power.host_width_mm));
+            host_attributes.insert("rack_height_u".into(), Value::from(power.host_height_u));
+        }
         resources.push(DiscoveredResource {
             identity: host.clone(), kind: "host".into(), attributes: host_attributes,
             source: source.into(), observed_at: now, verified: false,
@@ -921,6 +933,7 @@ pub fn instantiate_gpu_cluster_template(
                     ("cooling_capacity_watts".into(), Value::from(power.cooling_capacity_watts)),
                     ("rack_units".into(), Value::from(power.rack_units)),
                     ("rack_depth_mm".into(), Value::from(power.rack_depth_mm)),
+                    ("rack_width_mm".into(), Value::from(power.rack_width_mm)),
                 ]),
                 source: source.into(), observed_at: now, verified: false,
             });
@@ -1701,7 +1714,7 @@ mod tests {
             nic_power_watts: 0, storage_device_power_watts: 0, cxl_device_power_watts: 0,
             rack_power_capacity_watts: 10000, pdus_per_rack: 2, pdu_capacity_watts: 5000,
             cooling_capacity_watts: 10000, require_redundant_pdu: true,
-            rack_units: 42, host_height_u: 4, rack_depth_mm: 1200, host_depth_mm: 1000,
+            rack_units: 42, host_height_u: 4, rack_depth_mm: 1200, rack_width_mm: 600, host_depth_mm: 1000, host_width_mm: 440,
             rack_spacing_mm: 1500, ups_per_feed: 1, ups_capacity_watts: 4000,
         });
         let instance = instantiate_gpu_cluster_template(&template).unwrap();
@@ -1722,7 +1735,7 @@ mod tests {
             nic_power_watts: 100, storage_device_power_watts: 30, cxl_device_power_watts: 50,
             rack_power_capacity_watts: 5000, pdus_per_rack: 2, pdu_capacity_watts: 4500,
             cooling_capacity_watts: 5000, require_redundant_pdu: true,
-            rack_units: 42, host_height_u: 4, rack_depth_mm: 1200, host_depth_mm: 1000,
+            rack_units: 42, host_height_u: 4, rack_depth_mm: 1200, rack_width_mm: 600, host_depth_mm: 1000, host_width_mm: 440,
             rack_spacing_mm: 1500, ups_per_feed: 0, ups_capacity_watts: 0,
         });
         let instance = instantiate_gpu_cluster_template(&template).unwrap();

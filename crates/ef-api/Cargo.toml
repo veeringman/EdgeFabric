@@ -40,6 +40,7 @@ futures = { workspace = true }
 reqwest = { workspace = true }
 rumqttc = { workspace = true }
 base64 = { workspace = true }
+sha2 = { workspace = true }
 aes-gcm = "0.10"
 tokio-tungstenite = "0.26"
 utoipa = { workspace = true }

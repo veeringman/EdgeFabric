@@ -88,6 +88,34 @@ pub async fn create(
             "Simulation validation failed: {}", issues.join("; ")
         )));
     }
+    let mut profile_binding = Value::Null;
+    if let Some(profile_record_id) = request.hardware_profile_record_id {
+        let row = InfrastructureHardwareProfileRepo::get(
+            &state.pool, auth.tenant_id, profile_record_id
+        ).await.map_err(|error| {
+            tracing::error!(tenant_id = %auth.tenant_id, profile_id = %profile_record_id, error = %error, "Simulation hardware profile lookup failed");
+            ApiError::internal("Failed to resolve hardware profile")
+        })?.ok_or_else(|| ApiError::bad_request("Hardware profile does not exist in this tenant"))?;
+        let profile: HardwareProfile = serde_json::from_value(row.document.clone())
+            .map_err(|error| {
+                tracing::error!(profile_id = %profile_record_id, error = %error, "Stored hardware profile document is invalid");
+                ApiError::internal("Stored hardware profile is invalid")
+            })?;
+        if profile.id != row.profile_id || profile.version != row.version as u32 {
+            return Err(ApiError::bad_request("Hardware profile record metadata does not match its immutable document"));
+        }
+        profile_binding = json!({
+            "record_id": row.id,
+            "profile_id": row.profile_id,
+            "version": row.version,
+            "qualification": row.qualification,
+            "review_status": row.review_status,
+            "display_name": profile.display_name,
+            "binding_kind": "tenant_hardware_profile_reference",
+            "physical_qualification_asserted": false
+        });
+        instance.parameters.insert("hardware_profile_binding".into(), profile_binding.clone());
+    }
     let document = serde_json::to_value(&instance)
         .map_err(|error| ApiError::bad_request(format!("Invalid simulation document: {error}")))?;
     let seed = i64::try_from(instance.seed)
@@ -128,14 +156,22 @@ pub async fn create(
     })))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct GpuClusterSimulationRequest {
+    #[serde(flatten)]
+    pub template: GpuClusterTemplate,
+    /// Optional UUID of a tenant-owned immutable hardware profile version.
+    pub hardware_profile_record_id: Option<Uuid>,
+}
+
 /// POST /api/v1/infrastructure/simulations/templates/gpu-cluster
 /// Deterministically expands and persists a virtual multi-host GPU cluster.
 pub async fn create_gpu_cluster(
     State(state): State<AppState>,
     auth: AuthContext,
-    Json(template): Json<GpuClusterTemplate>,
+    Json(request): Json<GpuClusterSimulationRequest>,
 ) -> ApiResult<Json<Value>> {
-    let instance = instantiate_gpu_cluster_template(&template)
+    let mut instance = instantiate_gpu_cluster_template(&request.template)
         .map_err(|issues| ApiError::bad_request(format!(
             "GPU cluster template validation failed: {}", issues.join("; ")
         )))?;
@@ -169,6 +205,7 @@ pub async fn create_gpu_cluster(
     Ok(Json(json!({
         "simulation": row,
         "inventory_class": "simulated",
+        "hardware_profile_binding": profile_binding,
         "resource_count": instance.graph.resources.len(),
         "relationship_count": instance.graph.relationships.len(),
         "pcie_device_count": instance.pcie_topology.as_ref().map_or(0, |topology| topology.devices.len()),

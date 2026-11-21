@@ -232,6 +232,11 @@ pub fn instantiate_gpu_cluster_template(
                 ("virtual".into(), Value::Bool(true)),
                 ("downstream_ports".into(), Value::from(template.switch_downstream_ports)),
                 ("uplink_lanes".into(), Value::from(template.switch_uplink_lanes)),
+                ("downstream_lane_budget".into(), Value::from(u32::from(template.gpu_lanes) * u32::from(template.gpus_per_host))),
+                ("pcie_lane_oversubscription_ratio".into(), Value::from(
+                    (f64::from(template.gpu_lanes) * f64::from(template.gpus_per_host))
+                        / f64::from(template.switch_uplink_lanes)
+                )),
             ]),
             source: source.into(), observed_at: now, verified: false,
         });
@@ -791,6 +796,8 @@ mod tests {
         assert_eq!(first.graph.relationships.len(), 12);
         assert_eq!(first.pcie_topology.as_ref().unwrap().devices.len(), 12);
         assert_eq!(first.pcie_topology.as_ref().unwrap().links.len(), 10);
+        let switch = first.graph.resources.iter().find(|resource| resource.kind == "pcie_switch").unwrap();
+        assert_eq!(switch.attributes.get("pcie_lane_oversubscription_ratio"), Some(&json!(4.0)));
         let identities = |instance: &SimulationInstance| {
             instance.graph.resources.iter().map(|resource| resource.identity.clone()).collect::<Vec<_>>()
         };

@@ -51,6 +51,101 @@ pub struct ResourceRelationship {
     pub verified: bool,
 }
 
+/// Simulation modes are explicit so synthetic resources cannot be mistaken for
+/// physically discovered or verified inventory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SimulationKind {
+    HardwareEmulation,
+    TopologySimulation,
+    CapacityModel,
+    PowerThermalModel,
+    SpatialVisualization,
+}
+
+/// Position and orientation in a named coordinate frame. Translation units
+/// are defined by the referenced scene/model; rotation is a normalized quaternion.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpatialPose {
+    pub coordinate_frame: String,
+    pub translation: [f64; 3],
+    pub rotation_xyzw: [f64; 4],
+    pub scale: [f64; 3],
+}
+
+/// Immutable reference to a geometry asset; geometry bytes live in the existing
+/// artifact/object storage layer, not in the infrastructure graph row.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GeometryAsset {
+    pub asset_uri: String,
+    pub sha256: String,
+    /// Examples: glb, gltf, obj, stl, step, voxel.
+    pub format: String,
+    pub units: String,
+}
+
+/// A reproducible simulation scenario or virtual hardware instance.
+/// Its outputs are synthetic observations and never physical discovery facts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SimulationInstance {
+    pub identity: String,
+    pub kind: SimulationKind,
+    pub scenario_id: String,
+    pub engine: String,
+    pub engine_version: String,
+    pub seed: u64,
+    pub created_at: DateTime<Utc>,
+    pub source_manifest_revision: Option<String>,
+    pub graph: InfrastructureGraph,
+    #[serde(default)]
+    pub geometry: BTreeMap<String, GeometryAsset>,
+    #[serde(default)]
+    pub poses: BTreeMap<String, SpatialPose>,
+    #[serde(default)]
+    pub parameters: BTreeMap<String, Value>,
+}
+
+/// Validate the simulation envelope and its spatial metadata. This does not
+/// execute a simulator or claim physical equivalence with real hardware.
+pub fn validate_simulation(instance: &SimulationInstance) -> Vec<String> {
+    let mut issues = Vec::new();
+    if instance.identity.trim().is_empty() { issues.push("Simulation identity must not be empty".into()); }
+    if instance.scenario_id.trim().is_empty() { issues.push("Simulation scenario_id must not be empty".into()); }
+    if instance.engine.trim().is_empty() || instance.engine_version.trim().is_empty() {
+        issues.push("Simulation engine and engine_version are required".into());
+    }
+    for (identity, pose) in &instance.poses {
+        if !instance.graph.resources.iter().any(|resource| resource.identity == *identity) {
+            issues.push(format!("Spatial pose references unknown resource '{identity}'"));
+        }
+        if pose.coordinate_frame.trim().is_empty() {
+            issues.push(format!("Spatial pose for '{identity}' has no coordinate frame"));
+        }
+        if pose.translation.iter().any(|value| !value.is_finite())
+            || pose.rotation_xyzw.iter().any(|value| !value.is_finite())
+            || pose.scale.iter().any(|value| !value.is_finite() || *value <= 0.0) {
+            issues.push(format!("Spatial pose for '{identity}' contains invalid transform values"));
+        }
+        let norm = pose.rotation_xyzw.iter().map(|value| value * value).sum::<f64>().sqrt();
+        if !norm.is_finite() || (norm - 1.0).abs() > 1e-3 {
+            issues.push(format!("Spatial pose for '{identity}' rotation quaternion must be normalized"));
+        }
+    }
+    for (identity, asset) in &instance.geometry {
+        if !instance.graph.resources.iter().any(|resource| resource.identity == *identity) {
+            issues.push(format!("Geometry asset references unknown resource '{identity}'"));
+        }
+        if asset.asset_uri.trim().is_empty() || asset.sha256.trim().is_empty()
+            || asset.format.trim().is_empty() || asset.units.trim().is_empty() {
+            issues.push(format!("Geometry asset for '{identity}' requires URI, SHA-256, format and units"));
+        }
+    }
+    for issue in validate_graph(&instance.graph) {
+        issues.push(format!("Graph relationship '{}': {}", issue.relationship_identity, issue.detail));
+    }
+    issues
+}
+
 /// A provenance-aware resource graph assembled from bounded source snapshots.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InfrastructureGraph {
@@ -406,6 +501,31 @@ mod tests {
 
     fn snapshot(resources: Vec<DiscoveredResource>, coverage_complete: bool) -> DiscoverySnapshot {
         DiscoverySnapshot { observed_at: Utc::now(), coverage_complete, resources }
+    }
+
+    #[test]
+    fn simulation_rejects_spatial_metadata_for_unknown_resource() {
+        let instance = SimulationInstance {
+            identity: "sim-1".into(),
+            kind: SimulationKind::SpatialVisualization,
+            scenario_id: "rack-layout".into(),
+            engine: "fixture".into(),
+            engine_version: "1".into(),
+            seed: 42,
+            created_at: Utc::now(),
+            source_manifest_revision: None,
+            graph: InfrastructureGraph {
+                observed_at: Utc::now(), coverage_complete: false,
+                resources: vec![discovered("host-1")], relationships: vec![],
+            },
+            geometry: BTreeMap::new(),
+            poses: BTreeMap::from([("gpu-missing".into(), SpatialPose {
+                coordinate_frame: "rack-origin".into(), translation: [0.0, 0.0, 0.0],
+                rotation_xyzw: [0.0, 0.0, 0.0, 1.0], scale: [1.0, 1.0, 1.0],
+            })]),
+            parameters: BTreeMap::new(),
+        };
+        assert!(validate_simulation(&instance).iter().any(|issue| issue.contains("unknown resource")));
     }
 
     #[test]

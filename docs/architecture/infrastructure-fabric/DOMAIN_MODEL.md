@@ -53,6 +53,18 @@ Use explicit edge types such as `CONTAINS`, `HOSTED_BY`, `ATTACHED_TO`, `CONNECT
 
 Relationships also need source, confidence, validity interval and discovery time. A declared cable map and an observed LLDP link are distinct claims until reconciled.
 
+## Spatial and simulation model
+
+A `SimulationInstance` is a reproducible virtual scenario, identified independently from physical resources. It pins a simulation kind, scenario, engine/version, deterministic seed, optional source manifest revision, parameters and an infrastructure graph. Its graph is synthetic by definition. Simulated facts must be tagged as simulation output and remain separate from discovered and observed physical facts.
+
+A `SpatialPose` defines translation, normalized quaternion rotation and scale in a named coordinate frame. A `GeometryAsset` references immutable, content-addressed geometry by URI, SHA-256, format and units. Geometry is stored in the existing artifact/object storage layer; graph records retain only references and metadata. Resource identity is independent of geometry asset identity.
+
+Simulation kinds include hardware emulation, topology simulation, capacity modeling, power/thermal modeling and spatial visualization. Model fidelity and assumptions are explicit: topology feasibility, estimated bandwidth, thermal approximation and hardware-accurate emulation are different claims and must not share an undifferentiated "simulated" result label.
+
+Virtual hardware resources use the same extensible graph vocabulary as physical resources, but carry an explicit virtual/simulated origin. A GPU cluster scenario can describe host nodes, GPU instances, PCIe root complexes, bridges/switches, slot placement, lane width/generation, NUMA locality, GPU peer links, NVLink/NVSwitch domains, NIC/DPU paths and power/cooling constraints. A PCIe-connected GPU is a graph topology, not merely a count of GPU objects.
+
+The core currently contains simulation envelope types and validation for spatial references/transforms and graph consistency. It does not yet execute a simulator, render 3D scenes, store geometry assets or expose virtual instances through APIs.
+
 ## Implemented graph primitives
 
 The core crate now defines `ResourceRelationship` and `InfrastructureGraph` as provider-neutral, provenance-attributed graph types. `validate_graph` checks duplicate edge identities and missing or ambiguous endpoint identities without mutating the graph. These are domain primitives and unit-tested validation; they are not yet a persisted graph store or a tenant-facing graph API. Those layers must preserve tenant/site scope, source provenance, observation time and partial-coverage semantics.

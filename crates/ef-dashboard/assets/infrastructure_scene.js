@@ -33,8 +33,10 @@
     if (typeof url !== "string" || !url.startsWith("/api/v1/infrastructure/geometry-assets/")) {
       throw new Error("Untrusted geometry asset URL");
     }
-    const token = window.localStorage.getItem("ef_token");
-    if (!token) throw new Error("Authenticated session token unavailable");
+    const storedToken = window.localStorage.getItem("ef_token");
+    let token = storedToken;
+    try { token = JSON.parse(storedToken); } catch (_) { /* tolerate plain-text token storage */ }
+    if (typeof token !== "string" || !token) throw new Error("Authenticated session token unavailable");
     const response = await fetch(url, { headers: { Authorization: "Bearer " + token }, credentials: "same-origin" });
     if (!response.ok) throw new Error("Geometry asset request failed: " + response.status);
     const buffer = await response.arrayBuffer();

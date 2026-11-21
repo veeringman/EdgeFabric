@@ -162,8 +162,14 @@ pub async fn create_gpu_cluster(
                 tracing::error!(profile_id = %profile_record_id, error = %error, "Stored hardware profile document is invalid");
                 ApiError::internal("Stored hardware profile is invalid")
             })?;
-        if profile.id != row.profile_id || profile.version != row.version as u32 {
-            return Err(ApiError::bad_request("Hardware profile record metadata does not match its immutable document"));
+        let document_qualification = serde_json::to_value(profile.qualification)
+            .ok().and_then(|value| value.as_str().map(str::to_owned));
+        if profile.id != row.profile_id
+            || profile.version != row.version as u32
+            || document_qualification.as_deref() != Some(row.qualification.as_str())
+        {
+            tracing::error!(profile_id = %profile_record_id, "Hardware profile row metadata does not match its immutable document");
+            return Err(ApiError::internal("Stored hardware profile metadata is inconsistent"));
         }
         let template = &request.template;
         let mut observations = std::collections::BTreeMap::from([

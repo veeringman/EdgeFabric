@@ -184,6 +184,10 @@ pub fn InfrastructureScenePage() -> impl IntoView {
                                 let verified = node["provenance"]["verified"].as_bool().unwrap_or(false);
                                 let bounds = node["bounds_mm"].clone();
                                 let transform = node["transform"].clone();
+                                let has_bounds = !bounds.is_null();
+                                let has_transform = !transform.is_null();
+                                let bounds_json = serde_json::to_string_pretty(&bounds).unwrap_or_default();
+                                let transform_json = serde_json::to_string_pretty(&transform).unwrap_or_default();
                                 let attributes = serde_json::to_string_pretty(&node["attributes"]).unwrap_or_default();
                                 view! {
                                     <div class="infra-scene-details">
@@ -194,11 +198,11 @@ pub fn InfrastructureScenePage() -> impl IntoView {
                                             <dt>"Rendering"</dt><dd>{render}</dd>
                                             <dt>"Verified"</dt><dd>{if verified { "Yes" } else { "No · simulated" }}</dd>
                                         </dl>
-                                        <Show when=move || !bounds.is_null()>
-                                            <pre>{serde_json::to_string_pretty(&bounds).unwrap_or_default()}</pre>
+                                        <Show when=move || has_bounds>
+                                            <pre>{bounds_json.clone()}</pre>
                                         </Show>
-                                        <Show when=move || !transform.is_null()>
-                                            <pre>{serde_json::to_string_pretty(&transform).unwrap_or_default()}</pre>
+                                        <Show when=move || has_transform>
+                                            <pre>{transform_json.clone()}</pre>
                                         </Show>
                                         <details>
                                             <summary>"Attributes"</summary>

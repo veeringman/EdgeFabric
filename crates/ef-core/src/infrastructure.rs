@@ -32,6 +32,86 @@ pub struct DiscoveredResource {
     pub verified: bool,
 }
 
+/// A typed edge between two normalized infrastructure resources.
+///
+/// Relationship identity is stable within the graph snapshot and must not be
+/// derived from mutable display names or network addresses.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ResourceRelationship {
+    pub identity: String,
+    pub source_identity: String,
+    pub target_identity: String,
+    /// Examples: contains, connected_to, powered_by, cooled_by, attached_to.
+    pub kind: String,
+    #[serde(default)]
+    pub attributes: BTreeMap<String, Value>,
+    pub source: String,
+    pub observed_at: DateTime<Utc>,
+    #[serde(default)]
+    pub verified: bool,
+}
+
+/// A provenance-aware resource graph assembled from bounded source snapshots.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InfrastructureGraph {
+    pub observed_at: DateTime<Utc>,
+    pub coverage_complete: bool,
+    pub resources: Vec<DiscoveredResource>,
+    #[serde(default)]
+    pub relationships: Vec<ResourceRelationship>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GraphValidationIssue {
+    pub relationship_identity: String,
+    pub detail: String,
+}
+
+/// Check graph edge identities and endpoint references without mutating data.
+/// Multiple resources with the same identity are treated as ambiguous endpoints.
+pub fn validate_graph(graph: &InfrastructureGraph) -> Vec<GraphValidationIssue> {
+    let mut resource_counts: HashMap<&str, usize> = HashMap::new();
+    for resource in &graph.resources {
+        *resource_counts.entry(resource.identity.as_str()).or_default() += 1;
+    }
+
+    let mut edge_ids = HashSet::new();
+    let mut issues = Vec::new();
+    for relationship in &graph.relationships {
+        if relationship.identity.trim().is_empty() {
+            issues.push(GraphValidationIssue {
+                relationship_identity: relationship.identity.clone(),
+                detail: "Relationship identity must not be empty".into(),
+            });
+        } else if !edge_ids.insert(relationship.identity.as_str()) {
+            issues.push(GraphValidationIssue {
+                relationship_identity: relationship.identity.clone(),
+                detail: "Duplicate relationship identity".into(),
+            });
+        }
+        if relationship.kind.trim().is_empty() {
+            issues.push(GraphValidationIssue {
+                relationship_identity: relationship.identity.clone(),
+                detail: "Relationship kind must not be empty".into(),
+            });
+        }
+        for endpoint in [relationship.source_identity.as_str(), relationship.target_identity.as_str()] {
+            match resource_counts.get(endpoint).copied().unwrap_or(0) {
+                0 => issues.push(GraphValidationIssue {
+                    relationship_identity: relationship.identity.clone(),
+                    detail: format!("Relationship endpoint '{endpoint}' is not present in this graph snapshot"),
+                }),
+                1 => {},
+                _ => issues.push(GraphValidationIssue {
+                    relationship_identity: relationship.identity.clone(),
+                    detail: format!("Relationship endpoint '{endpoint}' is ambiguous because its resource identity is duplicated"),
+                }),
+            }
+        }
+    }
+    issues
+}
+
 /// One bounded discovery snapshot. Incomplete coverage must never imply absence.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DiscoverySnapshot {
@@ -326,6 +406,60 @@ mod tests {
 
     fn snapshot(resources: Vec<DiscoveredResource>, coverage_complete: bool) -> DiscoverySnapshot {
         DiscoverySnapshot { observed_at: Utc::now(), coverage_complete, resources }
+    }
+
+    #[test]
+    fn graph_validation_rejects_missing_and_ambiguous_endpoints() {
+        let mut left = discovered("host-1");
+        let right = discovered("switch-1");
+        let duplicate = discovered("host-1");
+        let relationship = ResourceRelationship {
+            identity: "edge-1".into(),
+            source_identity: "host-1".into(),
+            target_identity: "rack-404".into(),
+            kind: "connected_to".into(),
+            attributes: BTreeMap::new(),
+            source: "test".into(),
+            observed_at: Utc::now(),
+            verified: true,
+        };
+        let graph = InfrastructureGraph {
+            observed_at: Utc::now(),
+            coverage_complete: false,
+            resources: vec![left.clone(), right],
+            relationships: vec![relationship.clone()],
+        };
+        let issues = validate_graph(&graph);
+        assert!(issues.iter().any(|issue| issue.detail.contains("not present")));
+
+        left.identity = "host-1".into();
+        let mut ambiguous = graph;
+        ambiguous.resources.push(duplicate);
+        ambiguous.relationships[0].target_identity = "switch-1".into();
+        let issues = validate_graph(&ambiguous);
+        assert!(issues.iter().any(|issue| issue.detail.contains("ambiguous")));
+    }
+
+    #[test]
+    fn graph_validation_rejects_duplicate_relationship_identity() {
+        let edge = ResourceRelationship {
+            identity: "edge-1".into(),
+            source_identity: "host-1".into(),
+            target_identity: "switch-1".into(),
+            kind: "connected_to".into(),
+            attributes: BTreeMap::new(),
+            source: "test".into(),
+            observed_at: Utc::now(),
+            verified: true,
+        };
+        let graph = InfrastructureGraph {
+            observed_at: Utc::now(),
+            coverage_complete: true,
+            resources: vec![discovered("host-1"), discovered("switch-1")],
+            relationships: vec![edge.clone(), edge],
+        };
+        let issues = validate_graph(&graph);
+        assert!(issues.iter().any(|issue| issue.detail == "Duplicate relationship identity"));
     }
 
     #[test]
